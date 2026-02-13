@@ -1,0 +1,20 @@
+{
+  "version": "5",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1770366827909,
+      "tag": "0000_lazy_turbo",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1770369251698,
+      "tag": "0001_old_old_lace",
+      "breakpoints": true
+    }
+  ]
+}
