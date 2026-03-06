@@ -9,6 +9,8 @@ import {
   AIMessage,
 } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { eq, desc } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
@@ -46,6 +48,29 @@ All memory is stored as human-readable markdown with YAML frontmatter. The user 
 
 You run edge-first: local inference when possible, cloud when needed. You are the user's system — not a chatbot.`;
 
+function loadSoulPrompt(): string {
+  const explicitPath = process.env.ANIMA_SOUL_PATH;
+  const candidates = explicitPath
+    ? [explicitPath]
+    : [
+        resolve(process.cwd(), "soul.md"),
+        resolve(process.cwd(), "../../soul.md"),
+      ];
+
+  for (const path of candidates) {
+    try {
+      const prompt = readFileSync(path, "utf8").trim();
+      if (prompt) return prompt;
+    } catch {
+      // Try next candidate path.
+    }
+  }
+
+  return DEFAULT_SYSTEM_PROMPT;
+}
+
+const SOUL_PROMPT = loadSoulPrompt();
+
 // --- Build the agent graph for a specific user ---
 
 function buildAgent(
@@ -59,7 +84,7 @@ function buildAgent(
   const agent = createReactAgent({
     llm: model,
     tools,
-    messageModifier: new SystemMessage(systemPrompt || DEFAULT_SYSTEM_PROMPT),
+    messageModifier: new SystemMessage(systemPrompt || SOUL_PROMPT),
   });
 
   return agent;
@@ -133,7 +158,7 @@ export async function runAgent(
     // Fallback: direct model call without tools
     const model = createModel(config);
     const fallbackResult = await model.invoke([
-      new SystemMessage(config.systemPrompt || DEFAULT_SYSTEM_PROMPT),
+      new SystemMessage(config.systemPrompt || SOUL_PROMPT),
       ...history,
       new HumanMessage(userMessage),
     ]);
@@ -200,7 +225,7 @@ export async function* streamAgent(
     // Fallback: stream directly from model without tools
     const model = createModel(config);
     const fallbackStream = await model.stream([
-      new SystemMessage(config.systemPrompt || DEFAULT_SYSTEM_PROMPT),
+      new SystemMessage(config.systemPrompt || SOUL_PROMPT),
       ...history,
       new HumanMessage(userMessage),
     ]);
