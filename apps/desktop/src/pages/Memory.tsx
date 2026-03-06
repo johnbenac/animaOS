@@ -32,14 +32,22 @@ export default function Memory() {
   const [selectedFile, setSelectedFile] = useState<MemoryFile | null>(null);
   const [section, setSection] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchPerformed, setSearchPerformed] = useState(false);
   const [searchResults, setSearchResults] = useState<MemoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState("");
+  const [newSection, setNewSection] = useState("user");
+  const [sectionMode, setSectionMode] = useState<"preset" | "custom">("preset");
+  const [selectedPresetSection, setSelectedPresetSection] = useState("user");
+  const [newFilename, setNewFilename] = useState("");
+  const [newContent, setNewContent] = useState("");
+  const [newTags, setNewTags] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   const [consolidateMsg, setConsolidateMsg] = useState("");
 
-  const sections = ["all", "user", "knowledge", "relationships", "journal"];
+  const defaultSections = ["user", "knowledge", "relationships", "journal"];
 
   useEffect(() => {
     if (!user?.id) return;
@@ -53,7 +61,7 @@ export default function Memory() {
       const url =
         section === "all"
           ? `http://localhost:3031/api/memory/${user.id}`
-          : `http://localhost:3031/api/memory/${user.id}?section=${section}`;
+          : `http://localhost:3031/api/memory/${user.id}?section=${encodeURIComponent(section)}`;
       const res = await fetch(url);
       const data = await res.json();
       setMemories(data.memories || []);
@@ -68,6 +76,7 @@ export default function Memory() {
     if (!user?.id || !searchQuery.trim()) return;
     setLoading(true);
     try {
+      setSearchPerformed(true);
       const res = await fetch(
         `http://localhost:3031/api/memory/${user.id}/search?q=${encodeURIComponent(searchQuery)}`,
       );
@@ -89,7 +98,7 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       const res = await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${sectionName}/${filename}`,
+        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
       );
       const data = await res.json();
       setSelectedFile(data);
@@ -123,7 +132,7 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${sectionName}/${filename}`,
+        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -150,7 +159,7 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${sectionName}/${filename}`,
+        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
         { method: "DELETE" },
       );
       setSelectedFile(null);
@@ -178,6 +187,69 @@ export default function Memory() {
     }
   };
 
+  const createFile = async () => {
+    if (!user?.id) return;
+    if (!newFilename.trim()) return;
+    const sectionSource =
+      sectionMode === "preset" ? selectedPresetSection : newSection;
+    const sectionName =
+      sectionSource
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, "-")
+        .replace(/-{2,}/g, "-")
+        .replace(/^-+|-+$/g, "") || "knowledge";
+
+    setLoading(true);
+    try {
+      const tags = newTags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
+      await fetch(
+        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(newFilename.trim())}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: newContent || "# New Memory\n",
+            tags,
+          }),
+        },
+      );
+
+      const createdPath = `${sectionName}/${user.id}/${newFilename.trim().endsWith(".md") ? newFilename.trim() : `${newFilename.trim()}.md`}`;
+      setSection("all");
+      setSearchQuery("");
+      setSearchResults([]);
+      await loadMemories();
+      await openFile(createdPath);
+
+      setNewFilename("");
+      setNewContent("");
+      setNewTags("");
+      setNewSection(sectionName);
+      setSectionMode("preset");
+      setSelectedPresetSection(defaultSections.includes(sectionName) ? sectionName : "knowledge");
+      setShowCreate(false);
+    } catch (err) {
+      console.error("Failed to create file:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetComposer = () => {
+    setSectionMode("preset");
+    setSelectedPresetSection("user");
+    setNewSection("user");
+    setNewFilename("");
+    setNewTags("");
+    setNewContent("");
+    setShowCreate(false);
+  };
+
   const groupBySection = (entries: MemoryEntry[]) => {
     return entries.reduce(
       (acc, entry) => {
@@ -190,7 +262,12 @@ export default function Memory() {
     );
   };
 
-  const displayMemories = searchQuery ? searchResults : memories;
+  const discoveredSections = Array.from(
+    new Set(memories.map((entry) => entry.path.split("/")[0]).filter(Boolean)),
+  ).sort();
+  const sections = ["all", ...Array.from(new Set([...defaultSections, ...discoveredSections]))];
+  const displayMemories =
+    searchPerformed && searchQuery.trim() ? searchResults : memories;
   const grouped = groupBySection(displayMemories);
 
   return (
@@ -221,17 +298,36 @@ export default function Memory() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                const nextQuery = e.target.value;
+                setSearchQuery(nextQuery);
+                if (!nextQuery.trim()) {
+                  setSearchPerformed(false);
+                  setSearchResults([]);
+                }
+              }}
               onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               placeholder="Search..."
               className="flex-1 bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/50 outline-none focus:border-(--color-primary)"
             />
             <button
               onClick={handleSearch}
-              className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) px-1"
+              className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) px-1 uppercase tracking-wider"
             >
               Go
             </button>
+            {searchPerformed && searchQuery.trim() && (
+              <button
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchPerformed(false);
+                  setSearchResults([]);
+                }}
+                className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) px-1 uppercase tracking-wider"
+              >
+                Clear
+              </button>
+            )}
           </div>
 
           {/* Consolidate */}
@@ -249,6 +345,115 @@ export default function Memory() {
               </span>
             )}
           </div>
+
+          {/* New file */}
+          <div className="pt-1 border-t border-(--color-border)">
+            <button
+              onClick={() => setShowCreate((prev) => !prev)}
+              className="w-full text-left text-[10px] text-(--color-text-muted) hover:text-(--color-text) uppercase tracking-wider"
+            >
+              {showCreate ? "Hide" : "New File"}
+            </button>
+            {showCreate && (
+              <div className="mt-1.5 space-y-2 border border-(--color-border) rounded-sm p-2">
+                <div className="text-[10px] text-(--color-text-muted) uppercase tracking-wider">
+                  Create Memory File
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-(--color-text-muted) mb-1 uppercase tracking-wider">
+                    Section
+                  </label>
+                  <select
+                    value={sectionMode === "preset" ? selectedPresetSection : "__custom__"}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === "__custom__") {
+                        setSectionMode("custom");
+                        setNewSection("");
+                        return;
+                      }
+                      setSectionMode("preset");
+                      setSelectedPresetSection(value);
+                    }}
+                    className="w-full bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) outline-none focus:border-(--color-primary)"
+                  >
+                    {defaultSections.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                    {sections
+                      .filter((s) => s !== "all" && !defaultSections.includes(s))
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    <option value="__custom__">custom...</option>
+                  </select>
+                  {sectionMode === "custom" && (
+                    <input
+                      type="text"
+                      value={newSection}
+                      onChange={(e) => setNewSection(e.target.value)}
+                      placeholder="custom section, e.g. habits"
+                      className="mt-1.5 w-full bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/50 outline-none focus:border-(--color-primary)"
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[10px] text-(--color-text-muted) mb-1 uppercase tracking-wider">
+                    Filename
+                  </label>
+                  <input
+                    type="text"
+                    value={newFilename}
+                    onChange={(e) => setNewFilename(e.target.value)}
+                    placeholder="e.g. morning-routine"
+                    className="w-full bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/50 outline-none focus:border-(--color-primary)"
+                  />
+                </div>
+
+                <input
+                  type="text"
+                  value={newTags}
+                  onChange={(e) => setNewTags(e.target.value)}
+                  placeholder="tags (optional, comma separated)"
+                  className="w-full bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/50 outline-none focus:border-(--color-primary)"
+                />
+                <textarea
+                  value={newContent}
+                  onChange={(e) => setNewContent(e.target.value)}
+                  placeholder="initial content (markdown)"
+                  className="w-full h-24 bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-1 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/50 outline-none focus:border-(--color-primary) resize-none"
+                />
+                <div className="text-[10px] text-(--color-text-muted)">
+                  Path: {(
+                    (sectionMode === "preset" ? selectedPresetSection : newSection).trim() ||
+                    "knowledge"
+                  ).toLowerCase()}/
+                  {newFilename.trim() || "filename"}.md
+                </div>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={resetComposer}
+                    className="flex-1 text-[10px] px-1.5 py-1 rounded-sm bg-(--color-bg-input) text-(--color-text-muted) hover:text-(--color-text) border border-(--color-border) uppercase tracking-wider transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createFile}
+                    disabled={loading || !newFilename.trim()}
+                    className="flex-1 text-[10px] px-1.5 py-1 rounded-sm bg-(--color-bg-card) text-(--color-text-muted) hover:text-(--color-text) border border-(--color-border) hover:border-(--color-text-muted) uppercase tracking-wider transition-colors disabled:opacity-50"
+                  >
+                    Create
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* File List */}
@@ -259,7 +464,9 @@ export default function Memory() {
 
           {!loading && displayMemories.length === 0 && (
             <div className="text-(--color-text-muted) text-xs">
-              {searchQuery ? "No results" : "No memories yet"}
+              {searchPerformed && searchQuery.trim()
+                ? "No results"
+                : "No memories yet"}
             </div>
           )}
 

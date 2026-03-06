@@ -24,7 +24,7 @@ import {
 
 // Map memory categories to filesystem sections
 function categoryToSection(category: string): MemorySection {
-  switch (category) {
+  switch (category.toLowerCase()) {
     case "fact":
     case "preference":
     case "goal":
@@ -34,7 +34,7 @@ function categoryToSection(category: string): MemorySection {
     case "note":
       return "knowledge";
     default:
-      return "knowledge";
+      return normalizeSectionName(category);
   }
 }
 
@@ -50,6 +50,32 @@ function contentToFilename(content: string, category: string): string {
     .toLowerCase();
 
   return words || category;
+}
+
+function normalizeSectionName(raw: string): string {
+  const section = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return section || "knowledge";
+}
+
+function parseMemoryPath(file: string): {
+  section: MemorySection;
+  filename: string;
+} {
+  const normalized = file.trim().replace(/^\/+/, "").replace(/\.md$/i, "");
+  const parts = normalized.split("/").filter(Boolean);
+  const section = normalizeSectionName(parts[0] || "");
+  const filename = parts.slice(1).join("/");
+
+  if (!filename) {
+    throw new Error("Missing filename in path. Use format section/filename.");
+  }
+
+  return { section, filename };
 }
 
 interface ParsedTask {
@@ -181,8 +207,11 @@ export function createTools(userId: number) {
       schema: z.object({
         content: z.string().describe("The information to remember"),
         category: z
-          .enum(["fact", "preference", "goal", "relationship", "note"])
-          .describe("The category of memory"),
+          .string()
+          .min(1)
+          .describe(
+            "Memory category. Built-ins: fact, preference, goal, relationship, note. Any custom category is allowed and becomes its own memory section.",
+          ),
       }),
     },
   );
@@ -221,10 +250,7 @@ export function createTools(userId: number) {
   const readMemoryFile = tool(
     async ({ file }) => {
       try {
-        // Parse section and filename from path like "user/preferences" or "knowledge/topic-name"
-        const parts = file.split("/");
-        const section = parts[0] as MemorySection;
-        const filename = parts.slice(1).join("/") || parts[0];
+        const { section, filename } = parseMemoryPath(file);
 
         const result = await readMemory(section, userId, filename);
         return JSON.stringify({
@@ -252,9 +278,7 @@ export function createTools(userId: number) {
 
   const writeMemoryFile = tool(
     async ({ file, content, tags }) => {
-      const parts = file.split("/");
-      const section = (parts[0] || "knowledge") as MemorySection;
-      const filename = parts.slice(1).join("/") || parts[0];
+      const { section, filename } = parseMemoryPath(file);
 
       const result = await writeMemory(section, userId, filename, content, {
         category: section,
@@ -282,6 +306,42 @@ export function createTools(userId: number) {
           .array(z.string())
           .optional()
           .describe("Optional tags for the memory"),
+      }),
+    },
+  );
+
+  const appendMemoryFile = tool(
+    async ({ file, content, tags }) => {
+      const { section, filename } = parseMemoryPath(file);
+
+      const result = await appendMemory(section, userId, filename, content, {
+        category: section,
+        tags: tags || [],
+        source: "conversation",
+      });
+
+      return JSON.stringify({
+        status: "appended",
+        path: result.path,
+      });
+    },
+    {
+      name: "append_memory",
+      description:
+        'Append content to a memory file and create it if missing. Best for incremental notes, logs, and running lists. Path format: "section/filename".',
+      schema: z.object({
+        file: z
+          .string()
+          .describe(
+            'Path to the memory file, e.g. "journal/2026-03-06" or "knowledge/project-notes"',
+          ),
+        content: z
+          .string()
+          .describe("Markdown text to append (can include checklist bullets)"),
+        tags: z
+          .array(z.string())
+          .optional()
+          .describe("Optional tags for newly created files"),
       }),
     },
   );
@@ -333,7 +393,7 @@ export function createTools(userId: number) {
         "List all stored memory files, optionally filtered by section (user, knowledge, relationships, journal).",
       schema: z.object({
         section: z
-          .enum(["user", "knowledge", "relationships", "journal"])
+          .string()
           .optional()
           .describe("Optional section filter"),
       }),
@@ -697,6 +757,7 @@ export function createTools(userId: number) {
     recall,
     readMemoryFile,
     writeMemoryFile,
+    appendMemoryFile,
     getProfile,
     browseMemories,
     journal,

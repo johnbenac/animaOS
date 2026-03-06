@@ -3,6 +3,7 @@
 
 import {
   listMemories,
+  listSections,
   readMemory,
   type MemorySection,
 } from "../memory";
@@ -74,8 +75,19 @@ async function loadSectionContent(
 export async function loadMemoryContext(userId: number): Promise<string> {
   const parts: string[] = [];
   let totalChars = 0;
+  const customSections = (await listSections(userId)).filter(
+    (section) => !["user", "relationships", "knowledge", "journal"].includes(section),
+  );
+  const plan: SectionConfig[] = [
+    ...SECTIONS,
+    ...customSections.map((section) => ({
+      section,
+      files: [],
+      label: `Memory: ${section}`,
+    })),
+  ];
 
-  for (const { section, files, label } of SECTIONS) {
+  for (const { section, files, label } of plan) {
     if (totalChars >= MAX_CONTEXT_CHARS) break;
 
     const lines = await loadSectionContent(section, userId, files);

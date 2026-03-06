@@ -25,6 +25,8 @@ const LANGUAGES = [
 ];
 
 const LANG_STORAGE_KEY = "anima-translate-lang";
+const AI_LABEL = "ANIMA";
+const USER_LABEL = "YOU";
 
 function getDefaultLang(): string {
   return localStorage.getItem(LANG_STORAGE_KEY) || "en";
@@ -43,7 +45,10 @@ export default function Chat() {
   const [error, setError] = useState("");
   const [translateLang, setTranslateLang] = useState(getDefaultLang);
   const [showLangSettings, setShowLangSettings] = useState(false);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const historyHydratedRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const langDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -54,10 +59,31 @@ export default function Chat() {
     }
   }, [user?.id]);
 
-  // Auto-scroll
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  const updateScrollState = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    setIsAtBottom(distanceFromBottom < 40);
+  }, []);
+
+  // Initial snap after first history load only
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamBuffer]);
+    if (!historyHydratedRef.current && messages.length > 0) {
+      scrollToBottom("auto");
+      historyHydratedRef.current = true;
+    }
+  }, [messages.length, scrollToBottom]);
+
+  // Auto-scroll only when user is near bottom or while streaming
+  useEffect(() => {
+    if (streaming || isAtBottom) {
+      scrollToBottom(streaming ? "auto" : "smooth");
+    }
+  }, [messages, streamBuffer, streaming, isAtBottom, scrollToBottom]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -143,124 +169,143 @@ export default function Chat() {
     if (!user?.id) return;
     await api.chat.clearHistory(user.id);
     setMessages([]);
+    setStreamBuffer("");
+    setError("");
   };
 
   const currentLangLabel =
     LANGUAGES.find((l) => l.code === translateLang)?.label || translateLang;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative bg-[radial-gradient(circle_at_15%_20%,rgba(168,168,192,0.09),transparent_28%),radial-gradient(circle_at_85%_0%,rgba(168,168,192,0.06),transparent_30%)]">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-5 py-2.5 border-b border-(--color-border)">
-        <span className="text-[11px] text-(--color-text-muted) uppercase tracking-wider">
-          Chat
-        </span>
-        <div className="flex items-center gap-3">
+      <div className="px-3 md:px-5 py-2.5 border-b border-(--color-border) bg-(--color-bg)/85 backdrop-blur-sm">
+        <div className="max-w-5xl mx-auto w-full flex items-center justify-between">
+          <span className="text-[11px] text-(--color-text-muted) uppercase tracking-wider">
+            Chat
+          </span>
+          <div className="flex items-center gap-3">
           {/* Language selector */}
-          <div className="relative" ref={langDropdownRef}>
-            <button
-              onClick={() => setShowLangSettings((v) => !v)}
-              className="flex items-center gap-1.5 text-[10px] text-(--color-text-muted) hover:text-(--color-text) uppercase tracking-wider transition-colors"
-            >
-              TL {currentLangLabel}
-            </button>
-            {showLangSettings && (
-              <div className="absolute right-0 top-full mt-2 z-20 bg-(--color-bg-card) border border-(--color-border) rounded-sm py-1 shadow-xl min-w-[140px] max-h-64 overflow-y-auto">
-                <div className="px-3 py-1.5 text-[10px] text-(--color-text-muted) uppercase tracking-widest border-b border-(--color-border)">
-                  Translate to
+            <div className="relative" ref={langDropdownRef}>
+              <button
+                onClick={() => setShowLangSettings((v) => !v)}
+                className="flex items-center gap-1.5 text-[10px] text-(--color-text-muted) hover:text-(--color-text) uppercase tracking-wider transition-colors"
+              >
+                TL {currentLangLabel}
+              </button>
+              {showLangSettings && (
+                <div className="absolute right-0 top-full mt-2 z-20 bg-(--color-bg-card) border border-(--color-border) rounded-sm py-1 shadow-xl min-w-[140px] max-h-64 overflow-y-auto">
+                  <div className="px-3 py-1.5 text-[10px] text-(--color-text-muted) uppercase tracking-widest border-b border-(--color-border)">
+                    Translate to
+                  </div>
+                  {LANGUAGES.map((lang) => (
+                    <button
+                      key={lang.code}
+                      onClick={() => handleLangChange(lang.code)}
+                      className={`block w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                        translateLang === lang.code
+                          ? "text-(--color-text) bg-(--color-bg-input)"
+                          : "text-(--color-text-muted) hover:text-(--color-text) hover:bg-(--color-bg-input)"
+                      }`}
+                    >
+                      {lang.label}
+                    </button>
+                  ))}
                 </div>
-                {LANGUAGES.map((lang) => (
-                  <button
-                    key={lang.code}
-                    onClick={() => handleLangChange(lang.code)}
-                    className={`block w-full text-left px-3 py-1.5 text-xs transition-colors ${
-                      translateLang === lang.code
-                        ? "text-(--color-text) bg-(--color-bg-input)"
-                        : "text-(--color-text-muted) hover:text-(--color-text) hover:bg-(--color-bg-input)"
-                    }`}
-                  >
-                    {lang.label}
-                  </button>
-                ))}
-              </div>
-            )}
+              )}
+            </div>
+            <button
+              onClick={clearHistory}
+              className="text-[10px] text-(--color-text-muted) hover:text-(--color-danger) uppercase tracking-wider transition-colors"
+            >
+              Clear
+            </button>
           </div>
-          <button
-            onClick={clearHistory}
-            className="text-[10px] text-(--color-text-muted) hover:text-(--color-danger) uppercase tracking-wider transition-colors"
-          >
-            Clear
-          </button>
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 space-y-5">
-        {messages.length === 0 && !streaming && (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center space-y-3">
-              <div className="text-2xl text-(--color-text-muted)/20 tracking-widest">
-                ◈
+      <div
+        ref={scrollRef}
+        onScroll={updateScrollState}
+        className="flex-1 overflow-y-auto overscroll-contain px-2.5 md:px-4 lg:px-6 py-4 md:py-6 scroll-smooth"
+      >
+        <div className="max-w-5xl mx-auto w-full space-y-4 md:space-y-5">
+          {messages.length === 0 && !streaming && (
+            <div className="flex items-center justify-center h-full min-h-[35vh]">
+              <div className="text-center space-y-3">
+                <div className="text-2xl text-(--color-text-muted)/20 tracking-widest">
+                  ◈
+                </div>
+                <p className="text-(--color-text-muted) text-xs tracking-wider uppercase">
+                  Ready
+                </p>
               </div>
-              <p className="text-(--color-text-muted) text-xs tracking-wider uppercase">
-                Ready
-              </p>
             </div>
-          </div>
-        )}
+          )}
 
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} translateLang={translateLang} />
-        ))}
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} translateLang={translateLang} />
+          ))}
 
         {/* Streaming indicator */}
-        {streaming && streamBuffer && (
-          <div className="flex gap-3 animate-in fade-in duration-200">
-            <div className="text-[10px] text-(--color-text-muted) pt-1.5 select-none shrink-0 w-7 text-right uppercase">
-              sys
-            </div>
-            <div className="bg-(--color-bg-card) border border-(--color-border) rounded px-4 py-3 max-w-[80%]">
-              <div className="prose prose-invert prose-sm max-w-none">
-                <ReactMarkdown rehypePlugins={[rehypeHighlight, rehypeRaw]}>
-                  {streamBuffer}
-                </ReactMarkdown>
-                <span className="inline-block w-1.5 h-4 bg-(--color-primary) ml-0.5 animate-pulse" />
+          {streaming && streamBuffer && (
+            <div className="flex gap-3 animate-in fade-in duration-200">
+              <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
+                {AI_LABEL}
+              </div>
+              <div className="max-w-[86%] md:max-w-[74%] xl:max-w-[64%] bg-(--color-bg-card) border border-(--color-border) rounded-md px-3 py-2.5 md:px-4 md:py-3">
+                <div className="prose prose-invert prose-sm md:prose-base max-w-none">
+                  <ReactMarkdown rehypePlugins={[rehypeHighlight, rehypeRaw]}>
+                    {streamBuffer}
+                  </ReactMarkdown>
+                  <span className="inline-block w-1.5 h-4 bg-(--color-primary) ml-0.5 animate-pulse" />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {streaming && !streamBuffer && (
-          <div className="flex gap-3 animate-in fade-in duration-200">
-            <div className="text-[10px] text-(--color-text-muted) pt-1.5 select-none shrink-0 w-7 text-right uppercase">
-              sys
-            </div>
-            <div className="bg-(--color-bg-card) border border-(--color-border) rounded px-4 py-3">
-              <div className="flex gap-1.5 items-center h-5">
-                <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:300ms]" />
+          {streaming && !streamBuffer && (
+            <div className="flex gap-3 animate-in fade-in duration-200">
+              <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
+                {AI_LABEL}
+              </div>
+              <div className="max-w-[86%] md:max-w-[74%] xl:max-w-[64%] bg-(--color-bg-card) border border-(--color-border) rounded-md px-3 py-2.5 md:px-4 md:py-3">
+                <div className="flex gap-1.5 items-center h-5">
+                  <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:0ms]" />
+                  <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:150ms]" />
+                  <span className="w-1.5 h-1.5 bg-(--color-text-muted) rounded-full animate-bounce [animation-delay:300ms]" />
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {error && (
-          <div className="mx-8 bg-(--color-bg-card) border border-(--color-danger)/30 rounded px-4 py-3 text-(--color-danger) text-sm">
-            {error}
-          </div>
-        )}
+          {error && (
+            <div className="mx-8 bg-(--color-bg-card) border border-(--color-danger)/30 rounded px-4 py-3 text-(--color-danger) text-sm">
+              {error}
+            </div>
+          )}
 
-        <div ref={bottomRef} />
+          <div ref={bottomRef} />
+        </div>
       </div>
+
+      {!isAtBottom && (
+        <button
+          onClick={() => scrollToBottom("smooth")}
+          className="absolute right-3 md:right-6 bottom-20 md:bottom-24 z-20 text-[10px] px-2.5 py-1 rounded-full border border-(--color-border) bg-(--color-bg-card)/90 backdrop-blur text-(--color-text-muted) hover:text-(--color-text) transition-colors uppercase tracking-wider"
+        >
+          Latest
+        </button>
+      )}
 
       {/* Input */}
       <form
         onSubmit={handleSubmit}
-        className="border-t border-(--color-border) px-5 py-4 bg-(--color-bg-card)/30"
+        className="border-t border-(--color-border) px-2.5 md:px-5 py-3 md:py-4 bg-(--color-bg-card)/60 backdrop-blur-sm"
       >
-        <div className="flex gap-3 items-end max-w-4xl mx-auto">
-          <div className="text-xs text-(--color-primary)/60 pt-2 select-none shrink-0">
+        <div className="flex gap-2.5 md:gap-3 items-end max-w-5xl mx-auto border border-(--color-border) rounded-md px-2.5 md:px-3 py-2 bg-(--color-bg-card)">
+          <div className="text-[11px] md:text-xs text-(--color-primary)/60 pt-1.5 md:pt-2 select-none shrink-0">
             ▸
           </div>
           <textarea
@@ -271,12 +316,12 @@ export default function Chat() {
             placeholder="Say something..."
             disabled={streaming}
             rows={1}
-            className="flex-1 bg-transparent text-sm text-(--color-text) placeholder:text-(--color-text-muted)/40 outline-none resize-none max-h-32 py-1 leading-relaxed"
+            className="flex-1 bg-transparent text-[14px] md:text-sm text-(--color-text) placeholder:text-(--color-text-muted)/40 outline-none resize-none max-h-40 md:max-h-32 py-1 leading-relaxed"
           />
           <button
             type="submit"
             disabled={!input.trim() || streaming}
-            className="text-xs text-(--color-text-muted) hover:text-(--color-text) disabled:opacity-20 uppercase tracking-wider pb-1 transition-colors"
+            className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) disabled:opacity-20 uppercase tracking-wider pb-1 transition-colors"
           >
             Send
           </button>
@@ -315,33 +360,37 @@ function MessageBubble({
   };
 
   const timestamp = message.createdAt
-    ? new Date(message.createdAt).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
+    ? (() => {
+        const dt = new Date(message.createdAt);
+        if (Number.isNaN(dt.getTime())) return null;
+        return dt.toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      })()
     : null;
 
   return (
     <div className={`group flex gap-3 ${isUser ? "justify-end" : ""}`}>
       {!isUser && (
-        <div className="text-[10px] text-(--color-text-muted) pt-1.5 select-none shrink-0 w-7 text-right uppercase">
-          sys
+        <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
+          {AI_LABEL}
         </div>
       )}
-      <div className={`flex flex-col max-w-[80%] ${isUser ? "items-end" : ""}`}>
+      <div className={`flex flex-col max-w-[86%] md:max-w-[74%] xl:max-w-[64%] ${isUser ? "items-end" : ""}`}>
         <div
-          className={`rounded px-4 py-3 ${
+          className={`rounded-md px-3 py-2.5 md:px-4 md:py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
             isUser
-              ? "bg-(--color-bg-input) border border-(--color-border)"
-              : "bg-(--color-bg-card) border border-(--color-border)"
+              ? "bg-linear-to-b from-(--color-bg-input) to-(--color-bg-card) border border-(--color-border) text-(--color-text)"
+              : "bg-(--color-bg-card)/85 border border-(--color-border)"
           }`}
         >
           {isUser ? (
-            <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+            <p className="text-[13px] md:text-sm whitespace-pre-wrap break-words leading-relaxed">
               {message.content}
             </p>
           ) : (
-            <div className="prose prose-invert prose-sm max-w-none">
+            <div className="prose prose-invert prose-sm md:prose-base max-w-none">
               <ReactMarkdown rehypePlugins={[rehypeHighlight, rehypeRaw]}>
                 {message.content}
               </ReactMarkdown>
@@ -356,7 +405,7 @@ function MessageBubble({
           </div>
         )}
         {translation && !translating && (
-          <div className="mt-1.5 px-4 py-2.5 rounded bg-(--color-bg-card)/60 border border-(--color-border)/40 text-sm text-(--color-text-muted) leading-relaxed">
+          <div className="mt-1.5 w-full px-3 py-2 md:px-4 md:py-2.5 rounded bg-(--color-bg-card)/60 border border-(--color-border)/40 text-[13px] md:text-sm text-(--color-text-muted) leading-relaxed">
             {translation}
           </div>
         )}
@@ -378,8 +427,8 @@ function MessageBubble({
         </div>
       </div>
       {isUser && (
-        <div className="text-[10px] text-(--color-text-muted) pt-1.5 select-none shrink-0 w-7 uppercase">
-          you
+        <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 uppercase">
+          {USER_LABEL}
         </div>
       )}
     </div>

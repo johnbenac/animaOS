@@ -42,7 +42,7 @@ const PROJECT_ROOT = resolve(import.meta.dir, "../../../../");
 const MEMORY_ROOT = join(PROJECT_ROOT, "memory");
 
 const SECTIONS = ["user", "knowledge", "relationships", "journal"] as const;
-export type MemorySection = (typeof SECTIONS)[number];
+export type MemorySection = string;
 
 // --- Frontmatter Parser/Serializer ---
 // Lightweight — no dependency needed. Handles simple YAML frontmatter.
@@ -214,6 +214,32 @@ function relPath(fullPath: string): string {
 }
 
 /**
+ * List known sections for a user.
+ * Includes default sections plus any custom top-level folders under /memory
+ * that contain the user's directory.
+ */
+export async function listSections(userId: number): Promise<MemorySection[]> {
+  const merged = new Set<string>(SECTIONS);
+
+  if (!existsSync(MEMORY_ROOT)) {
+    return Array.from(merged);
+  }
+
+  const topLevel = await readdir(MEMORY_ROOT, { withFileTypes: true });
+  for (const entry of topLevel) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith(".")) continue;
+
+    const userDir = join(MEMORY_ROOT, entry.name, String(userId));
+    if (existsSync(userDir)) {
+      merged.add(entry.name);
+    }
+  }
+
+  return Array.from(merged);
+}
+
+/**
  * Write a memory file. Creates or overwrites.
  * Includes retry logic and validation to ensure file is written successfully.
  */
@@ -372,7 +398,8 @@ export async function listMemories(
  */
 export async function listAllMemories(userId: number): Promise<MemoryEntry[]> {
   const all: MemoryEntry[] = [];
-  for (const section of SECTIONS) {
+  const sections = await listSections(userId);
+  for (const section of sections) {
     const entries = await listMemories(section, userId);
     all.push(...entries);
   }
