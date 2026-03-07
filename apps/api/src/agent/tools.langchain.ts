@@ -6,7 +6,11 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
-import { syncReminderJobsForTask } from "../cron/task-reminders";
+import {
+  syncReminderJobsForTask,
+  cancelReminderJobsForTask,
+} from "../cron/task-reminders";
+import * as chrono from "chrono-node";
 
 import {
   writeMemory,
@@ -79,7 +83,6 @@ function parseMemoryPath(file: string): {
   return { section, filename };
 }
 
-
 function parseCurrentFocus(content: string): string {
   for (const rawLine of content.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -107,114 +110,109 @@ function renderCurrentFocus(focus: string, note?: string): string {
   return lines.join("\n");
 }
 
-/**
- * Fallback: extract a due date/time from task text when the LLM forgets to set dueDate.
- * Handles patterns like "at 5:30 pm", "at 9pm", "at 17:00" combined with "today"/"tomorrow".
- */
 /** Format a Date as local ISO without timezone offset issues */
 function formatLocalISO(date: Date): string {
   const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/** Validate an ISO datetime string and return it normalized, or null if invalid */
+function validateISO(value: string): string | null {
+  const trimmed = value.trim();
+  // Accept YYYY-MM-DD or YYYY-MM-DDTHH:mm or YYYY-MM-DDTHH:mm:ss
+  if (!/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(trimmed)) return null;
+  const d = new Date(trimmed.length === 10 ? `${trimmed}T00:00:00` : trimmed);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatLocalISO(d);
 }
 
 /**
- * Fallback: extract a due date/time from task text when the LLM forgets to set dueDate.
- * Handles patterns like "at 5:30 pm", "in 2 hours", "tonight", "next Monday", "March 10", etc.
+ * Parse a natural-language date/time expression using chrono-node.
+ * Handles: "in 30 min", "at 12:20pm", "tomorrow at 5pm", "next Monday",
+ * "March 10th", "tonight", "end of month", etc.
+ *
+ * @param expression  Raw time expression from the user (e.g. "in 30 min")
+ * @param taskText    Full task text — used as fallback if expression is empty
+ * @param timezone    IANA timezone (e.g. "America/New_York") for accurate resolution
  */
-function extractDueDateFromText(text: string): string | null {
-  const lower = text.toLowerCase();
-  const now = new Date();
-  const date = new Date(now);
+function parseDueDateExpression(
+  expression: string | undefined,
+  taskText: string,
+  timezone?: string,
+): string | null {
+  const textToParse = expression?.trim() || taskText;
+  if (!textToParse) return null;
 
-  // --- "in X hours/minutes" ---
-  const relativeMatch = lower.match(/in\s+(\d+)\s*(hours?|hrs?|minutes?|mins?)/);
-  if (relativeMatch) {
-    const amount = parseInt(relativeMatch[1], 10);
-    const unit = relativeMatch[2];
-    if (unit.startsWith("h")) {
-      date.setTime(date.getTime() + amount * 60 * 60_000);
-    } else {
-      date.setTime(date.getTime() + amount * 60_000);
-    }
-    return formatLocalISO(date);
-  }
+  try {
+    // Build a reference date so chrono resolves relative expressions
+    // ("in 30 min", "tonight") against the correct wall-clock time.
+    const refDate = new Date();
 
-  // --- "tonight" / "this evening" ---
-  if (lower.includes("tonight") || lower.includes("this evening")) {
-    date.setHours(20, 0, 0, 0);
-    if (date.getTime() <= now.getTime()) {
-      date.setDate(date.getDate() + 1);
-    }
-    return formatLocalISO(date);
-  }
-
-  // --- "next week" ---
-  if (/\bnext\s+week\b/.test(lower)) {
-    const daysUntilMonday = ((1 - now.getDay()) + 7) % 7 || 7;
-    date.setDate(date.getDate() + daysUntilMonday);
-    date.setHours(9, 0, 0, 0);
-    return formatLocalISO(date);
-  }
-
-  // --- "next Monday" / day-of-week ---
-  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-  const dayMatch = lower.match(/(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
-  if (dayMatch) {
-    const targetDay = dayNames.indexOf(dayMatch[1]);
-    if (targetDay !== -1) {
-      let daysAhead = (targetDay - now.getDay() + 7) % 7;
-      if (daysAhead === 0) daysAhead = 7; // "next X" means next occurrence
-      date.setDate(date.getDate() + daysAhead);
-      date.setHours(9, 0, 0, 0);
-      return formatLocalISO(date);
-    }
-  }
-
-  // --- "March 10" / "March 10th" ---
-  const monthNames = ["january", "february", "march", "april", "may", "june",
-    "july", "august", "september", "october", "november", "december"];
-  const monthDayMatch = lower.match(
-    /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?/,
-  );
-  if (monthDayMatch) {
-    const month = monthNames.indexOf(monthDayMatch[1]);
-    const day = parseInt(monthDayMatch[2], 10);
-    if (month !== -1) {
-      date.setMonth(month, day);
-      date.setHours(9, 0, 0, 0);
-      // If the date already passed this year, assume next year
-      if (date.getTime() < now.getTime()) {
-        date.setFullYear(date.getFullYear() + 1);
+    // Validate timezone before passing to chrono — invalid IANA strings
+    // would cause chrono to silently fall back or throw.
+    let safeTimezone = timezone;
+    if (safeTimezone) {
+      try {
+        Intl.DateTimeFormat(undefined, { timeZone: safeTimezone });
+      } catch {
+        console.warn(
+          `[add_task] Invalid timezone "${safeTimezone}", falling back to server timezone`,
+        );
+        safeTimezone = undefined;
       }
-      return formatLocalISO(date);
     }
+
+    const results = chrono.parse(textToParse, {
+      instant: refDate,
+      timezone: safeTimezone,
+    });
+
+    if (results.length === 0) {
+      console.log(`[add_task] chrono found no date in: "${textToParse}"`);
+      return null;
+    }
+
+    const parsed = results[0].start.date();
+
+    // Guard against chrono returning an invalid Date
+    if (Number.isNaN(parsed.getTime())) {
+      console.warn(
+        `[add_task] chrono returned invalid date for: "${textToParse}"`,
+      );
+      return null;
+    }
+
+    // If the resolved time is in the past and no explicit past-indicator words
+    // were used, bump forward by 1 day (matches user intent for "at 3pm" when
+    // it's already 4pm).
+    const now = Date.now();
+    if (
+      parsed.getTime() < now &&
+      !/(yesterday|last|ago)/.test(textToParse.toLowerCase())
+    ) {
+      // Only auto-bump for time-only expressions (no date component)
+      const component = results[0].start;
+      const hasDate =
+        component.isCertain("day") ||
+        component.isCertain("weekday") ||
+        component.isCertain("month");
+      if (!hasDate) {
+        parsed.setDate(parsed.getDate() + 1);
+      }
+    }
+
+    const iso = formatLocalISO(parsed);
+    console.log(
+      `[add_task] Parsed "${textToParse}" → ${iso}${safeTimezone ? ` (tz: ${safeTimezone})` : ""}`,
+    );
+    return iso;
+  } catch (err) {
+    console.error(
+      `[add_task] Date parsing failed for "${textToParse}":`,
+      (err as Error).message,
+    );
+    return null;
   }
-
-  // --- "at 5:30 pm", "at 9pm", "at 17:00", "by 3pm" ---
-  const timeMatch = lower.match(
-    /(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i,
-  );
-  if (!timeMatch) return null;
-
-  let hours = parseInt(timeMatch[1], 10);
-  const minutes = parseInt(timeMatch[2] || "0", 10);
-  const ampm = timeMatch[3]?.toLowerCase();
-
-  if (ampm === "pm" && hours < 12) hours += 12;
-  if (ampm === "am" && hours === 12) hours = 0;
-
-  if (lower.includes("tomorrow")) {
-    date.setDate(date.getDate() + 1);
-  }
-
-  date.setHours(hours, minutes, 0, 0);
-
-  // Auto-bump to tomorrow if parsed time already passed today (and no explicit "today")
-  if (date.getTime() <= now.getTime() && !lower.includes("today") && !lower.includes("tomorrow")) {
-    date.setDate(date.getDate() + 1);
-  }
-
-  return formatLocalISO(date);
 }
 
 export function createTools(userId: number) {
@@ -222,7 +220,10 @@ export function createTools(userId: number) {
     async ({ content, category }) => {
       try {
         // Goals/tasks should use add_task tool (which has dueDate fallback)
-        if (category.toLowerCase() === "goal" || category.toLowerCase() === "task") {
+        if (
+          category.toLowerCase() === "goal" ||
+          category.toLowerCase() === "task"
+        ) {
           // Store as a memory note instead of creating a task directly
           await appendMemory("user", userId, "goals", `- ${content}`, {
             category: "goal",
@@ -465,10 +466,7 @@ export function createTools(userId: number) {
       description:
         "List all stored memory files, optionally filtered by section (user, knowledge, relationships, journal).",
       schema: z.object({
-        section: z
-          .string()
-          .optional()
-          .describe("Optional section filter"),
+        section: z.string().optional().describe("Optional section filter"),
       }),
     },
   );
@@ -524,17 +522,41 @@ export function createTools(userId: number) {
   );
 
   const addTask = tool(
-    async ({ task, priority, dueDate }) => {
+    async ({ task, priority, dueDate, dueDateRaw, timezone }) => {
       const text = task.trim();
       if (!text) {
-        return JSON.stringify({ status: "error", error: "Task text is required" });
+        return JSON.stringify({
+          status: "error",
+          error: "Task text is required",
+        });
       }
 
-      // Fallback: if no dueDate provided, try to extract time from task text
-      let resolvedDueDate = dueDate ?? null;
-      if (!resolvedDueDate) {
-        resolvedDueDate = extractDueDateFromText(text);
+      // Resolution order:
+      // 1. dueDateRaw → parsed by chrono-node server-side (preferred, most reliable)
+      // 2. Explicit ISO dueDate (validated — reject garbage strings)
+      // 3. Task text → chrono-node fallback (catches "remind me to X in 30 min")
+      let resolvedDueDate: string | null = null;
+
+      if (dueDateRaw) {
+        resolvedDueDate = parseDueDateExpression(dueDateRaw, text, timezone);
       }
+      if (!resolvedDueDate && dueDate) {
+        const validated = validateISO(dueDate);
+        if (validated) {
+          resolvedDueDate = validated;
+        } else {
+          console.warn(
+            `[add_task] LLM passed invalid ISO dueDate: "${dueDate}", ignoring`,
+          );
+        }
+      }
+      if (!resolvedDueDate) {
+        resolvedDueDate = parseDueDateExpression(undefined, text, timezone);
+      }
+
+      console.log(
+        `[add_task] task="${text}" resolvedDueDate=${resolvedDueDate ?? "none"} (raw=${dueDateRaw ?? "–"}, iso=${dueDate ?? "–"})`,
+      );
 
       const [created] = await db
         .insert(schema.tasks)
@@ -561,11 +583,39 @@ export function createTools(userId: number) {
     {
       name: "add_task",
       description:
-        "Add a new task for the user. MUST set dueDate whenever user mentions ANY time, deadline, or schedule (e.g. 'at 5pm', 'tomorrow', 'next week', 'in 2 hours'). Call get_current_time first to know the current date/time, then calculate the ISO datetime (YYYY-MM-DDTHH:mm:ss).",
+        "Add a new task for the user. When the user mentions ANY time, deadline, or schedule (e.g. 'in 30 min', 'at 12:20pm', 'tomorrow', 'next week'), you MUST pass the EXACT time phrase into dueDateRaw — the server parses it automatically. Do NOT calculate ISO dates yourself; do NOT call get_current_time for task scheduling. Also pass the user's IANA timezone if known.",
       schema: z.object({
-        task: z.string().min(1).describe("Task text to add"),
-        priority: z.number().int().min(0).max(2).optional().describe("Priority: 0=normal, 1=high, 2=urgent"),
-        dueDate: z.string().optional().describe("Due date/time in ISO format (YYYY-MM-DDTHH:mm:ss). REQUIRED when user mentions any time or deadline."),
+        task: z
+          .string()
+          .min(1)
+          .describe(
+            "The full task description. Keep it natural. E.g. 'cook dinner', 'take out the trash', 'call mom'.",
+          ),
+        priority: z
+          .number()
+          .int()
+          .min(0)
+          .max(2)
+          .optional()
+          .describe("Priority: 0=normal, 1=high, 2=urgent"),
+        dueDate: z
+          .string()
+          .optional()
+          .describe(
+            "Pre-computed ISO datetime (YYYY-MM-DDTHH:mm:ss). Only use if you are certain. Prefer dueDateRaw instead.",
+          ),
+        dueDateRaw: z
+          .string()
+          .optional()
+          .describe(
+            "The user's raw time/date phrase EXACTLY as stated, e.g. 'in 30 min', 'at 12:20pm', 'tomorrow at 5pm', 'next Monday', 'March 10th'. Server parses this accurately.",
+          ),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            "User's IANA timezone, e.g. 'America/New_York'. Helps resolve relative times accurately.",
+          ),
       }),
     },
   );
@@ -628,6 +678,179 @@ export function createTools(userId: number) {
     },
   );
 
+  const updateTask = tool(
+    async ({
+      id,
+      task: taskQuery,
+      text,
+      priority,
+      dueDate,
+      dueDateRaw,
+      timezone,
+    }) => {
+      let targetId: number | undefined;
+
+      if (typeof id === "number") {
+        targetId = id;
+      } else if (typeof taskQuery === "string" && taskQuery.trim()) {
+        const rows = await db
+          .select()
+          .from(schema.tasks)
+          .where(eq(schema.tasks.userId, userId));
+        const needle = taskQuery.trim().toLowerCase();
+        const match =
+          rows.find((t) => t.text.toLowerCase() === needle) ||
+          rows.find((t) => t.text.toLowerCase().includes(needle));
+        targetId = match?.id;
+      }
+
+      if (!targetId) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
+      }
+
+      const data: Record<string, unknown> = {
+        updatedAt: new Date().toISOString(),
+      };
+      if (text !== undefined) data.text = text;
+      if (priority !== undefined) data.priority = priority;
+
+      // Resolve new due date the same way as add_task
+      if (dueDateRaw || dueDate) {
+        let resolvedDueDate: string | null = null;
+        if (dueDateRaw) {
+          resolvedDueDate = parseDueDateExpression(
+            dueDateRaw,
+            text ?? "",
+            timezone,
+          );
+        }
+        if (!resolvedDueDate && dueDate) {
+          const validated = validateISO(dueDate);
+          if (validated) resolvedDueDate = validated;
+        }
+        data.dueDate = resolvedDueDate;
+      }
+
+      const [updated] = await db
+        .update(schema.tasks)
+        .set(data)
+        .where(eq(schema.tasks.id, targetId))
+        .returning();
+
+      if (!updated) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
+      }
+      await syncReminderJobsForTask(updated);
+
+      return JSON.stringify({
+        status: "updated",
+        task: {
+          id: updated.id,
+          text: updated.text,
+          priority: updated.priority,
+          dueDate: updated.dueDate,
+          done: updated.done,
+        },
+      });
+    },
+    {
+      name: "update_task",
+      description:
+        "Update an existing task's text, priority, or due date. Find the task by id or text match. For rescheduling, pass the new time into dueDateRaw (e.g. 'tomorrow at 3pm').",
+      schema: z.object({
+        id: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("Task id to update"),
+        task: z
+          .string()
+          .optional()
+          .describe("Task text to search for (if id not known)"),
+        text: z.string().min(1).optional().describe("New task text"),
+        priority: z
+          .number()
+          .int()
+          .min(0)
+          .max(2)
+          .optional()
+          .describe("New priority: 0=normal, 1=high, 2=urgent"),
+        dueDate: z
+          .string()
+          .optional()
+          .describe("New due date in ISO format. Prefer dueDateRaw."),
+        dueDateRaw: z
+          .string()
+          .optional()
+          .describe(
+            "New due date as raw phrase, e.g. 'tomorrow at 3pm'. Server parses it.",
+          ),
+        timezone: z.string().optional().describe("User's IANA timezone"),
+      }),
+    },
+  );
+
+  const deleteTask = tool(
+    async ({ id, task: taskQuery }) => {
+      let targetId: number | undefined;
+
+      if (typeof id === "number") {
+        targetId = id;
+      } else if (typeof taskQuery === "string" && taskQuery.trim()) {
+        const rows = await db
+          .select()
+          .from(schema.tasks)
+          .where(eq(schema.tasks.userId, userId));
+        const needle = taskQuery.trim().toLowerCase();
+        const match =
+          rows.find((t) => t.text.toLowerCase() === needle) ||
+          rows.find((t) => t.text.toLowerCase().includes(needle));
+        targetId = match?.id;
+      }
+
+      if (!targetId) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
+      }
+
+      const [deleted] = await db
+        .delete(schema.tasks)
+        .where(eq(schema.tasks.id, targetId))
+        .returning();
+
+      if (!deleted) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
+      }
+      await cancelReminderJobsForTask(targetId, "Task deleted via chat");
+
+      return JSON.stringify({
+        status: "deleted",
+        task: { id: deleted.id, text: deleted.text },
+      });
+    },
+    {
+      name: "delete_task",
+      description:
+        "Delete a task permanently. Find the task by id or text match. Use this when user wants to remove/cancel a task entirely (not just mark it done).",
+      schema: z
+        .object({
+          id: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("Task id to delete"),
+          task: z
+            .string()
+            .optional()
+            .describe("Task text to search for (if id not known)"),
+        })
+        .refine((v) => v.id !== undefined || (v.task?.trim().length ?? 0) > 0, {
+          message: "Provide id or task",
+        }),
+    },
+  );
+
   const getCurrentFocus = tool(
     async () => {
       const existing = await readMemory("user", userId, "current-focus").catch(
@@ -670,11 +893,17 @@ export function createTools(userId: number) {
       }
 
       const content = renderCurrentFocus(focusText, note);
-      const result = await writeMemory("user", userId, "current-focus", content, {
-        category: "goal",
-        tags: ["focus", "task"],
-        source: "conversation",
-      });
+      const result = await writeMemory(
+        "user",
+        userId,
+        "current-focus",
+        content,
+        {
+          category: "goal",
+          tags: ["focus", "task"],
+          source: "conversation",
+        },
+      );
 
       return JSON.stringify({
         status: "set",
@@ -703,7 +932,8 @@ export function createTools(userId: number) {
     },
     {
       name: "clear_current_focus",
-      description: "Clear current focus by deleting user/current-focus memory file.",
+      description:
+        "Clear current focus by deleting user/current-focus memory file.",
       schema: z.object({}),
     },
   );
@@ -808,10 +1038,7 @@ export function createTools(userId: number) {
           .string()
           .optional()
           .describe("Optional IANA timezone, e.g. America/New_York"),
-        locale: z
-          .string()
-          .optional()
-          .describe("Optional locale, e.g. en-US"),
+        locale: z.string().optional().describe("Optional locale, e.g. en-US"),
       }),
     },
   );
@@ -828,6 +1055,8 @@ export function createTools(userId: number) {
     listTasks,
     addTask,
     completeTask,
+    updateTask,
+    deleteTask,
     getCurrentFocus,
     setCurrentFocus,
     clearCurrentFocus,

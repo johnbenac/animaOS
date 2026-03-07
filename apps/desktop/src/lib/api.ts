@@ -94,7 +94,13 @@ export interface TaskItem {
 
 export interface HomeData {
   currentFocus: string | null;
-  tasks: { id: number; text: string; done: boolean; priority: number; dueDate: string | null }[];
+  tasks: {
+    id: number;
+    text: string;
+    done: boolean;
+    priority: number;
+    dueDate: string | null;
+  }[];
   journalStreak: number;
   journalTotal: number;
   memoryCount: number;
@@ -200,14 +206,14 @@ export const api = {
     nudges: (userId: number) =>
       request<{ nudges: Nudge[] }>(`/chat/nudges?userId=${userId}`),
 
-    home: (userId: number) =>
-      request<HomeData>(`/chat/home?userId=${userId}`),
+    home: (userId: number) => request<HomeData>(`/chat/home?userId=${userId}`),
 
     consolidate: (userId: number) =>
-      request<{ filesProcessed: number; filesChanged: number; errors: string[] }>(
-        "/chat/consolidate",
-        { method: "POST", body: { userId } },
-      ),
+      request<{
+        filesProcessed: number;
+        filesChanged: number;
+        errors: string[];
+      }>("/chat/consolidate", { method: "POST", body: { userId } }),
   },
   config: {
     providers: () => request<ProviderInfo[]>("/config/providers"),
@@ -230,17 +236,29 @@ export const api = {
       }),
   },
   tasks: {
-    list: (userId: number) =>
-      request<TaskItem[]>(`/tasks?userId=${userId}`),
+    list: (userId: number) => request<TaskItem[]>(`/tasks?userId=${userId}`),
 
-    create: (userId: number, text: string, priority?: number, dueDate?: string) =>
+    create: (
+      userId: number,
+      text: string,
+      priority?: number,
+      dueDate?: string,
+      dueDateRaw?: string,
+    ) =>
       request<TaskItem>("/tasks", {
         method: "POST",
-        body: { userId, text, priority, dueDate },
+        body: { userId, text, priority, dueDate, dueDateRaw },
       }),
 
-    update: (id: number, data: { text?: string; done?: boolean; priority?: number; dueDate?: string | null }) =>
-      request<TaskItem>(`/tasks/${id}`, { method: "PUT", body: data }),
+    update: (
+      id: number,
+      data: {
+        text?: string;
+        done?: boolean;
+        priority?: number;
+        dueDate?: string | null;
+      },
+    ) => request<TaskItem>(`/tasks/${id}`, { method: "PUT", body: data }),
 
     delete: (id: number) =>
       request<{ status: string }>(`/tasks/${id}`, { method: "DELETE" }),

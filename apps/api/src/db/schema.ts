@@ -63,9 +63,41 @@ export const tasks = sqliteTable("tasks", {
   updatedAt: text("updated_at").default("CURRENT_TIMESTAMP"),
 });
 
+export const agentThreads = sqliteTable("agent_threads", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().unique(),
+  threadId: text("thread_id").notNull().unique(),
+  createdAt: text("created_at").default("CURRENT_TIMESTAMP"),
+  updatedAt: text("updated_at").default("CURRENT_TIMESTAMP"),
+});
+
+export const langgraphCheckpoints = sqliteTable("langgraph_checkpoints", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadId: text("thread_id").notNull(),
+  checkpointNs: text("checkpoint_ns").notNull().default(""),
+  checkpointId: text("checkpoint_id").notNull(),
+  parentCheckpointId: text("parent_checkpoint_id"),
+  checkpoint: text("checkpoint").notNull(),
+  metadata: text("metadata").notNull(),
+  createdAt: text("created_at").default("CURRENT_TIMESTAMP"),
+});
+
+export const langgraphWrites = sqliteTable("langgraph_writes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  threadId: text("thread_id").notNull(),
+  checkpointNs: text("checkpoint_ns").notNull().default(""),
+  checkpointId: text("checkpoint_id").notNull(),
+  taskId: text("task_id").notNull(),
+  idx: integer("idx").notNull(),
+  channel: text("channel").notNull(),
+  value: text("value").notNull(),
+  createdAt: text("created_at").default("CURRENT_TIMESTAMP"),
+});
+
 export type Message = typeof messages.$inferSelect;
 
 export type AgentConfig = typeof agentConfig.$inferSelect;
 export type TelegramLink = typeof telegramLinks.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type NewTask = typeof tasks.$inferInsert;
+export type AgentThread = typeof agentThreads.$inferSelect;

@@ -17,8 +17,10 @@
     "@langchain/langgraph": "^1.1.4",
     "@langchain/openai": "^1.2.6",
     "bullmq": "^5.70.4",
+    "chrono-node": "^2.9.0",
     "drizzle-orm": "^0.29.3",
     "hono": "^4.0.0",
+    "langchain": "^1.2.30",
     "zod": "^3.22.4"
   },
   "devDependencies": {

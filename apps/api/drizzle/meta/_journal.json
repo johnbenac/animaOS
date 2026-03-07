@@ -36,6 +36,13 @@
       "when": 1778371200000,
       "tag": "0004_task_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778457600000,
+      "tag": "0005_langgraph_persistence",
+      "breakpoints": true
     }
   ]
 }

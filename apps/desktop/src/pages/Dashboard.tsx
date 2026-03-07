@@ -1,7 +1,13 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { api, type DailyBrief, type Nudge, type HomeData, type TaskItem } from "../lib/api";
+import {
+  api,
+  type DailyBrief,
+  type Nudge,
+  type HomeData,
+  type TaskItem,
+} from "../lib/api";
 
 function getTimeOfDay(): string {
   const h = new Date().getHours();
@@ -12,13 +18,59 @@ function getTimeOfDay(): string {
   return "night";
 }
 
+/** Format a due date for display — relative when close, absolute otherwise */
+function formatDueDate(iso: string): string {
+  const due = new Date(iso);
+  if (Number.isNaN(due.getTime())) return "";
+
+  const now = new Date();
+  const diffMs = due.getTime() - now.getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+  const diffHrs = Math.round(diffMs / 3_600_000);
+
+  // Past due
+  if (diffMs < 0) {
+    const ago = Math.abs(diffMin);
+    if (ago < 60) return `${ago}m overdue`;
+    const hrsAgo = Math.abs(diffHrs);
+    if (hrsAgo < 24) return `${hrsAgo}h overdue`;
+    return `overdue`;
+  }
+
+  // Future
+  if (diffMin < 60) return `in ${diffMin}m`;
+  if (diffHrs < 24) return `in ${diffHrs}h`;
+
+  // Show day name if within this week
+  const diffDays = Math.ceil(diffMs / 86_400_000);
+  if (diffDays <= 7) {
+    const dayName = due.toLocaleDateString("en-US", { weekday: "short" });
+    const time = due.toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return `${dayName} ${time}`;
+  }
+
+  // Farther out — show date
+  return due.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+const PRIORITY_INDICATOR: Record<number, { dot: string; label: string }> = {
+  0: { dot: "", label: "" },
+  1: { dot: "bg-amber-400", label: "High" },
+  2: { dot: "bg-red-500", label: "Urgent" },
+};
+
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [brief, setBrief] = useState<DailyBrief | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [nudges, setNudges] = useState<Nudge[]>([]);
-  const [dismissedNudges, setDismissedNudges] = useState<Set<string>>(new Set());
+  const [dismissedNudges, setDismissedNudges] = useState<Set<string>>(
+    new Set(),
+  );
   const [home, setHome] = useState<HomeData | null>(null);
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [newTask, setNewTask] = useState("");
@@ -32,26 +84,38 @@ export default function Dashboard() {
     setBriefLoading(true);
     api.chat
       .brief(user.id)
-      .then((b) => { if (active) setBrief(b); })
+      .then((b) => {
+        if (active) setBrief(b);
+      })
       .catch(() => {})
-      .finally(() => { if (active) setBriefLoading(false); });
+      .finally(() => {
+        if (active) setBriefLoading(false);
+      });
 
     api.chat
       .nudges(user.id)
-      .then((res) => { if (active) setNudges(res.nudges); })
+      .then((res) => {
+        if (active) setNudges(res.nudges);
+      })
       .catch(() => {});
 
     api.chat
       .home(user.id)
-      .then((data) => { if (active) setHome(data); })
+      .then((data) => {
+        if (active) setHome(data);
+      })
       .catch(() => {});
 
     api.tasks
       .list(user.id)
-      .then((rows) => { if (active) setTasks(rows); })
+      .then((rows) => {
+        if (active) setTasks(rows);
+      })
       .catch(() => {});
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [user?.id]);
 
   const toggleTask = async (task: TaskItem) => {
@@ -62,7 +126,15 @@ export default function Dashboard() {
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTask.trim() || !user?.id) return;
-    const created = await api.tasks.create(user.id, newTask.trim());
+    // Send the full input as both text and dueDateRaw — server extracts the date
+    // via chrono-node and stores it. The task text stays as-is for readability.
+    const created = await api.tasks.create(
+      user.id,
+      newTask.trim(),
+      undefined, // priority
+      undefined, // dueDate (ISO)
+      newTask.trim(), // dueDateRaw — server parses NLP time expressions
+    );
     setTasks((prev) => [...prev, created]);
     setNewTask("");
   };
@@ -91,7 +163,8 @@ export default function Dashboard() {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-(--color-primary)/[0.03] rounded-full blur-3xl pointer-events-none" />
           <div className="relative space-y-3">
             <p className="text-xs text-(--color-text-muted)/40 uppercase tracking-[0.3em]">
-              Good {tod}{user?.name ? `, ${user.name.split(" ")[0]}` : ""}
+              Good {tod}
+              {user?.name ? `, ${user.name.split(" ")[0]}` : ""}
             </p>
             {briefLoading && (
               <div className="flex justify-center gap-1 py-2">
@@ -141,9 +214,13 @@ export default function Dashboard() {
                 key={nudge.type}
                 className="flex items-center justify-between gap-3 px-4 py-2.5 bg-(--color-bg-card)/50 border border-(--color-border) rounded-lg"
               >
-                <span className="text-xs text-(--color-text-muted)">{nudge.message}</span>
+                <span className="text-xs text-(--color-text-muted)">
+                  {nudge.message}
+                </span>
                 <button
-                  onClick={() => setDismissedNudges((prev) => new Set([...prev, nudge.type]))}
+                  onClick={() =>
+                    setDismissedNudges((prev) => new Set([...prev, nudge.type]))
+                  }
                   className="text-[10px] text-(--color-text-muted)/40 hover:text-(--color-text-muted) shrink-0"
                 >
                   ×
@@ -154,7 +231,10 @@ export default function Dashboard() {
         )}
 
         {/* Focus + Tasks */}
-        {(home?.currentFocus || openTasks.length > 0 || doneTasks.length > 0 || true) && (
+        {(home?.currentFocus ||
+          openTasks.length > 0 ||
+          doneTasks.length > 0 ||
+          true) && (
           <div className="bg-(--color-bg-card) border border-(--color-border) rounded-xl p-5 space-y-4">
             {home?.currentFocus && (
               <div>
@@ -168,7 +248,9 @@ export default function Dashboard() {
             )}
 
             <div>
-              {home?.currentFocus && <div className="border-t border-(--color-border) -mx-5 mb-4" />}
+              {home?.currentFocus && (
+                <div className="border-t border-(--color-border) -mx-5 mb-4" />
+              )}
 
               {/* Quick add */}
               <form onSubmit={handleAddTask} className="flex gap-2 mb-3">
@@ -196,7 +278,30 @@ export default function Dashboard() {
                       onClick={() => toggleTask(task)}
                       className="w-4 h-4 rounded-full border border-(--color-border) shrink-0 mt-0.5 hover:border-(--color-primary)/60 hover:bg-(--color-primary)/10 transition-colors cursor-pointer"
                     />
-                    <span className="text-sm text-(--color-text)/80 flex-1">{task.text}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {task.priority > 0 && (
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full shrink-0 ${PRIORITY_INDICATOR[task.priority]?.dot}`}
+                            title={PRIORITY_INDICATOR[task.priority]?.label}
+                          />
+                        )}
+                        <span className="text-sm text-(--color-text)/80 truncate">
+                          {task.text}
+                        </span>
+                      </div>
+                      {task.dueDate && (
+                        <p
+                          className={`text-[10px] mt-0.5 ${
+                            new Date(task.dueDate).getTime() < Date.now()
+                              ? "text-red-400/80"
+                              : "text-(--color-text-muted)/40"
+                          }`}
+                        >
+                          {formatDueDate(task.dueDate)}
+                        </p>
+                      )}
+                    </div>
                     <button
                       onClick={() => deleteTask(task.id)}
                       className="text-[10px] text-(--color-text-muted)/0 group-hover:text-(--color-text-muted)/40 hover:!text-(--color-text-muted) transition-colors"
@@ -206,14 +311,19 @@ export default function Dashboard() {
                   </div>
                 ))}
                 {doneTasks.slice(0, 3).map((task) => (
-                  <div key={task.id} className="flex items-start gap-2.5 opacity-40 group">
+                  <div
+                    key={task.id}
+                    className="flex items-start gap-2.5 opacity-40 group"
+                  >
                     <button
                       onClick={() => toggleTask(task)}
                       className="w-4 h-4 rounded-full bg-(--color-success)/20 border border-(--color-success)/30 shrink-0 mt-0.5 flex items-center justify-center cursor-pointer hover:bg-(--color-success)/30 transition-colors"
                     >
                       <span className="w-1.5 h-1.5 rounded-full bg-(--color-success)/60" />
                     </button>
-                    <span className="text-sm line-through flex-1">{task.text}</span>
+                    <span className="text-sm line-through flex-1 truncate">
+                      {task.text}
+                    </span>
                     <button
                       onClick={() => deleteTask(task.id)}
                       className="text-[10px] text-(--color-text-muted)/0 group-hover:text-(--color-text-muted)/40 hover:!text-(--color-text-muted) transition-colors"

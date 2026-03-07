@@ -6,7 +6,7 @@ import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
-import { runAgent, streamAgent } from "../agent";
+import { runAgent, streamAgent, resetAgentThread } from "../agent";
 import { generateBrief } from "../agent/brief";
 import { checkNudges } from "../agent/nudge";
 import { consolidateMemories } from "../agent/consolidate";
@@ -104,6 +104,9 @@ chat.delete(
     await db
       .delete(schema.messages)
       .where(eq(schema.messages.userId, userId));
+    await resetAgentThread(userId).catch(() => {
+      // Ignore reset failures so chat history clear still succeeds.
+    });
     return c.json({ status: "cleared" });
   }
 );

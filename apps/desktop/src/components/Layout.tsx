@@ -3,6 +3,7 @@ import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
   { to: "/", label: "Home" },
+  { to: "/tasks", label: "Tasks" },
   { to: "/chat", label: "Chat" },
   { to: "/memory", label: "Memory" },
   { to: "/soul", label: "Soul" },
@@ -65,9 +66,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-hidden">
-        {children}
-      </main>
+      <main className="flex-1 overflow-hidden">{children}</main>
     </div>
   );
 }

@@ -2,17 +2,15 @@
 // and summarizes bloated memory files to keep context sharp.
 
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
-import { eq } from "drizzle-orm";
-import { db } from "../db";
-import * as schema from "../db/schema";
 import { createModel } from "./models";
+import type { ProviderConfig } from "../llm/types";
 import {
   listMemories,
   readMemory,
   writeMemory,
   type MemorySection,
 } from "../memory";
-import type { ProviderConfig } from "../llm/types";
+import { getAgentConfig } from "./config";
 
 const CONSOLIDATION_PROMPT = `You are a memory consolidation system. Given a memory file's content, clean it up by:
 
@@ -50,26 +48,6 @@ interface ConsolidationResult {
   filesProcessed: number;
   filesChanged: number;
   errors: string[];
-}
-
-async function getModelConfig(userId: number): Promise<ProviderConfig> {
-  const [cfg] = await db
-    .select()
-    .from(schema.agentConfig)
-    .where(eq(schema.agentConfig.userId, userId));
-
-  return cfg
-    ? {
-        provider: cfg.provider as any,
-        model: cfg.model,
-        apiKey: cfg.apiKey || undefined,
-        ollamaUrl: cfg.ollamaUrl || undefined,
-      }
-    : {
-        provider: "ollama",
-        model: "qwen3:14b",
-        ollamaUrl: "http://localhost:11434",
-      };
 }
 
 function countBulletLines(content: string): number {
@@ -133,7 +111,7 @@ async function consolidateFile(
 export async function consolidateMemories(
   userId: number,
 ): Promise<ConsolidationResult> {
-  const config = await getModelConfig(userId);
+  const config = await getAgentConfig(userId);
   const sectionsToProcess: MemorySection[] = [
     "user",
     "relationships",

@@ -11,6 +11,7 @@ import Chat from "./pages/Chat";
 import Memory from "./pages/Memory";
 import Settings from "./pages/Settings";
 import Soul from "./pages/Soul";
+import Tasks from "./pages/Tasks";
 import "./index.css";
 
 // Register global shortcut to summon ANIMA (Cmd+Shift+A / Ctrl+Shift+A)
@@ -20,9 +21,8 @@ function useGlobalShortcut() {
 
     (async () => {
       try {
-        const { register, unregister } = await import(
-          "@tauri-apps/plugin-global-shortcut"
-        );
+        const { register, unregister } =
+          await import("@tauri-apps/plugin-global-shortcut");
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
 
         await register("CommandOrControl+Shift+A", async () => {
@@ -73,7 +73,9 @@ function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
-            <Layout><Dashboard /></Layout>
+            <Layout>
+              <Dashboard />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -81,7 +83,9 @@ function AppRoutes() {
         path="/chat"
         element={
           <ProtectedRoute>
-            <Layout><Chat /></Layout>
+            <Layout>
+              <Chat />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -89,7 +93,9 @@ function AppRoutes() {
         path="/memory"
         element={
           <ProtectedRoute>
-            <Layout><Memory /></Layout>
+            <Layout>
+              <Memory />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -97,7 +103,9 @@ function AppRoutes() {
         path="/profile"
         element={
           <ProtectedRoute>
-            <Layout><Profile /></Layout>
+            <Layout>
+              <Profile />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -105,7 +113,19 @@ function AppRoutes() {
         path="/settings"
         element={
           <ProtectedRoute>
-            <Layout><Settings /></Layout>
+            <Layout>
+              <Settings />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Tasks />
+            </Layout>
           </ProtectedRoute>
         }
       />
@@ -113,7 +133,9 @@ function AppRoutes() {
         path="/soul"
         element={
           <ProtectedRoute>
-            <Layout><Soul /></Layout>
+            <Layout>
+              <Soul />
+            </Layout>
           </ProtectedRoute>
         }
       />

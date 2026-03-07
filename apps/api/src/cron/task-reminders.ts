@@ -14,17 +14,24 @@ import * as schema from "../db/schema";
 import { redisConnection } from "../lib/redis";
 
 const QUEUE_NAME = "task-reminders";
-const PRE_REMINDER_MINUTES = 15;
-const FOLLOWUP_AFTER_MINUTES = 5;
 const FOLLOWUP_WINDOW_MINUTES = 24 * 60;
 const MAX_ATTEMPTS = 5;
+
+// Priority-based reminder timing (minutes)
+// priority 0 = normal, 1 = high, 2 = urgent
+const PRE_REMINDER_MINUTES: Record<number, number[]> = {
+  0: [15], // normal: 15 min before
+  1: [60, 15], // high: 1 hour + 15 min before
+  2: [120, 30, 5], // urgent: 2 hours + 30 min + 5 min before
+};
+const FOLLOWUP_AFTER_MINUTES = 5;
 
 // --- Types ---
 
 interface ReminderJobData {
   taskId: number;
   userId: number;
-  phase: "pre" | "followup";
+  phase: string; // "pre-0", "pre-1", "pre-2", or "followup"
 }
 
 // --- Queue ---
@@ -35,7 +42,7 @@ const reminderQueue = new Queue<ReminderJobData>(QUEUE_NAME, {
     attempts: MAX_ATTEMPTS,
     backoff: { type: "exponential", delay: 60_000 }, // 1m, 2m, 4m, 8m, 16m
     removeOnComplete: { age: 7 * 24 * 3600 }, // keep 7 days
-    removeOnFail: { age: 14 * 24 * 3600 },    // keep 14 days
+    removeOnFail: { age: 14 * 24 * 3600 }, // keep 14 days
   },
 });
 
@@ -92,7 +99,10 @@ async function notifyUser(userId: number, message: string): Promise<void> {
         await sendTelegramMessage(token, link.chatId, message);
       }
     } catch (err) {
-      console.error(`[task-reminder] Telegram notify failed for user ${userId}:`, (err as Error).message);
+      console.error(
+        `[task-reminder] Telegram notify failed for user ${userId}:`,
+        (err as Error).message,
+      );
     }
   }
 }
@@ -125,23 +135,35 @@ async function processReminder(job: Job<ReminderJobData>): Promise<void> {
     minute: "2-digit",
   });
 
-  if (phase === "pre") {
+  if (phase.startsWith("pre")) {
     if (minutesUntilDue <= 0) {
-      console.log(`[task-reminder] Pre-reminder window missed for task ${taskId}`);
+      console.log(
+        `[task-reminder] Pre-reminder window missed for task ${taskId} (${phase})`,
+      );
       return;
     }
+    const urgencyLabel =
+      (task.priority ?? 0) >= 2
+        ? "🚨"
+        : (task.priority ?? 0) >= 1
+          ? "⚠️"
+          : "⏰";
     await notifyUser(
       userId,
-      `⏰ Heads up — "${task.text}" is due at ${dueTime} (in ~${Math.round(minutesUntilDue)} min)`,
+      `${urgencyLabel} Heads up — "${task.text}" is due at ${dueTime} (in ~${Math.round(minutesUntilDue)} min)`,
     );
-    console.log(`[task-reminder] Pre-reminder sent for task ${taskId} (user ${userId})`);
+    console.log(
+      `[task-reminder] Pre-reminder (${phase}) sent for task ${taskId} (user ${userId})`,
+    );
     return;
   }
 
   // followup phase
   const minsAgo = Math.round(Math.abs(minutesUntilDue));
   if (minsAgo > FOLLOWUP_WINDOW_MINUTES) {
-    console.log(`[task-reminder] Follow-up window expired for task ${taskId} (${minsAgo} min ago)`);
+    console.log(
+      `[task-reminder] Follow-up window expired for task ${taskId} (${minsAgo} min ago)`,
+    );
     return;
   }
 
@@ -149,7 +171,9 @@ async function processReminder(job: Job<ReminderJobData>): Promise<void> {
     userId,
     `👋 Did you get to "${task.text}"? It was due at ${dueTime} (${minsAgo} min ago). Let me know if it's done or if you need to reschedule.`,
   );
-  console.log(`[task-reminder] Follow-up sent for task ${taskId} (user ${userId})`);
+  console.log(
+    `[task-reminder] Follow-up sent for task ${taskId} (user ${userId})`,
+  );
 }
 
 // --- Public API: schedule/cancel reminders ---
@@ -170,50 +194,115 @@ export async function syncReminderJobsForTask(
 
   const now = Date.now();
   const dueMs = due.getTime();
+  const priority = task.priority ?? 0;
 
-  for (const phase of ["pre", "followup"] as const) {
-    const offsetMs =
-      phase === "pre"
-        ? -PRE_REMINDER_MINUTES * 60_000
-        : FOLLOWUP_AFTER_MINUTES * 60_000;
-    const runAtMs = dueMs + offsetMs;
-    const delay = Math.max(runAtMs - now, 0); // if in the past, run immediately
+  // --- Schedule pre-reminders based on priority ---
+  const preOffsets = PRE_REMINDER_MINUTES[priority] ?? PRE_REMINDER_MINUTES[0];
 
-    const id = jobId(task.id, phase);
-
-    // Remove existing job for this task+phase, then re-add
+  // First, clean up any old pre-reminder jobs for this task (handles priority changes)
+  for (let i = 0; i < 5; i++) {
+    const oldId = jobId(task.id, `pre-${i}`);
     try {
-      const existing = await reminderQueue.getJob(id);
+      const existing = await reminderQueue.getJob(oldId);
       if (existing) await existing.remove();
     } catch {
-      // job doesn't exist — fine
+      /* job doesn't exist */
     }
+  }
+  // Also clean legacy "pre" jobId from before priority-based reminders
+  try {
+    const legacy = await reminderQueue.getJob(jobId(task.id, "pre"));
+    if (legacy) await legacy.remove();
+  } catch {
+    /* fine */
+  }
 
-    // Skip pre-reminder if due time already passed
-    if (phase === "pre" && dueMs <= now) continue;
-    // Skip followup if >24h past due
-    if (phase === "followup" && now - dueMs > FOLLOWUP_WINDOW_MINUTES * 60_000) continue;
+  for (let i = 0; i < preOffsets.length; i++) {
+    const offsetMs = -preOffsets[i] * 60_000;
+    const runAtMs = dueMs + offsetMs;
+    const delay = Math.max(runAtMs - now, 0);
+    const phase = `pre-${i}`;
+    const id = jobId(task.id, phase);
 
-    await reminderQueue.add("reminder", {
-      taskId: task.id,
-      userId: task.userId,
-      phase,
-    }, {
-      jobId: id,
-      delay,
-    });
+    // Skip if due time already passed
+    if (dueMs <= now) continue;
+    // Skip if this reminder time already passed
+    if (runAtMs <= now) continue;
 
-    console.log(`[task-reminder] Scheduled ${phase} for task ${task.id} (delay: ${Math.round(delay / 1000)}s)`);
+    await reminderQueue.add(
+      "reminder",
+      {
+        taskId: task.id,
+        userId: task.userId,
+        phase,
+      },
+      {
+        jobId: id,
+        delay,
+      },
+    );
+
+    console.log(
+      `[task-reminder] Scheduled ${phase} (${preOffsets[i]}min before) for task ${task.id} (delay: ${Math.round(delay / 1000)}s)`,
+    );
+  }
+
+  // --- Schedule followup ---
+  const followupPhase = "followup";
+  const followupId = jobId(task.id, followupPhase);
+  try {
+    const existing = await reminderQueue.getJob(followupId);
+    if (existing) await existing.remove();
+  } catch {
+    /* fine */
+  }
+
+  if (!(now - dueMs > FOLLOWUP_WINDOW_MINUTES * 60_000)) {
+    const followupDelay = Math.max(
+      dueMs + FOLLOWUP_AFTER_MINUTES * 60_000 - now,
+      0,
+    );
+    await reminderQueue.add(
+      "reminder",
+      {
+        taskId: task.id,
+        userId: task.userId,
+        phase: followupPhase,
+      },
+      {
+        jobId: followupId,
+        delay: followupDelay,
+      },
+    );
+
+    console.log(
+      `[task-reminder] Scheduled followup for task ${task.id} (delay: ${Math.round(followupDelay / 1000)}s)`,
+    );
   }
 }
 
-export async function cancelReminderJobsForTask(taskId: number, reason?: string): Promise<void> {
-  for (const phase of ["pre", "followup"]) {
+export async function cancelReminderJobsForTask(
+  taskId: number,
+  reason?: string,
+): Promise<void> {
+  // Cancel all possible pre-reminder slots + followup + legacy "pre"
+  const phases = [
+    "pre",
+    "followup",
+    "pre-0",
+    "pre-1",
+    "pre-2",
+    "pre-3",
+    "pre-4",
+  ];
+  for (const phase of phases) {
     try {
       const existing = await reminderQueue.getJob(jobId(taskId, phase));
       if (existing) {
         await existing.remove();
-        console.log(`[task-reminder] Cancelled ${phase} for task ${taskId}${reason ? ` (${reason})` : ""}`);
+        console.log(
+          `[task-reminder] Cancelled ${phase} for task ${taskId}${reason ? ` (${reason})` : ""}`,
+        );
       }
     } catch {
       // job doesn't exist or already completed
@@ -243,14 +332,10 @@ let worker: Worker<ReminderJobData> | null = null;
 export function startTaskReminderCron(): void {
   if (worker) return;
 
-  worker = new Worker<ReminderJobData>(
-    QUEUE_NAME,
-    processReminder,
-    {
-      connection: redisConnection,
-      concurrency: 5,
-    },
-  );
+  worker = new Worker<ReminderJobData>(QUEUE_NAME, processReminder, {
+    connection: redisConnection,
+    concurrency: 5,
+  });
 
   worker.on("completed", (job) => {
     console.log(`[task-reminder] Job ${job.id} completed`);
@@ -264,7 +349,10 @@ export function startTaskReminderCron(): void {
 
   // Reconcile: schedule jobs for any tasks with due dates that don't have jobs yet
   reconcileReminderJobs().catch((err) =>
-    console.error("[task-reminder] Reconciliation error:", (err as Error).message),
+    console.error(
+      "[task-reminder] Reconciliation error:",
+      (err as Error).message,
+    ),
   );
 }
 

@@ -6,20 +6,24 @@ import { eq, desc } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { createModel } from "./models";
-import { readMemory, listMemories } from "../memory";
-import type { ProviderConfig } from "../llm/types";
+import { readMemory } from "../memory";
+import { getAgentConfig } from "./config";
+import { getSoulPrompt } from "./prompt";
 
-const BRIEF_PROMPT = `You are ANIMA, a calm and thoughtful personal AI companion. Generate a brief daily greeting for the user based on the context provided.
+const BRIEF_TASK = `Your task right now: generate a brief daily greeting for the user based on the context below.
 
 Rules:
 - Keep it to 2-4 short sentences maximum
-- Be warm but restrained — no excessive enthusiasm
 - Reference specific things from the context if relevant (current focus, open tasks, recent activity)
 - If there's nothing notable, a simple quiet greeting is fine
-- You may use a Japanese greeting if it feels natural
 - Do NOT list out all the context — just weave in what matters
 - Do NOT use bullet points or markdown formatting
 - Sound like a person, not a report`;
+
+function buildBriefPrompt(): string {
+  const soul = getSoulPrompt();
+  return `${soul}\n\n---\n\n${BRIEF_TASK}`;
+}
 
 interface BriefContext {
   currentFocus: string | null;
@@ -110,7 +114,13 @@ async function gatherBriefContext(userId: number): Promise<BriefContext> {
     // No facts
   }
 
-  return { currentFocus, openTasks, recentTopics, daysSinceLastChat, factsSnippet };
+  return {
+    currentFocus,
+    openTasks,
+    recentTopics,
+    daysSinceLastChat,
+    factsSnippet,
+  };
 }
 
 export interface DailyBrief {
@@ -164,10 +174,14 @@ export async function generateBrief(userId: number): Promise<DailyBrief> {
     contextParts.push(`Current focus: ${ctx.currentFocus}`);
   }
   if (ctx.openTasks.length > 0) {
-    contextParts.push(`Open tasks (${ctx.openTasks.length}): ${ctx.openTasks.slice(0, 5).join(", ")}`);
+    contextParts.push(
+      `Open tasks (${ctx.openTasks.length}): ${ctx.openTasks.slice(0, 5).join(", ")}`,
+    );
   }
   if (ctx.recentTopics.length > 0) {
-    contextParts.push(`Recent conversation topics:\n${ctx.recentTopics.join("\n")}`);
+    contextParts.push(
+      `Recent conversation topics:\n${ctx.recentTopics.join("\n")}`,
+    );
   }
   if (ctx.daysSinceLastChat !== null) {
     if (ctx.daysSinceLastChat === 0) {
@@ -191,30 +205,12 @@ export async function generateBrief(userId: number): Promise<DailyBrief> {
     };
   }
 
-  // Get user's model config
-  const [cfg] = await db
-    .select()
-    .from(schema.agentConfig)
-    .where(eq(schema.agentConfig.userId, userId));
-
-  const config: ProviderConfig = cfg
-    ? {
-        provider: cfg.provider as any,
-        model: cfg.model,
-        apiKey: cfg.apiKey || undefined,
-        ollamaUrl: cfg.ollamaUrl || undefined,
-      }
-    : {
-        provider: "ollama",
-        model: "qwen3:14b",
-        ollamaUrl: "http://localhost:11434",
-      };
-
+  const config = await getAgentConfig(userId);
   const model = createModel(config);
 
   try {
     const result = await model.invoke([
-      new SystemMessage(BRIEF_PROMPT),
+      new SystemMessage(buildBriefPrompt()),
       new HumanMessage(contextParts.join("\n\n")),
     ]);
 
