@@ -22,7 +22,7 @@ export default function Register() {
       setUser(user);
       navigate("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Access creation failed");
+      setError(err instanceof Error ? err.message : "Registration failed");
     } finally {
       setLoading(false);
     }
@@ -30,53 +30,50 @@ export default function Register() {
 
   return (
     <div className="flex items-center justify-center min-h-screen p-8">
-      <div className="w-full max-w-[400px]">
-        <div className="text-center mb-10">
-          <h1 className="font-mono text-3xl font-bold tracking-[0.4em] text-text uppercase">
+      <div className="w-full max-w-[380px]">
+        <div className="text-center mb-12">
+          <div className="text-4xl text-(--color-text-muted)/10 mb-4 select-none">◈</div>
+          <h1 className="font-mono text-lg font-medium tracking-[0.3em] uppercase text-(--color-text)">
             ANIMA
           </h1>
-          <p className="font-mono text-text-muted text-xs mt-2 tracking-widest uppercase">
-            life operating system
+          <p className="text-xs text-(--color-text-muted) mt-1.5 tracking-wide">
+            Personal companion
           </p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-bg-card border border-border rounded-sm p-8"
+          className="bg-(--color-bg-card) border border-(--color-border) rounded-lg p-7 space-y-5"
         >
-          <h2 className="font-mono text-sm font-medium mb-6 tracking-wider uppercase text-text-muted">
-            // Create Access
-          </h2>
-
           {error && (
-            <div className="bg-danger/10 border border-danger/30 text-danger px-3.5 py-2.5 rounded-sm font-mono text-xs mb-4">
+            <div className="bg-(--color-danger)/8 border border-(--color-danger)/20 text-(--color-danger) px-3.5 py-2.5 rounded-md text-xs">
               {error}
             </div>
           )}
 
-          <div className="mb-5">
+          <div>
             <label
               htmlFor="name"
-              className="block font-mono text-[11px] font-medium text-text-muted mb-1.5 uppercase tracking-wider"
+              className="block text-[11px] font-medium text-(--color-text-muted) mb-1.5 tracking-wide"
             >
-              Identity
+              Name
             </label>
             <input
               id="name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="your name"
+              placeholder="Your name"
               required
               autoFocus
-              className="w-full px-3.5 py-2.5 bg-bg-input border border-border rounded-sm text-text font-mono text-sm outline-none transition-colors focus:border-text-muted placeholder:text-text-muted/40"
+              className="w-full px-3.5 py-2.5 bg-(--color-bg-input) border border-(--color-border) rounded-md text-sm text-(--color-text) outline-none transition-colors focus:border-(--color-text-muted)/40 placeholder:text-(--color-text-muted)/30"
             />
           </div>
 
-          <div className="mb-5">
+          <div>
             <label
               htmlFor="username"
-              className="block font-mono text-[11px] font-medium text-text-muted mb-1.5 uppercase tracking-wider"
+              className="block text-[11px] font-medium text-(--color-text-muted) mb-1.5 tracking-wide"
             >
               Username
             </label>
@@ -85,47 +82,47 @@ export default function Register() {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="choose identifier"
+              placeholder="Choose a username"
               required
-              className="w-full px-3.5 py-2.5 bg-bg-input border border-border rounded-sm text-text font-mono text-sm outline-none transition-colors focus:border-text-muted placeholder:text-text-muted/40"
+              className="w-full px-3.5 py-2.5 bg-(--color-bg-input) border border-(--color-border) rounded-md text-sm text-(--color-text) outline-none transition-colors focus:border-(--color-text-muted)/40 placeholder:text-(--color-text-muted)/30"
             />
           </div>
 
-          <div className="mb-5">
+          <div>
             <label
               htmlFor="password"
-              className="block font-mono text-[11px] font-medium text-text-muted mb-1.5 uppercase tracking-wider"
+              className="block text-[11px] font-medium text-(--color-text-muted) mb-1.5 tracking-wide"
             >
-              Passkey
+              Password
             </label>
             <input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="min 6 characters"
+              placeholder="Min 6 characters"
               required
               minLength={6}
-              className="w-full px-3.5 py-2.5 bg-bg-input border border-border rounded-sm text-text font-mono text-sm outline-none transition-colors focus:border-text-muted placeholder:text-text-muted/40"
+              className="w-full px-3.5 py-2.5 bg-(--color-bg-input) border border-(--color-border) rounded-md text-sm text-(--color-text) outline-none transition-colors focus:border-(--color-text-muted)/40 placeholder:text-(--color-text-muted)/30"
             />
           </div>
 
           <button
             type="submit"
-            className="w-full py-2.5 px-5 bg-text text-bg border-none rounded-sm font-mono text-sm font-semibold uppercase tracking-wider cursor-pointer transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full py-2.5 bg-(--color-text) text-(--color-bg) rounded-md text-sm font-medium tracking-wide cursor-pointer transition-colors hover:bg-(--color-primary-hover) disabled:opacity-40 disabled:cursor-not-allowed"
             disabled={loading}
           >
-            {loading ? "Creating..." : "Create Access →"}
+            {loading ? "Creating..." : "Create account"}
           </button>
         </form>
 
-        <p className="text-center mt-6 font-mono text-xs text-text-muted tracking-wide">
-          Have access?{" "}
+        <p className="text-center mt-6 text-xs text-(--color-text-muted)">
+          Already have an account?{" "}
           <Link
             to="/login"
-            className="text-text hover:opacity-70 underline underline-offset-4"
+            className="text-(--color-text) hover:opacity-70 underline underline-offset-4"
           >
-            Enter
+            Sign in
           </Link>
         </p>
       </div>

@@ -15,6 +15,27 @@
       "when": 1770369251698,
       "tag": "0001_old_old_lace",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1772812800000,
+      "tag": "0002_telegram_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1778284800000,
+      "tag": "0003_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "5",
+      "when": 1778371200000,
+      "tag": "0004_task_indexes",
+      "breakpoints": true
     }
   ]
 }

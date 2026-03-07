@@ -22,6 +22,38 @@ body {
   @apply bg-bg text-text font-sans antialiased min-h-screen leading-relaxed;
 }
 
+/* Selection */
+::selection {
+  background: rgba(168, 168, 192, 0.18);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(90, 90, 110, 0.25);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(90, 90, 110, 0.4);
+}
+
+/* Smooth transitions for all interactive elements */
+input,
+textarea,
+button,
+a {
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 /* Custom typography styles */
 .prose {
   --tw-prose-body: var(--color-text);
@@ -48,7 +80,7 @@ body {
 }
 
 .prose :where(pre):not(:where([class~="not-prose"] *)) {
-  @apply bg-bg-card border border-border rounded-sm my-3;
+  @apply bg-bg-card border border-border rounded-md my-3;
 }
 
 .prose :where(pre code):not(:where([class~="not-prose"] *)) {

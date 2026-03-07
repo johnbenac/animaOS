@@ -32,9 +32,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) =>
-                `px-3 py-2 rounded-sm text-[13px] transition-colors ${
+                `relative px-3 py-2 rounded-md text-[13px] transition-all duration-150 ${
                   isActive
-                    ? "bg-(--color-bg-card) text-(--color-text)"
+                    ? "bg-(--color-bg-card) text-(--color-text) font-medium before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-(--color-primary)"
                     : "text-(--color-text-muted) hover:text-(--color-text) hover:bg-(--color-bg-card)/50"
                 }`
               }
@@ -48,7 +48,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="px-2 py-4 border-t border-(--color-border) space-y-1">
           <button
             onClick={() => navigate("/profile")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-sm text-[13px] text-(--color-text-muted) hover:text-(--color-text) hover:bg-(--color-bg-card)/50 transition-colors"
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] text-(--color-text-muted) hover:text-(--color-text) hover:bg-(--color-bg-card)/50 transition-colors"
           >
             <span className="w-5 h-5 rounded-full bg-(--color-bg-input) border border-(--color-border) flex items-center justify-center text-[9px] uppercase shrink-0">
               {user?.name?.charAt(0) || "?"}
@@ -57,7 +57,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </button>
           <button
             onClick={logout}
-            className="w-full px-3 py-1.5 rounded-sm text-[12px] text-(--color-text-muted)/50 hover:text-(--color-danger) text-left transition-colors"
+            className="w-full px-3 py-1.5 rounded-md text-[12px] text-(--color-text-muted)/50 hover:text-(--color-danger) text-left transition-colors"
           >
             Log out
           </button>

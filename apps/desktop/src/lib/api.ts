@@ -80,6 +80,27 @@ export interface Nudge {
   priority: number;
 }
 
+export interface TaskItem {
+  id: number;
+  userId: number;
+  text: string;
+  done: boolean;
+  priority: number;
+  dueDate: string | null;
+  completedAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface HomeData {
+  currentFocus: string | null;
+  tasks: { id: number; text: string; done: boolean; priority: number; dueDate: string | null }[];
+  journalStreak: number;
+  journalTotal: number;
+  memoryCount: number;
+  messageCount: number;
+}
+
 export interface DailyBrief {
   message: string;
   context: {
@@ -179,6 +200,9 @@ export const api = {
     nudges: (userId: number) =>
       request<{ nudges: Nudge[] }>(`/chat/nudges?userId=${userId}`),
 
+    home: (userId: number) =>
+      request<HomeData>(`/chat/home?userId=${userId}`),
+
     consolidate: (userId: number) =>
       request<{ filesProcessed: number; filesChanged: number; errors: string[] }>(
         "/chat/consolidate",
@@ -204,6 +228,22 @@ export const api = {
         method: "PUT",
         body: data,
       }),
+  },
+  tasks: {
+    list: (userId: number) =>
+      request<TaskItem[]>(`/tasks?userId=${userId}`),
+
+    create: (userId: number, text: string, priority?: number, dueDate?: string) =>
+      request<TaskItem>("/tasks", {
+        method: "POST",
+        body: { userId, text, priority, dueDate },
+      }),
+
+    update: (id: number, data: { text?: string; done?: boolean; priority?: number; dueDate?: string | null }) =>
+      request<TaskItem>(`/tasks/${id}`, { method: "PUT", body: data }),
+
+    delete: (id: number) =>
+      request<{ status: string }>(`/tasks/${id}`, { method: "DELETE" }),
   },
   translate: async (text: string, targetLang: string): Promise<string> => {
     const res = await fetch(

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api, type ChatMessage } from "../lib/api";
 import ReactMarkdown from "react-markdown";
@@ -38,6 +39,8 @@ function setDefaultLang(code: string) {
 
 export default function Chat() {
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pendingMsgRef = useRef<string | null>(searchParams.get("msg"));
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -52,12 +55,36 @@ export default function Chat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const langDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Load history on mount
+  // Load history on mount, then auto-send pending message from dashboard
   useEffect(() => {
-    if (user?.id) {
-      api.chat.history(user.id).then(setMessages).catch(console.error);
-    }
+    if (!user?.id) return;
+    api.chat.history(user.id).then((hist) => {
+      setMessages(hist);
+      // Auto-send message passed from dashboard
+      const pending = pendingMsgRef.current;
+      if (pending) {
+        pendingMsgRef.current = null;
+        setSearchParams({}, { replace: true });
+        setTimeout(() => sendMessage(pending), 100);
+      }
+    }).catch(console.error);
   }, [user?.id]);
+
+  // Poll for new messages (e.g. from task reminders) every 30s
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(async () => {
+      if (streaming) return;
+      try {
+        const hist = await api.chat.history(user.id);
+        setMessages((prev) => {
+          if (hist.length > prev.length) return hist;
+          return prev;
+        });
+      } catch {}
+    }, 10_000);
+    return () => clearInterval(interval);
+  }, [user?.id, streaming]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     bottomRef.current?.scrollIntoView({ behavior, block: "end" });
@@ -116,11 +143,10 @@ export default function Chat() {
     setShowLangSettings(false);
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || !user?.id || streaming) return;
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || !user?.id || streaming) return;
 
-    const userMsg = input.trim();
+    const userMsg = text.trim();
     setInput("");
     setError("");
 
@@ -156,6 +182,11 @@ export default function Chat() {
       setStreaming(false);
       inputRef.current?.focus();
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    sendMessage(input);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -339,6 +370,7 @@ function MessageBubble({
   translateLang: string;
 }) {
   const isUser = message.role === "user";
+  const isSystem = message.role === "system";
   const [translation, setTranslation] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
 
@@ -374,7 +406,7 @@ function MessageBubble({
     <div className={`group flex gap-3 ${isUser ? "justify-end" : ""}`}>
       {!isUser && (
         <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
-          {AI_LABEL}
+          {isSystem ? "SYS" : AI_LABEL}
         </div>
       )}
       <div className={`flex flex-col max-w-[86%] md:max-w-[74%] xl:max-w-[64%] ${isUser ? "items-end" : ""}`}>
@@ -382,7 +414,9 @@ function MessageBubble({
           className={`rounded-md px-3 py-2.5 md:px-4 md:py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
             isUser
               ? "bg-linear-to-b from-(--color-bg-input) to-(--color-bg-card) border border-(--color-border) text-(--color-text)"
-              : "bg-(--color-bg-card)/85 border border-(--color-border)"
+              : isSystem
+                ? "bg-(--color-primary)/[0.06] border border-(--color-primary)/20"
+                : "bg-(--color-bg-card)/85 border border-(--color-border)"
           }`}
         >
           {isUser ? (

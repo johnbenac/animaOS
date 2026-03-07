@@ -44,16 +44,16 @@ async function gatherBriefContext(userId: number): Promise<BriefContext> {
     // No focus set
   }
 
-  // Open tasks from goals
+  // Open tasks from DB
   const openTasks: string[] = [];
   try {
-    const goals = await readMemory("user", userId, "goals");
-    for (const line of goals.content.split("\n")) {
-      const match = line.trim().match(/^- \[ \]\s+(.+)$/);
-      if (match) openTasks.push(match[1].trim());
-    }
+    const rows = await db
+      .select({ text: schema.tasks.text })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.userId, userId));
+    for (const r of rows) openTasks.push(r.text);
   } catch {
-    // No goals file
+    // Tasks table might not exist yet
   }
 
   // Recent chat topics (last 6 user messages)

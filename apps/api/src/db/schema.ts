@@ -43,6 +43,29 @@ export const agentConfig = sqliteTable("agent_config", {
   updatedAt: text("updated_at").default("CURRENT_TIMESTAMP"),
 });
 
+export const telegramLinks = sqliteTable("telegram_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  chatId: integer("chat_id").notNull().unique(),
+  userId: integer("user_id").notNull().unique(),
+  createdAt: text("created_at").default("CURRENT_TIMESTAMP"),
+  updatedAt: text("updated_at").default("CURRENT_TIMESTAMP"),
+});
+
+export const tasks = sqliteTable("tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  text: text("text").notNull(),
+  done: integer("done", { mode: "boolean" }).notNull().default(false),
+  priority: integer("priority").notNull().default(0), // 0=normal, 1=high, 2=urgent
+  dueDate: text("due_date"), // ISO datetime or YYYY-MM-DD
+  completedAt: text("completed_at"),
+  createdAt: text("created_at").default("CURRENT_TIMESTAMP"),
+  updatedAt: text("updated_at").default("CURRENT_TIMESTAMP"),
+});
+
 export type Message = typeof messages.$inferSelect;
 
 export type AgentConfig = typeof agentConfig.$inferSelect;
+export type TelegramLink = typeof telegramLinks.$inferSelect;
+export type Task = typeof tasks.$inferSelect;
+export type NewTask = typeof tasks.$inferInsert;

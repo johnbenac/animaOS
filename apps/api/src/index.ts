@@ -6,6 +6,9 @@ import chat from "./routes/chat";
 import config from "./routes/config";
 import memory from "./routes/memory";
 import soul from "./routes/soul";
+import telegram from "./routes/telegram";
+import tasks from "./routes/tasks";
+import { startTaskReminderCron } from "./cron/task-reminders";
 
 
 const app = new Hono();
@@ -25,11 +28,16 @@ app.route("/api/chat", chat);
 app.route("/api/config", config);
 app.route("/api/memory", memory);
 app.route("/api/soul", soul);
+app.route("/api/telegram", telegram);
+app.route("/api/tasks", tasks);
 
 
 // Health check
 app.get("/", (c) => c.json({ message: "ANIMA API", version: "0.1.0" }));
 app.get("/health", (c) => c.json({ status: "healthy" }));
+
+// Start background crons
+startTaskReminderCron();
 
 export default {
   port: 3031,

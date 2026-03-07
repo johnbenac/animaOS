@@ -142,6 +142,21 @@ export async function extractMemories(
 
     let stored = 0;
     for (const item of items) {
+      // Goals are stored as memory notes — task creation requires dueDate/priority
+      // which auto-extraction can't provide. Users should use add_task via chat.
+      if (item.category === "goal") {
+        const duplicate = await isDuplicate(userId, item.content);
+        if (duplicate) continue;
+
+        await appendMemory("user", userId, "goals", `- ${item.content}`, {
+          category: "goal",
+          tags: ["goal", "auto-extracted"],
+          source: "extraction",
+        });
+        stored++;
+        continue;
+      }
+
       const duplicate = await isDuplicate(userId, item.content);
       if (duplicate) continue;
 

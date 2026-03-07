@@ -1,7 +1,7 @@
 // Nudge system — checks for conditions worth surfacing to the user.
 // Returns structured nudges, not LLM-generated text (keeps it fast and deterministic).
 
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { readMemory, listMemories } from "../memory";
@@ -47,14 +47,30 @@ async function checkStaleFocus(userId: number): Promise<Nudge | null> {
 
 async function checkOverdueTasks(userId: number): Promise<Nudge | null> {
   try {
-    const goals = await readMemory("user", userId, "goals");
-    const openTasks: string[] = [];
+    const openTasks = await db
+      .select({
+        id: schema.tasks.id,
+        text: schema.tasks.text,
+        dueDate: schema.tasks.dueDate,
+      })
+      .from(schema.tasks)
+      .where(and(eq(schema.tasks.userId, userId), eq(schema.tasks.done, false)));
 
-    for (const line of goals.content.split("\n")) {
-      const match = line.trim().match(/^- \[ \]\s+(.+)$/);
-      if (match) openTasks.push(match[1].trim());
+    // Check for actually overdue tasks (dueDate < now)
+    const nowISO = new Date().toISOString();
+    const overdue = openTasks.filter((t) => t.dueDate && t.dueDate < nowISO);
+
+    if (overdue.length > 0) {
+      const names = overdue.slice(0, 3).map((t) => `"${t.text}"`).join(", ");
+      const extra = overdue.length > 3 ? ` and ${overdue.length - 3} more` : "";
+      return {
+        type: "overdue_tasks",
+        message: `You have ${overdue.length} overdue task${overdue.length > 1 ? "s" : ""}: ${names}${extra}. Want to reschedule or mark them done?`,
+        priority: 1,
+      };
     }
 
+    // Fallback: too many open tasks
     if (openTasks.length >= 5) {
       return {
         type: "overdue_tasks",
@@ -63,7 +79,7 @@ async function checkOverdueTasks(userId: number): Promise<Nudge | null> {
       };
     }
   } catch {
-    // No goals file
+    // Tasks table might not exist yet
   }
 
   return null;

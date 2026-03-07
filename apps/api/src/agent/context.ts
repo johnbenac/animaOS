@@ -7,6 +7,9 @@ import {
   readMemory,
   type MemorySection,
 } from "../memory";
+import { eq } from "drizzle-orm";
+import { db } from "../db";
+import * as schema from "../db/schema";
 
 const MAX_CONTEXT_CHARS = 3000;
 
@@ -19,7 +22,7 @@ interface SectionConfig {
 // Priority order: user profile data first, then relationships, then knowledge.
 // Journal is excluded — it's too verbose for context injection.
 const SECTIONS: SectionConfig[] = [
-  { section: "user", files: ["facts", "preferences", "goals", "current-focus"], label: "About the user" },
+  { section: "user", files: ["facts", "preferences", "current-focus"], label: "About the user" },
   { section: "relationships", files: [], label: "People" },
   { section: "knowledge", files: [], label: "Knowledge" },
 ];
@@ -104,6 +107,32 @@ export async function loadMemoryContext(userId: number): Promise<string> {
       parts.push(`## ${label}\n${trimmed}`);
       totalChars += trimmed.length;
     }
+  }
+
+  // Inject tasks from DB
+  try {
+    const taskRows = await db
+      .select()
+      .from(schema.tasks)
+      .where(eq(schema.tasks.userId, userId));
+
+    if (taskRows.length > 0) {
+      const openTasks = taskRows.filter((t) => !t.done);
+      const doneTasks = taskRows.filter((t) => t.done);
+      const taskLines: string[] = [];
+      for (const t of openTasks) {
+        const extra = t.dueDate ? ` (due: ${t.dueDate})` : "";
+        taskLines.push(`- [ ] ${t.text}${extra}`);
+      }
+      for (const t of doneTasks.slice(-3)) {
+        taskLines.push(`- [x] ${t.text}`);
+      }
+      if (taskLines.length > 0) {
+        parts.push(`## Tasks\n${taskLines.join("\n")}`);
+      }
+    }
+  } catch {
+    // tasks table might not exist yet
   }
 
   if (parts.length === 0) return "";

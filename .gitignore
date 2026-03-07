@@ -2,3 +2,6 @@ node_modules
 dist
 *.db
 .turbo
+.env
+.env.*
+!.env.example

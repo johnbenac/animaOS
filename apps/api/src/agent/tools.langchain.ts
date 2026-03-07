@@ -6,6 +6,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
+import { syncReminderJobsForTask } from "../cron/task-reminders";
 
 import {
   writeMemory,
@@ -78,58 +79,6 @@ function parseMemoryPath(file: string): {
   return { section, filename };
 }
 
-interface ParsedTask {
-  id: number;
-  text: string;
-  done: boolean;
-  lineIndex: number;
-  indent: string;
-}
-
-function parseTasksFromGoals(content: string): ParsedTask[] {
-  const lines = content.split(/\r?\n/);
-  const tasks: ParsedTask[] = [];
-
-  lines.forEach((line, lineIndex) => {
-    const checklist = line.match(/^(\s*)- \[( |x|X)\]\s+(.+)$/);
-    if (checklist) {
-      tasks.push({
-        id: tasks.length + 1,
-        text: checklist[3].trim(),
-        done: checklist[2].toLowerCase() === "x",
-        lineIndex,
-        indent: checklist[1] || "",
-      });
-      return;
-    }
-
-    const bullet = line.match(/^(\s*)- (.+)$/);
-    if (bullet) {
-      tasks.push({
-        id: tasks.length + 1,
-        text: bullet[2].trim(),
-        done: false,
-        lineIndex,
-        indent: bullet[1] || "",
-      });
-    }
-  });
-
-  return tasks;
-}
-
-async function loadGoalsFile(userId: number) {
-  const existing = await readMemory("user", userId, "goals").catch(() => null);
-  return existing;
-}
-
-async function saveGoalsFile(userId: number, content: string) {
-  await writeMemory("user", userId, "goals", content, {
-    category: "goal",
-    tags: ["goal", "task"],
-    source: "conversation",
-  });
-}
 
 function parseCurrentFocus(content: string): string {
   for (const rawLine of content.split(/\r?\n/)) {
@@ -158,17 +107,142 @@ function renderCurrentFocus(focus: string, note?: string): string {
   return lines.join("\n");
 }
 
+/**
+ * Fallback: extract a due date/time from task text when the LLM forgets to set dueDate.
+ * Handles patterns like "at 5:30 pm", "at 9pm", "at 17:00" combined with "today"/"tomorrow".
+ */
+/** Format a Date as local ISO without timezone offset issues */
+function formatLocalISO(date: Date): string {
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
+}
+
+/**
+ * Fallback: extract a due date/time from task text when the LLM forgets to set dueDate.
+ * Handles patterns like "at 5:30 pm", "in 2 hours", "tonight", "next Monday", "March 10", etc.
+ */
+function extractDueDateFromText(text: string): string | null {
+  const lower = text.toLowerCase();
+  const now = new Date();
+  const date = new Date(now);
+
+  // --- "in X hours/minutes" ---
+  const relativeMatch = lower.match(/in\s+(\d+)\s*(hours?|hrs?|minutes?|mins?)/);
+  if (relativeMatch) {
+    const amount = parseInt(relativeMatch[1], 10);
+    const unit = relativeMatch[2];
+    if (unit.startsWith("h")) {
+      date.setTime(date.getTime() + amount * 60 * 60_000);
+    } else {
+      date.setTime(date.getTime() + amount * 60_000);
+    }
+    return formatLocalISO(date);
+  }
+
+  // --- "tonight" / "this evening" ---
+  if (lower.includes("tonight") || lower.includes("this evening")) {
+    date.setHours(20, 0, 0, 0);
+    if (date.getTime() <= now.getTime()) {
+      date.setDate(date.getDate() + 1);
+    }
+    return formatLocalISO(date);
+  }
+
+  // --- "next week" ---
+  if (/\bnext\s+week\b/.test(lower)) {
+    const daysUntilMonday = ((1 - now.getDay()) + 7) % 7 || 7;
+    date.setDate(date.getDate() + daysUntilMonday);
+    date.setHours(9, 0, 0, 0);
+    return formatLocalISO(date);
+  }
+
+  // --- "next Monday" / day-of-week ---
+  const dayNames = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const dayMatch = lower.match(/(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/);
+  if (dayMatch) {
+    const targetDay = dayNames.indexOf(dayMatch[1]);
+    if (targetDay !== -1) {
+      let daysAhead = (targetDay - now.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7; // "next X" means next occurrence
+      date.setDate(date.getDate() + daysAhead);
+      date.setHours(9, 0, 0, 0);
+      return formatLocalISO(date);
+    }
+  }
+
+  // --- "March 10" / "March 10th" ---
+  const monthNames = ["january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december"];
+  const monthDayMatch = lower.match(
+    /(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?/,
+  );
+  if (monthDayMatch) {
+    const month = monthNames.indexOf(monthDayMatch[1]);
+    const day = parseInt(monthDayMatch[2], 10);
+    if (month !== -1) {
+      date.setMonth(month, day);
+      date.setHours(9, 0, 0, 0);
+      // If the date already passed this year, assume next year
+      if (date.getTime() < now.getTime()) {
+        date.setFullYear(date.getFullYear() + 1);
+      }
+      return formatLocalISO(date);
+    }
+  }
+
+  // --- "at 5:30 pm", "at 9pm", "at 17:00", "by 3pm" ---
+  const timeMatch = lower.match(
+    /(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i,
+  );
+  if (!timeMatch) return null;
+
+  let hours = parseInt(timeMatch[1], 10);
+  const minutes = parseInt(timeMatch[2] || "0", 10);
+  const ampm = timeMatch[3]?.toLowerCase();
+
+  if (ampm === "pm" && hours < 12) hours += 12;
+  if (ampm === "am" && hours === 12) hours = 0;
+
+  if (lower.includes("tomorrow")) {
+    date.setDate(date.getDate() + 1);
+  }
+
+  date.setHours(hours, minutes, 0, 0);
+
+  // Auto-bump to tomorrow if parsed time already passed today (and no explicit "today")
+  if (date.getTime() <= now.getTime() && !lower.includes("today") && !lower.includes("tomorrow")) {
+    date.setDate(date.getDate() + 1);
+  }
+
+  return formatLocalISO(date);
+}
+
 export function createTools(userId: number) {
   const remember = tool(
     async ({ content, category }) => {
       try {
+        // Goals/tasks should use add_task tool (which has dueDate fallback)
+        if (category.toLowerCase() === "goal" || category.toLowerCase() === "task") {
+          // Store as a memory note instead of creating a task directly
+          await appendMemory("user", userId, "goals", `- ${content}`, {
+            category: "goal",
+            tags: ["goal"],
+            source: "conversation",
+          });
+          return JSON.stringify({
+            status: "stored",
+            content,
+            category: "goal",
+            hint: "If this has a deadline, use add_task tool to create a trackable task with a dueDate.",
+          });
+        }
+
         const section = categoryToSection(category);
 
         // For user-level categories, group into a single file per category
         // For relationships/knowledge, create per-topic files
         let filename: string;
         if (section === "user") {
-          // Append to a category file (e.g., preferences.md, goals.md, facts.md)
           filename = category === "fact" ? "facts" : `${category}s`;
           const entry = `- ${content}`;
           await appendMemory(section, userId, filename, entry, {
@@ -177,7 +251,6 @@ export function createTools(userId: number) {
             source: "conversation",
           });
         } else {
-          // For relationships/knowledge, derive filename from content
           filename = contentToFilename(content, category);
           await appendMemory(section, userId, filename, `- ${content}`, {
             category,
@@ -203,14 +276,14 @@ export function createTools(userId: number) {
     {
       name: "remember",
       description:
-        "Store a piece of information about the user for long-term memory. Use this when the user shares facts, preferences, goals, or important details about themselves. Information is saved to markdown files organized by category.",
+        "Store a piece of information about the user for long-term memory. Use this when the user shares facts, preferences, or important details about themselves. For goals/tasks, use add_task instead. Information is saved to markdown files organized by category.",
       schema: z.object({
         content: z.string().describe("The information to remember"),
         category: z
           .string()
           .min(1)
           .describe(
-            "Memory category. Built-ins: fact, preference, goal, relationship, note. Any custom category is allowed and becomes its own memory section.",
+            "Memory category. Built-ins: fact, preference, relationship, note. For goals/tasks use add_task tool instead. Any custom category is allowed and becomes its own memory section.",
           ),
       }),
     },
@@ -420,139 +493,130 @@ export function createTools(userId: number) {
 
   const listTasks = tool(
     async () => {
-      const goals = await loadGoalsFile(userId);
-      if (!goals) {
-        return JSON.stringify({
-          count: 0,
-          open: 0,
-          completed: 0,
-          tasks: [],
-          message: "No goals/tasks file exists yet.",
-        });
-      }
+      const rows = await db
+        .select()
+        .from(schema.tasks)
+        .where(eq(schema.tasks.userId, userId))
+        .orderBy(schema.tasks.done, schema.tasks.createdAt);
 
-      const tasks = parseTasksFromGoals(goals.content);
-      const open = tasks.filter((t) => !t.done).length;
-      const completed = tasks.filter((t) => t.done).length;
+      const open = rows.filter((t) => !t.done).length;
+      const completed = rows.filter((t) => t.done).length;
 
       return JSON.stringify({
-        count: tasks.length,
+        count: rows.length,
         open,
         completed,
-        tasks: tasks.map((task) => ({
-          id: task.id,
-          text: task.text,
-          done: task.done,
+        tasks: rows.map((t) => ({
+          id: t.id,
+          text: t.text,
+          done: t.done,
+          priority: t.priority,
+          dueDate: t.dueDate,
         })),
       });
     },
     {
       name: "list_tasks",
       description:
-        "List user tasks from user/goals memory file. Returns task ids and completion status.",
+        "List all user tasks. Returns task ids, text, completion status, priority, and due dates.",
       schema: z.object({}),
     },
   );
 
   const addTask = tool(
-    async ({ task }) => {
+    async ({ task, priority, dueDate }) => {
       const text = task.trim();
       if (!text) {
         return JSON.stringify({ status: "error", error: "Task text is required" });
       }
 
-      const goals = await loadGoalsFile(userId);
-      let content = goals?.content ?? "";
-
-      if (!content.trim()) {
-        content = `# User Goals\n\n- [ ] ${text}`;
-      } else {
-        const lines = content.split(/\r?\n/);
-        if (lines[lines.length - 1]?.trim() !== "") {
-          lines.push("");
-        }
-        lines.push(`- [ ] ${text}`);
-        content = lines.join("\n");
+      // Fallback: if no dueDate provided, try to extract time from task text
+      let resolvedDueDate = dueDate ?? null;
+      if (!resolvedDueDate) {
+        resolvedDueDate = extractDueDateFromText(text);
       }
 
-      await saveGoalsFile(userId, content);
-
-      const tasks = parseTasksFromGoals(content);
-      const added = tasks[tasks.length - 1];
+      const [created] = await db
+        .insert(schema.tasks)
+        .values({
+          userId,
+          text,
+          priority: priority ?? 0,
+          dueDate: resolvedDueDate,
+        })
+        .returning();
+      await syncReminderJobsForTask(created);
 
       return JSON.stringify({
         status: "added",
         task: {
-          id: added?.id,
-          text,
+          id: created.id,
+          text: created.text,
           done: false,
+          priority: created.priority,
+          dueDate: created.dueDate,
         },
       });
     },
     {
       name: "add_task",
       description:
-        "Add a new open task to user/goals memory file as a checklist item.",
+        "Add a new task for the user. MUST set dueDate whenever user mentions ANY time, deadline, or schedule (e.g. 'at 5pm', 'tomorrow', 'next week', 'in 2 hours'). Call get_current_time first to know the current date/time, then calculate the ISO datetime (YYYY-MM-DDTHH:mm:ss).",
       schema: z.object({
         task: z.string().min(1).describe("Task text to add"),
+        priority: z.number().int().min(0).max(2).optional().describe("Priority: 0=normal, 1=high, 2=urgent"),
+        dueDate: z.string().optional().describe("Due date/time in ISO format (YYYY-MM-DDTHH:mm:ss). REQUIRED when user mentions any time or deadline."),
       }),
     },
   );
 
   const completeTask = tool(
     async ({ id, task }) => {
-      const goals = await loadGoalsFile(userId);
-      if (!goals) {
-        return JSON.stringify({
-          status: "error",
-          error: "No goals/tasks file found",
-        });
-      }
-
-      const lines = goals.content.split(/\r?\n/);
-      const tasks = parseTasksFromGoals(goals.content);
-
-      if (tasks.length === 0) {
-        return JSON.stringify({
-          status: "error",
-          error: "No tasks available to complete",
-        });
-      }
-
-      let target: ParsedTask | undefined;
+      let targetId: number | undefined;
 
       if (typeof id === "number") {
-        target = tasks.find((t) => t.id === id);
+        targetId = id;
       } else if (typeof task === "string" && task.trim()) {
+        // Find by text match
+        const rows = await db
+          .select()
+          .from(schema.tasks)
+          .where(eq(schema.tasks.userId, userId));
         const needle = task.trim().toLowerCase();
-        target =
-          tasks.find((t) => t.text.toLowerCase() === needle) ||
-          tasks.find((t) => t.text.toLowerCase().includes(needle));
+        const match =
+          rows.find((t) => t.text.toLowerCase() === needle) ||
+          rows.find((t) => t.text.toLowerCase().includes(needle));
+        targetId = match?.id;
       }
 
-      if (!target) {
-        return JSON.stringify({
-          status: "error",
-          error: "Task not found",
-        });
+      if (!targetId) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
       }
 
-      lines[target.lineIndex] = `${target.indent}- [x] ${target.text}`;
-      const updatedContent = lines.join("\n");
-      await saveGoalsFile(userId, updatedContent);
+      const [updated] = await db
+        .update(schema.tasks)
+        .set({
+          done: true,
+          completedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.tasks.id, targetId))
+        .returning();
+
+      if (!updated) {
+        return JSON.stringify({ status: "error", error: "Task not found" });
+      }
+      await syncReminderJobsForTask(updated);
 
       return JSON.stringify({
         status: "completed",
-        task: {
-          id: target.id,
-          text: target.text,
-        },
+        task: { id: updated.id, text: updated.text },
       });
     },
     {
       name: "complete_task",
       description:
-        "Mark a task as completed in user/goals memory. Provide either task id or task text.",
+        "Mark a task as completed. Provide either the task id or task text to match.",
       schema: z
         .object({
           id: z.number().int().positive().optional(),
