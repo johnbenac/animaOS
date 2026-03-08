@@ -73,6 +73,18 @@ mock.module("../../db", () => ({
 
 mock.module("../../memory", () => ({
   readMemory: readMemoryMock,
+  writeMemory: mock(async () => ({})),
+  appendMemory: mock(async () => ({})),
+  deleteMemory: mock(async () => true),
+  searchMemories: mock(async () => []),
+  listMemories: mock(async () => []),
+  listAllMemories: mock(async () => []),
+  listSections: mock(async () => []),
+  writeJournalEntry: mock(async () => ({})),
+  loadFullMemoryContext: mock(async () => ""),
+  readMemoryByPath: mock(async () => ({ meta: {}, content: "", path: "" })),
+  MEMORY_ROOT: "",
+  SECTIONS: ["user", "knowledge", "relationships", "journal"],
 }));
 
 mock.module("../models", () => ({
