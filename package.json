@@ -2,16 +2,20 @@
   "name": "anima",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "turbo dev",
-    "build": "turbo build",
-    "lint": "turbo lint",
-    "db:push": "pnpm --filter api db:push",
-    "db:studio": "pnpm --filter api db:studio"
+    "dev": "bun --filter '*' dev",
+    "dev:api": "bun --filter api dev",
+    "dev:desktop": "bun --filter desktop dev",
+    "build": "bun --filter '*' build",
+    "lint": "bun --filter '*' lint",
+    "db:push": "bun --filter api db:push",
+    "db:studio": "bun --filter api db:studio"
   },
   "devDependencies": {
-    "turbo": "^2.0.0",
     "typescript": "^5.3.3"
   }
 }
