@@ -23,6 +23,9 @@ import {
   writeJournalEntry,
   type MemorySection,
 } from "../memory";
+import { getActionContracts } from "./capabilities/contracts";
+import { defineCapability } from "./capabilities/registry";
+import { defaultCapabilityRuntime } from "./capabilities/runtime";
 
 // Each tool receives userId via closure when created.
 // This keeps the LangChain tool interface clean (no userId param exposed to the LLM).
@@ -1043,26 +1046,59 @@ export function createTools(userId: number) {
     },
   );
 
-  return [
-    remember,
-    recall,
-    readMemoryFile,
-    writeMemoryFile,
-    appendMemoryFile,
-    getProfile,
-    browseMemories,
-    journal,
-    listTasks,
-    addTask,
-    completeTask,
-    updateTask,
-    deleteTask,
-    getCurrentFocus,
-    setCurrentFocus,
-    clearCurrentFocus,
-    getWeather,
-    getCurrentTime,
-  ];
+  const memoryCoreCapability = defineCapability({
+    id: "memory-core",
+    summary: "Core memory CRUD and semantic retrieval.",
+    actions: getActionContracts("memory-core"),
+    tools: [remember, recall, readMemoryFile, writeMemoryFile, appendMemoryFile],
+  });
+
+  const profileCapability = defineCapability({
+    id: "profile",
+    summary: "User profile lookup.",
+    actions: getActionContracts("profile"),
+    tools: [getProfile],
+  });
+
+  const memoryOpsCapability = defineCapability({
+    id: "memory-ops",
+    summary: "Memory browsing and journal capture.",
+    actions: getActionContracts("memory-ops"),
+    tools: [browseMemories, journal],
+  });
+
+  const tasksCapability = defineCapability({
+    id: "tasks",
+    summary: "Task CRUD operations with reminder synchronization.",
+    actions: getActionContracts("tasks"),
+    tools: [listTasks, addTask, completeTask, updateTask, deleteTask],
+  });
+
+  const focusCapability = defineCapability({
+    id: "focus",
+    summary: "Current focus state management.",
+    actions: getActionContracts("focus"),
+    tools: [getCurrentFocus, setCurrentFocus, clearCurrentFocus],
+  });
+
+  const environmentCapability = defineCapability({
+    id: "environment",
+    summary: "Runtime context helpers for weather and time.",
+    actions: getActionContracts("environment"),
+    tools: [getWeather, getCurrentTime],
+  });
+
+  return defaultCapabilityRuntime.buildToolset(
+    { userId },
+    [
+      memoryCoreCapability,
+      profileCapability,
+      memoryOpsCapability,
+      tasksCapability,
+      focusCapability,
+      environmentCapability,
+    ],
+  );
 }
 
 // WMO weather codes → readable text
