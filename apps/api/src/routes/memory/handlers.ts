@@ -1,6 +1,6 @@
-// Memory routes — browse, read, write, and delete memory files via REST API
+// Memory route handlers
 
-import { Hono } from "hono";
+import type { Context } from "hono";
 import {
   listAllMemories,
   listMemories,
@@ -11,14 +11,11 @@ import {
   searchMemories,
   writeJournalEntry,
   type MemorySection,
-} from "../memory";
+} from "../../memory";
 
-const memory = new Hono();
-
-// --- List all memories for a user (or filter by section) ---
-// GET /api/memory/:userId?section=user
-memory.get("/:userId", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// GET /memory/:userId
+export async function listUserMemories(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const section = c.req.query("section") as MemorySection | undefined;
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
@@ -28,12 +25,11 @@ memory.get("/:userId", async (c) => {
     : await listAllMemories(userId);
 
   return c.json({ count: entries.length, memories: entries });
-});
+}
 
-// --- Search memories ---
-// GET /api/memory/:userId/search?q=query
-memory.get("/:userId/search", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// GET /memory/:userId/search
+export async function searchUserMemories(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const query = c.req.query("q") || "";
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
@@ -41,14 +37,13 @@ memory.get("/:userId/search", async (c) => {
 
   const results = await searchMemories(userId, query);
   return c.json({ count: results.length, results });
-});
+}
 
-// --- Read a specific memory file ---
-// GET /api/memory/:userId/:section/:filename
-memory.get("/:userId/:section/:filename", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// GET /memory/:userId/:section/:filename
+export async function readUserMemory(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const section = c.req.param("section") as MemorySection;
-  const filename = c.req.param("filename");
+  const filename = c.req.param("filename") || "";
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
 
@@ -58,15 +53,13 @@ memory.get("/:userId/:section/:filename", async (c) => {
   } catch {
     return c.json({ error: "Memory file not found" }, 404);
   }
-});
+}
 
-// --- Write/overwrite a memory file ---
-// PUT /api/memory/:userId/:section/:filename
-// Body: { content: string, tags?: string[] }
-memory.put("/:userId/:section/:filename", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// PUT /memory/:userId/:section/:filename
+export async function writeUserMemory(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const section = c.req.param("section") as MemorySection;
-  const filename = c.req.param("filename");
+  const filename = c.req.param("filename") || "";
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
 
@@ -80,15 +73,13 @@ memory.put("/:userId/:section/:filename", async (c) => {
   });
 
   return c.json(file);
-});
+}
 
-// --- Append to a memory file ---
-// POST /api/memory/:userId/:section/:filename
-// Body: { content: string }
-memory.post("/:userId/:section/:filename", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// POST /memory/:userId/:section/:filename
+export async function appendUserMemory(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const section = c.req.param("section") as MemorySection;
-  const filename = c.req.param("filename");
+  const filename = c.req.param("filename") || "";
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
 
@@ -101,26 +92,23 @@ memory.post("/:userId/:section/:filename", async (c) => {
   });
 
   return c.json(file);
-});
+}
 
-// --- Delete a memory file ---
-// DELETE /api/memory/:userId/:section/:filename
-memory.delete("/:userId/:section/:filename", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// DELETE /memory/:userId/:section/:filename
+export async function deleteUserMemory(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
   const section = c.req.param("section") as MemorySection;
-  const filename = c.req.param("filename");
+  const filename = c.req.param("filename") || "";
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
 
   const deleted = await deleteMemory(section, userId, filename);
   return c.json({ deleted });
-});
+}
 
-// --- Write journal entry ---
-// POST /api/memory/:userId/journal
-// Body: { entry: string, date?: string }
-memory.post("/:userId/journal", async (c) => {
-  const userId = parseInt(c.req.param("userId"));
+// POST /memory/:userId/journal
+export async function writeJournal(c: Context) {
+  const userId = parseInt(c.req.param("userId") || "");
 
   if (isNaN(userId)) return c.json({ error: "Invalid userId" }, 400);
 
@@ -129,6 +117,4 @@ memory.post("/:userId/journal", async (c) => {
 
   const file = await writeJournalEntry(userId, body.entry, body.date);
   return c.json(file);
-});
-
-export default memory;
+}

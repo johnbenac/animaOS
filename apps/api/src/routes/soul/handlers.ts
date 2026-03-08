@@ -1,13 +1,9 @@
-// Soul routes — read and update ANIMA's soul definition (soul/soul.md)
+// Soul route handlers
 
-import { Hono } from "hono";
-import { zValidator } from "@hono/zod-validator";
-import { z } from "zod";
+import type { Context } from "hono";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { invalidateSoulCache } from "../agent/graph";
-
-const soul = new Hono();
+import { invalidateSoulCache } from "../../agent/graph";
 
 function getSoulPath(): string {
   if (process.env.ANIMA_SOUL_PATH) return process.env.ANIMA_SOUL_PATH;
@@ -29,8 +25,8 @@ function getSoulPath(): string {
   return resolve(process.cwd(), "../../soul/soul.md");
 }
 
-// GET /soul — read the soul definition
-soul.get("/", (c) => {
+// GET /soul
+export function getSoul(c: Context) {
   const path = getSoulPath();
 
   try {
@@ -39,29 +35,18 @@ soul.get("/", (c) => {
   } catch {
     return c.json({ content: "", path }, 200);
   }
-});
+}
 
-// PUT /soul — update the soul definition
-soul.put(
-  "/",
-  zValidator(
-    "json",
-    z.object({
-      content: z.string().min(1),
-    }),
-  ),
-  (c) => {
-    const { content } = c.req.valid("json");
-    const path = getSoulPath();
+// PUT /soul
+export function updateSoul(c: Context) {
+  const { content } = c.req.valid("json" as never);
+  const path = getSoulPath();
 
-    try {
-      writeFileSync(path, content, "utf-8");
-      invalidateSoulCache();
-      return c.json({ status: "saved", path });
-    } catch (err: any) {
-      return c.json({ error: err.message }, 500);
-    }
-  },
-);
-
-export default soul;
+  try {
+    writeFileSync(path, content, "utf-8");
+    invalidateSoulCache();
+    return c.json({ status: "saved", path });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+}

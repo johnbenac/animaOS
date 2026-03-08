@@ -1,8 +1,10 @@
-import { Hono } from "hono";
+// Telegram route handlers
+
+import type { Context } from "hono";
 import { eq, or } from "drizzle-orm";
-import { db } from "../db";
-import * as schema from "../db/schema";
-import { runAgent } from "../agent";
+import { db } from "../../db";
+import * as schema from "../../db/schema";
+import { runAgent } from "../../agent";
 
 interface TelegramMessage {
   chat?: { id?: number };
@@ -12,8 +14,6 @@ interface TelegramMessage {
 interface TelegramUpdate {
   message?: TelegramMessage;
 }
-
-const telegram = new Hono();
 
 function getTelegramConfig() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -34,14 +34,17 @@ async function sendTelegramMessage(
   }
 
   for (const chunk of chunks) {
-    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: chunk || "[empty response]",
-      }),
-    });
+    const res = await fetch(
+      `https://api.telegram.org/bot${token}/sendMessage`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: chunk || "[empty response]",
+        }),
+      },
+    );
 
     if (!res.ok) {
       const body = await res.text();
@@ -135,7 +138,8 @@ async function handleChatMessage(token: string, chatId: number, text: string) {
   await sendTelegramMessage(token, chatId, result.response);
 }
 
-telegram.post("/webhook", async (c) => {
+// POST /telegram/webhook
+export async function webhook(c: Context) {
   const { token, webhookSecret, linkSecret } = getTelegramConfig();
 
   if (!token) {
@@ -150,7 +154,9 @@ telegram.post("/webhook", async (c) => {
     }
   }
 
-  const update = (await c.req.json().catch(() => null)) as TelegramUpdate | null;
+  const update = (await c.req
+    .json()
+    .catch(() => null)) as TelegramUpdate | null;
   if (!update?.message?.chat?.id) {
     return c.json({ ok: true });
   }
@@ -200,6 +206,4 @@ telegram.post("/webhook", async (c) => {
   });
 
   return c.json({ ok: true });
-});
-
-export default telegram;
+}

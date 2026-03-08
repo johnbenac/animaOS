@@ -1,17 +1,13 @@
-import { Hono } from "hono";
+// Auth route handlers
+
+import type { Context } from "hono";
 import { eq } from "drizzle-orm";
-import { db } from "../db";
-import { users } from "../db/schema";
+import { db } from "../../db";
+import { users } from "../../db/schema";
 
-const app = new Hono();
-
-// Register
-app.post("/register", async (c) => {
-  const { username, password, name } = await c.req.json();
-
-  if (!username || !password || !name) {
-    return c.json({ error: "username, password, and name are required" }, 400);
-  }
+// POST /auth/register
+export async function register(c: Context) {
+  const { username, password, name } = c.req.valid("json" as never);
 
   // Check if username already exists
   const [existing] = await db
@@ -35,15 +31,11 @@ app.post("/register", async (c) => {
     });
 
   return c.json(user, 201);
-});
+}
 
-// Login
-app.post("/login", async (c) => {
-  const { username, password } = await c.req.json();
-
-  if (!username || !password) {
-    return c.json({ error: "username and password are required" }, 400);
-  }
+// POST /auth/login
+export async function login(c: Context) {
+  const { username, password } = c.req.valid("json" as never);
 
   const [user] = await db
     .select()
@@ -65,6 +57,4 @@ app.post("/login", async (c) => {
     name: user.name,
     message: "Login successful",
   });
-});
-
-export default app;
+}
