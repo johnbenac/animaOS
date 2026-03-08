@@ -8,34 +8,7 @@ import {
   cancelReminderJobsForTask,
   syncReminderJobsForTask,
 } from "../../cron/task-reminders";
-import * as chrono from "chrono-node";
-
-/** Validate an ISO datetime string, or try chrono-node NLP parsing. Returns ISO or null. */
-function resolveDueDate(value: string | undefined | null): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  // Try strict ISO first (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)
-  if (/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(trimmed)) {
-    const d = new Date(trimmed.length === 10 ? `${trimmed}T00:00:00` : trimmed);
-    if (!Number.isNaN(d.getTime())) return formatISO(d);
-  }
-
-  // Fall back to chrono-node NLP parsing
-  const results = chrono.parse(trimmed, { instant: new Date() });
-  if (results.length > 0) {
-    const parsed = results[0].start.date();
-    if (!Number.isNaN(parsed.getTime())) return formatISO(parsed);
-  }
-
-  return null;
-}
-
-function formatISO(d: Date): string {
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
+import { resolveDueDate } from "../../lib/task-date";
 
 // GET /tasks
 export async function listTasks(c: Context) {

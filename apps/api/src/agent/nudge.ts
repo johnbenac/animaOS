@@ -5,6 +5,7 @@ import { eq, desc, and } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { readMemory, listMemories } from "../memory";
+import { isTaskOverdue } from "../lib/task-date";
 
 export interface Nudge {
   type: "stale_focus" | "overdue_tasks" | "journal_gap" | "long_absence";
@@ -56,9 +57,7 @@ async function checkOverdueTasks(userId: number): Promise<Nudge | null> {
       .from(schema.tasks)
       .where(and(eq(schema.tasks.userId, userId), eq(schema.tasks.done, false)));
 
-    // Check for actually overdue tasks (dueDate < now)
-    const nowISO = new Date().toISOString();
-    const overdue = openTasks.filter((t) => t.dueDate && t.dueDate < nowISO);
+    const overdue = openTasks.filter((t) => isTaskOverdue(t.dueDate));
 
     if (overdue.length > 0) {
       const names = overdue.slice(0, 3).map((t) => `"${t.text}"`).join(", ");

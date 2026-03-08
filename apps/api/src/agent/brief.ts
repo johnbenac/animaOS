@@ -1,28 +1,19 @@
 // Daily brief generator — produces a short briefing from memory context.
-// Called on dashboard load to give ANIMA a proactive voice.
 
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
-import { eq, desc } from "drizzle-orm";
+import { and, eq, desc } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { createModel } from "./models";
 import { readMemory } from "../memory";
 import { getAgentConfig } from "./config";
-import { getSoulPrompt } from "./prompt";
-
-const BRIEF_TASK = `Your task right now: generate a brief daily greeting for the user based on the context below.
-
-Rules:
-- Keep it to 2-4 short sentences maximum
-- Reference specific things from the context if relevant (current focus, open tasks, recent activity)
-- If there's nothing notable, a simple quiet greeting is fine
-- Do NOT list out all the context — just weave in what matters
-- Do NOT use bullet points or markdown formatting
-- Sound like a person, not a report`;
+import { getSoulPrompt, renderPromptTemplate } from "./prompt";
+import { isTaskOpen } from "../lib/task-date";
 
 function buildBriefPrompt(): string {
-  const soul = getSoulPrompt();
-  return `${soul}\n\n---\n\n${BRIEF_TASK}`;
+  return renderPromptTemplate("brief-system", {
+    soul_prompt: getSoulPrompt(),
+  });
 }
 
 interface BriefContext {
@@ -33,59 +24,76 @@ interface BriefContext {
   factsSnippet: string | null;
 }
 
-async function gatherBriefContext(userId: number): Promise<BriefContext> {
-  // Current focus
-  let currentFocus: string | null = null;
+function toLocalDateKey(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function logBriefContextError(scope: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  console.debug(`[brief] Context load failed (${scope}): ${message}`);
+}
+
+async function loadCurrentFocus(userId: number): Promise<string | null> {
   try {
     const focus = await readMemory("user", userId, "current-focus");
     const line = focus.content
       .split("\n")
       .find((l) => l.trim().match(/^- \[[ xX]\]\s+/));
-    if (line) {
-      currentFocus = line.replace(/^- \[[ xX]\]\s+/, "").trim();
-    }
-  } catch {
-    // No focus set
+    if (!line) return null;
+    return line.replace(/^- \[[ xX]\]\s+/, "").trim();
+  } catch (err) {
+    logBriefContextError("focus", err);
+    return null;
   }
+}
 
-  // Open tasks from DB
-  const openTasks: string[] = [];
+async function loadOpenTasks(userId: number): Promise<string[]> {
   try {
     const rows = await db
-      .select({ text: schema.tasks.text })
+      .select({
+        text: schema.tasks.text,
+        done: schema.tasks.done,
+        dueDate: schema.tasks.dueDate,
+      })
       .from(schema.tasks)
       .where(eq(schema.tasks.userId, userId));
-    for (const r of rows) openTasks.push(r.text);
-  } catch {
-    // Tasks table might not exist yet
-  }
 
-  // Recent chat topics (last 6 user messages)
-  const recentTopics: string[] = [];
+    return rows.filter((r) => isTaskOpen(r.done, r.dueDate)).map((r) => r.text);
+  } catch (err) {
+    logBriefContextError("tasks", err);
+    return [];
+  }
+}
+
+async function loadRecentTopics(userId: number): Promise<string[]> {
   try {
     const rows = await db
       .select({ content: schema.messages.content })
       .from(schema.messages)
-      .where(eq(schema.messages.userId, userId))
+      .where(
+        and(
+          eq(schema.messages.userId, userId),
+          eq(schema.messages.role, "user"),
+        ),
+      )
       .orderBy(desc(schema.messages.id))
       .limit(12);
 
-    const userMsgs = rows
+    return rows
       .reverse()
-      .filter((r) => true) // all messages for topic extraction
-      .slice(-6);
-
-    for (const msg of userMsgs) {
-      if (msg.content.length > 10 && msg.content.length < 200) {
-        recentTopics.push(msg.content.slice(0, 100));
-      }
-    }
-  } catch {
-    // No history
+      .slice(-6)
+      .filter((r) => r.content.length > 10 && r.content.length < 200)
+      .map((r) => r.content.slice(0, 100));
+  } catch (err) {
+    logBriefContextError("recent-topics", err);
+    return [];
   }
+}
 
-  // Days since last chat
-  let daysSinceLastChat: number | null = null;
+async function loadDaysSinceLastChat(userId: number): Promise<number | null> {
   try {
     const [lastMsg] = await db
       .select({ createdAt: schema.messages.createdAt })
@@ -94,25 +102,42 @@ async function gatherBriefContext(userId: number): Promise<BriefContext> {
       .orderBy(desc(schema.messages.id))
       .limit(1);
 
-    if (lastMsg?.createdAt) {
-      const lastDate = new Date(lastMsg.createdAt);
-      const now = new Date();
-      daysSinceLastChat = Math.floor(
-        (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24),
-      );
-    }
-  } catch {
-    // No messages
+    if (!lastMsg?.createdAt) return null;
+    const lastDate = new Date(lastMsg.createdAt);
+    const now = new Date();
+    return Math.floor(
+      (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24),
+    );
+  } catch (err) {
+    logBriefContextError("last-chat", err);
+    return null;
   }
+}
 
-  // Facts snippet
-  let factsSnippet: string | null = null;
+async function loadFactsSnippet(userId: number): Promise<string | null> {
   try {
     const facts = await readMemory("user", userId, "facts");
-    factsSnippet = facts.content.trim().slice(0, 300);
-  } catch {
-    // No facts
+    return facts.content.trim().slice(0, 300);
+  } catch (err) {
+    logBriefContextError("facts", err);
+    return null;
   }
+}
+
+async function gatherBriefContext(userId: number): Promise<BriefContext> {
+  const [
+    currentFocus,
+    openTasks,
+    recentTopics,
+    daysSinceLastChat,
+    factsSnippet,
+  ] = await Promise.all([
+    loadCurrentFocus(userId),
+    loadOpenTasks(userId),
+    loadRecentTopics(userId),
+    loadDaysSinceLastChat(userId),
+    loadFactsSnippet(userId),
+  ]);
 
   return {
     currentFocus,
@@ -136,7 +161,7 @@ export interface DailyBrief {
 const briefCache = new Map<string, { brief: DailyBrief; timestamp: number }>();
 
 function cacheKey(userId: number): string {
-  const date = new Date().toISOString().slice(0, 10);
+  const date = toLocalDateKey();
   return `${userId}:${date}`;
 }
 

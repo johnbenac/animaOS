@@ -12,6 +12,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import { redisConnection } from "../lib/redis";
+import { parseDueDateDeadline } from "../lib/task-date";
 
 const QUEUE_NAME = "task-reminders";
 const FOLLOWUP_WINDOW_MINUTES = 24 * 60;
@@ -47,15 +48,6 @@ const reminderQueue = new Queue<ReminderJobData>(QUEUE_NAME, {
 });
 
 // --- Helpers ---
-
-function parseDueDate(dueDate: string): Date | null {
-  const value = dueDate.trim();
-  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
-    ? `${value}T00:00:00`
-    : value;
-  const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
 
 function jobId(taskId: number, phase: string): string {
   return `task-${taskId}-${phase}`;
@@ -123,7 +115,7 @@ async function processReminder(job: Job<ReminderJobData>): Promise<void> {
   if (task.done) return; // task completed — skip silently
   if (!task.dueDate) return;
 
-  const due = parseDueDate(task.dueDate);
+  const due = parseDueDateDeadline(task.dueDate);
   if (!due) throw new Error(`Invalid due date: ${task.dueDate}`);
 
   const nowMs = Date.now();
@@ -186,7 +178,7 @@ export async function syncReminderJobsForTask(
     return;
   }
 
-  const due = parseDueDate(task.dueDate);
+  const due = parseDueDateDeadline(task.dueDate);
   if (!due) {
     await cancelReminderJobsForTask(task.id);
     return;
