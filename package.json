@@ -12,6 +12,8 @@
     "dev:desktop": "bun --filter desktop dev",
     "build": "bun --filter '*' build",
     "lint": "bun --filter '*' lint",
+    "data:nuke": "bash ./scripts/nuke-dev-data.sh --yes",
+    "data:nuke:reinit": "bash ./scripts/nuke-dev-data.sh --yes --migrate",
     "db:push": "bun --filter api db:push",
     "db:studio": "bun --filter api db:studio"
   },
