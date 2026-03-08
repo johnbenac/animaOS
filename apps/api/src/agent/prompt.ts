@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { DEFAULT_SOUL_PATH, PROMPTS_DIR, SOUL_PATH } from "../lib/runtime-paths";
 
 function readPromptFile(path: string): string | null {
   try {
@@ -11,56 +12,22 @@ function readPromptFile(path: string): string | null {
 }
 
 function resolvePromptTemplatePath(name: string): string[] {
-  const explicitPromptsDir = process.env.ANIMA_PROMPTS_DIR;
   const filename = name.endsWith(".md") || name.endsWith(".txt")
     ? name
     : `${name}.md`;
 
-  if (explicitPromptsDir) {
-    return [resolve(explicitPromptsDir, filename)];
-  }
-
-  return [
-    resolve(process.cwd(), "prompts", filename),
-    resolve(process.cwd(), "apps", "api", "prompts", filename),
-    resolve(process.cwd(), "../../apps/api/prompts", filename),
-  ];
+  return [resolve(PROMPTS_DIR, filename)];
 }
 
 function loadSoulPrompt(): string {
-  const explicitSoulPath = process.env.ANIMA_SOUL_PATH;
-  if (explicitSoulPath) {
-    const prompt = readPromptFile(explicitSoulPath);
-    if (prompt) return prompt;
-  }
-
-  const explicitSoulDir = process.env.ANIMA_SOUL_DIR;
-  const soulCandidates = explicitSoulDir
-    ? [resolve(explicitSoulDir, "soul.md")]
-    : [
-        resolve(process.cwd(), "soul", "soul.md"),
-        resolve(process.cwd(), "../../soul/soul.md"),
-      ];
-
+  const soulCandidates = DEFAULT_SOUL_PATH ? [SOUL_PATH, DEFAULT_SOUL_PATH] : [SOUL_PATH];
   for (const path of soulCandidates) {
     const prompt = readPromptFile(path);
     if (prompt) return prompt;
   }
 
-  const factoryCandidates = explicitSoulDir
-    ? [resolve(explicitSoulDir, "factory.md")]
-    : [
-        resolve(process.cwd(), "soul", "factory.md"),
-        resolve(process.cwd(), "../../soul/factory.md"),
-      ];
-
-  for (const path of factoryCandidates) {
-    const prompt = readPromptFile(path);
-    if (prompt) return prompt;
-  }
-
   throw new Error(
-    "No prompt file found. Expected soul.md, or fallback factory.md.",
+    `No soul prompt found. Checked: ${soulCandidates.join(", ")}`,
   );
 }
 

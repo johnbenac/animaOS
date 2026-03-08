@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
+import { apiUrl } from "../lib/runtime";
 
 interface MemoryEntry {
   path: string;
@@ -60,8 +61,10 @@ export default function Memory() {
     try {
       const url =
         section === "all"
-          ? `http://localhost:3031/api/memory/${user.id}`
-          : `http://localhost:3031/api/memory/${user.id}?section=${encodeURIComponent(section)}`;
+          ? apiUrl(`/memory/${user.id}`)
+          : apiUrl(
+              `/memory/${user.id}?section=${encodeURIComponent(section)}`,
+            );
       const res = await fetch(url);
       const data = await res.json();
       setMemories(data.memories || []);
@@ -78,7 +81,7 @@ export default function Memory() {
     try {
       setSearchPerformed(true);
       const res = await fetch(
-        `http://localhost:3031/api/memory/${user.id}/search?q=${encodeURIComponent(searchQuery)}`,
+        apiUrl(`/memory/${user.id}/search?q=${encodeURIComponent(searchQuery)}`),
       );
       const data = await res.json();
       setSearchResults(data.results || []);
@@ -98,7 +101,9 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       const res = await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        apiUrl(
+          `/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        ),
       );
       const data = await res.json();
       setSelectedFile(data);
@@ -132,7 +137,9 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        apiUrl(
+          `/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        ),
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -159,7 +166,9 @@ export default function Memory() {
       const sectionName = parts[0];
       const filename = parts.slice(2).join("/");
       await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        apiUrl(
+          `/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(filename)}`,
+        ),
         { method: "DELETE" },
       );
       setSelectedFile(null);
@@ -208,7 +217,9 @@ export default function Memory() {
         .filter(Boolean);
 
       await fetch(
-        `http://localhost:3031/api/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(newFilename.trim())}`,
+        apiUrl(
+          `/memory/${user.id}/${encodeURIComponent(sectionName)}/${encodeURIComponent(newFilename.trim())}`,
+        ),
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },

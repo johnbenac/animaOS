@@ -1,28 +1,12 @@
 // Soul route handlers
 
 import type { Context } from "hono";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { invalidateSoulCache } from "../../agent/graph";
+import { SOUL_PATH } from "../../lib/runtime-paths";
 
 function getSoulPath(): string {
-  if (process.env.ANIMA_SOUL_PATH) return process.env.ANIMA_SOUL_PATH;
-
-  const dir = process.env.ANIMA_SOUL_DIR;
-  if (dir) return resolve(dir, "soul.md");
-
-  // Try standard locations
-  const candidates = [
-    resolve(process.cwd(), "soul", "soul.md"),
-    resolve(process.cwd(), "../../soul/soul.md"),
-  ];
-
-  for (const path of candidates) {
-    if (existsSync(path)) return path;
-  }
-
-  // Default to project root soul dir
-  return resolve(process.cwd(), "../../soul/soul.md");
+  return SOUL_PATH;
 }
 
 // GET /soul

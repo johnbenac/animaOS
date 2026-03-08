@@ -1,12 +1,13 @@
 // Memory filesystem — reads/writes markdown files with YAML frontmatter
 // as ANIMA's long-term memory store.
 //
-// Memory lives at the project root: /memory/{section}/{userId}/{file}.md
+// Memory lives under ANIMA_DATA_DIR: /memory/{section}/{userId}/{file}.md
 // This module handles all CRUD operations on the filesystem.
 
 import { readdir, readFile, writeFile, mkdir, unlink, stat } from "fs/promises";
-import { join, resolve, basename, relative, extname } from "path";
+import { join, basename, relative } from "path";
 import { existsSync } from "fs";
+import { MEMORY_ROOT } from "../lib/runtime-paths";
 
 // --- Types ---
 
@@ -36,10 +37,6 @@ export interface MemoryEntry {
 }
 
 // --- Constants ---
-
-// Resolve memory root relative to the project root (two levels up from apps/api/src)
-const PROJECT_ROOT = resolve(import.meta.dir, "../../../../");
-const MEMORY_ROOT = join(PROJECT_ROOT, "memory");
 
 const SECTIONS = ["user", "knowledge", "relationships", "journal"] as const;
 export type MemorySection = string;

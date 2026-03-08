@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:3031/api";
+import { API_BASE } from "./runtime";
 
 interface ApiOptions {
   method?: string;

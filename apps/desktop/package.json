@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "prepare:release": "bun run ../../scripts/prepare-desktop-release.ts",
+    "package": "tauri build",
+    "package:app": "tauri build --bundles app"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",

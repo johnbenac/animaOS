@@ -1,7 +1,17 @@
+use std::{
+    fs::{copy, create_dir_all, write},
+    io::{Read, Write},
+    net::{SocketAddr, TcpStream},
+    path::Path,
+    process::{Child, Command, Stdio},
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
-    Manager,
+    Manager, State,
 };
 
 #[tauri::command]
@@ -9,12 +19,158 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[derive(Default)]
+struct ApiProcessState {
+    child: Mutex<Option<Child>>,
+}
+
+fn api_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "anima-api.exe"
+    } else {
+        "anima-api"
+    }
+}
+
+fn ensure_customer_data_layout(data_dir: &Path, default_soul_path: &Path) -> Result<(), String> {
+    let memory_dir = data_dir.join("memory");
+    let soul_dir = data_dir.join("soul");
+    let soul_path = soul_dir.join("soul.md");
+
+    create_dir_all(data_dir).map_err(|err| format!("failed creating data dir: {err}"))?;
+    create_dir_all(&memory_dir).map_err(|err| format!("failed creating memory dir: {err}"))?;
+    create_dir_all(&soul_dir).map_err(|err| format!("failed creating soul dir: {err}"))?;
+
+    if !soul_path.exists() {
+        if default_soul_path.exists() {
+            copy(default_soul_path, &soul_path)
+                .map_err(|err| format!("failed seeding soul.md: {err}"))?;
+        } else {
+            write(&soul_path, "# ANIMA Soul\n")
+                .map_err(|err| format!("failed creating default soul.md: {err}"))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn api_healthcheck() -> bool {
+    let addr: SocketAddr = "127.0.0.1:3031".parse().expect("valid API socket address");
+    let mut stream = match TcpStream::connect_timeout(&addr, Duration::from_millis(300)) {
+        Ok(stream) => stream,
+        Err(_) => return false,
+    };
+
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(300)));
+
+    let request = b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    if stream.write_all(request).is_err() {
+        return false;
+    }
+
+    let mut response = String::new();
+    if stream.read_to_string(&mut response).is_err() {
+        return false;
+    }
+
+    response.contains("\"healthy\"")
+}
+
+fn wait_for_api_ready(timeout: Duration) -> Result<(), String> {
+    let started_at = Instant::now();
+    while started_at.elapsed() < timeout {
+        if api_healthcheck() {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Err("timed out waiting for local API health check".to_string())
+}
+
+fn start_api_sidecar(app: &tauri::AppHandle) -> Result<Child, String> {
+    let resource_dir = app
+        .path()
+        .resource_dir()
+        .map_err(|err| format!("failed resolving resource dir: {err}"))?;
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed resolving app data dir: {err}"))?;
+
+    let sidecar_path = resource_dir.join("bin").join(api_binary_name());
+    let prompts_dir = resource_dir.join("prompts");
+    let migrations_dir = resource_dir.join("drizzle");
+    let default_soul_path = resource_dir.join("defaults").join("soul.md");
+
+    if !sidecar_path.exists() {
+        return Err(format!(
+            "API sidecar binary not found at {}",
+            sidecar_path.display()
+        ));
+    }
+    if !prompts_dir.exists() {
+        return Err(format!("prompts dir missing at {}", prompts_dir.display()));
+    }
+    if !migrations_dir.exists() {
+        return Err(format!(
+            "migrations dir missing at {}",
+            migrations_dir.display()
+        ));
+    }
+
+    ensure_customer_data_layout(&data_dir, &default_soul_path)?;
+
+    Command::new(&sidecar_path)
+        .env("ANIMA_DATA_DIR", &data_dir)
+        .env("ANIMA_PROMPTS_DIR", &prompts_dir)
+        .env("ANIMA_MIGRATIONS_DIR", &migrations_dir)
+        .env("ANIMA_DEFAULT_SOUL_PATH", &default_soul_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|err| {
+            format!(
+                "failed starting API sidecar {}: {err}",
+                sidecar_path.display()
+            )
+        })
+}
+
+fn stop_api_sidecar(state: &ApiProcessState) {
+    if let Ok(mut child_guard) = state.child.lock() {
+        if let Some(mut child) = child_guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        .manage(ApiProcessState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            if !cfg!(debug_assertions) {
+                let mut child = start_api_sidecar(&app.handle())
+                    .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+
+                if let Err(err) = wait_for_api_ready(Duration::from_secs(10)) {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(err.into());
+                }
+
+                let state: State<ApiProcessState> = app.state();
+                let mut guard = state
+                    .child
+                    .lock()
+                    .map_err(|_| "failed to lock API process state".to_string())?;
+                *guard = Some(child);
+            }
+
             // System tray
             let show = MenuItem::with_id(app, "show", "Open ANIMA", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -50,6 +206,16 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![greet])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+        ) {
+            let state: State<ApiProcessState> = app.state();
+            stop_api_sidecar(&state);
+        }
+    });
 }

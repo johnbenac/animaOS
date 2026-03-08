@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-
-const API_BASE = "http://localhost:3031/api";
+import { API_BASE } from "../lib/runtime";
 
 export default function Soul() {
   const [content, setContent] = useState("");

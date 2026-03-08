@@ -9,7 +9,9 @@ import soul from "./routes/soul";
 import telegram from "./routes/telegram";
 import tasks from "./routes/tasks";
 import { startTaskReminderCron } from "./cron/task-reminders";
+import { ensureRuntimeLayout } from "./lib/runtime-paths";
 
+await ensureRuntimeLayout();
 
 const app = new Hono();
 
@@ -17,7 +19,13 @@ const app = new Hono();
 app.use(
   "*",
   cors({
-    origin: ["http://localhost:1420", "http://localhost:5173", "http://tauri.localhost"],
+    origin: [
+      "http://localhost:1420",
+      "http://localhost:5173",
+      "http://tauri.localhost",
+      "https://tauri.localhost",
+      "tauri://localhost",
+    ],
   }),
 );
 
@@ -41,5 +49,6 @@ startTaskReminderCron();
 
 export default {
   port: 3031,
+  hostname: "127.0.0.1",
   fetch: app.fetch,
 };

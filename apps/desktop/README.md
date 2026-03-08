@@ -1,6 +1,18 @@
-# Tauri + React + Typescript
+# Desktop App
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+ANIMA desktop client built with Tauri + React + TypeScript.
+
+## Build / Packaging
+
+Use the root-level packaging guide:
+
+- [docs/build-release.md](/Users/julio/anima-os-lite/docs/build-release.md)
+
+Quick command (from repo root):
+
+```bash
+bun --filter desktop package:app
+```
 
 ## Recommended IDE Setup
 
