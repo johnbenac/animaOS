@@ -1,46 +1,52 @@
 # anima-os-lite
 
-Bun workspace monorepo for ANIMA:
+Mixed monorepo for ANIMA:
 
-- `apps/api`: Bun + Hono backend
-- `apps/desktop`: Tauri + React desktop client
+- `apps/server`: Python + FastAPI backend managed with `uv`
+- `apps/desktop`: Tauri + React desktop client orchestrated via `nx`
+- `apps/api`: legacy Bun + Hono backend kept during migration
 - `docs/`: project docs
 - `memory/`: local user memory data (git-ignored)
 
 ## Requirements
 
 - Bun `>=1.x`
+- Python `>=3.12`
+- `uv >=0.9.x`
 - Rust toolchain (for Tauri packaging/runtime)
 
 ## Quick Start
 
 ```bash
 bun install
-bun dev
+uv sync --all-packages
+bun run dev
 ```
 
 Run app-specific dev tasks:
 
 ```bash
-bun --filter api dev
-bun --filter desktop dev
-bun --filter desktop tauri dev
+bun run dev:server
+bun run dev:desktop
+bun run dev:api:legacy
 ```
 
 ## Common Commands
 
 From repo root unless noted:
 
-- `bun dev`: run workspace dev scripts
-- `bun run build`: build all workspaces
-- `bun run db:push`: apply API DB migrations
-- `bun run db:studio`: open Drizzle Studio
-- `cd apps/api && bun run test`: run API tests
-- `cd apps/api && bun run test:brief`: brief-agent tests
+- `bun run dev`: run the Python server and desktop app through `nx`
+- `bun run build`: build `apps/server` and `apps/desktop`
+- `bun run lint`: lint `apps/server` and type-check `apps/desktop`
+- `bun run test`: run Python backend tests
+- `bun run python:sync`: sync the `uv` workspace
+- `bun run db:push`: apply legacy API DB migrations
+- `bun run db:studio`: open legacy Drizzle Studio
 
 ## Repository Notes
 
 - `memory/` is intentionally local-only and fully git-ignored.
+- The Python backend migration starts in `apps/server`; `apps/api` remains available until feature parity is reached.
 - Auth is local-owner bootstrap (no mandatory email identity flow).
 - User backup/sync uses encrypted vault export/import with a user passphrase (argon2id + AES-256-GCM).
 - Keep prompts in `apps/api/prompts/*.md` and load via `renderPromptTemplate(...)`.

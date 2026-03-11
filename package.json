@@ -2,22 +2,35 @@
   "name": "anima",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "bun@1.3.8",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev": "bun --filter '*' dev",
-    "dev:api": "bun --filter api dev",
-    "dev:desktop": "bun --filter desktop dev",
-    "build": "bun --filter '*' build",
-    "lint": "bun --filter '*' lint",
+    "dev": "node ./scripts/run-nx.cjs run-many -t dev --projects=server,desktop --parallel=2",
+    "dev:server": "node ./scripts/run-nx.cjs dev server",
+    "dev:desktop": "node ./scripts/run-nx.cjs dev desktop",
+    "dev:api:legacy": "node ./scripts/run-nx.cjs dev api-legacy",
+    "build": "node ./scripts/run-nx.cjs run-many -t build --projects=server,desktop",
+    "build:server": "node ./scripts/run-nx.cjs build server",
+    "build:desktop": "node ./scripts/run-nx.cjs build desktop",
+    "build:api:legacy": "node ./scripts/run-nx.cjs build api-legacy",
+    "lint": "node ./scripts/run-nx.cjs run-many -t lint --projects=server,desktop",
+    "lint:server": "node ./scripts/run-nx.cjs lint server",
+    "lint:desktop": "node ./scripts/run-nx.cjs lint desktop",
+    "test": "node ./scripts/run-nx.cjs run-many -t test --projects=server",
+    "test:server": "node ./scripts/run-nx.cjs test server",
+    "test:api:legacy": "node ./scripts/run-nx.cjs test api-legacy",
+    "python:sync": "uv sync --all-packages",
+    "python:lock": "uv lock",
     "data:nuke": "bash ./scripts/nuke-dev-data.sh --yes",
     "data:nuke:reinit": "bash ./scripts/nuke-dev-data.sh --yes --migrate",
-    "db:push": "bun --filter api db:push",
-    "db:studio": "bun --filter api db:studio"
+    "db:push": "node ./scripts/run-nx.cjs run api-legacy:db-push",
+    "db:studio": "node ./scripts/run-nx.cjs run api-legacy:db-studio"
   },
   "devDependencies": {
+    "nx": "^21.0.3",
     "typescript": "^5.3.3"
   }
 }

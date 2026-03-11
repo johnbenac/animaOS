@@ -1,0 +1,49 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "workspaceLayout": {
+    "appsDir": "apps",
+    "libsDir": "packages"
+  },
+  "useDaemonProcess": false,
+  "useInferencePlugins": false,
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default",
+      "!{projectRoot}/tests/**/*",
+      "!{projectRoot}/**/*.test.*",
+      "!{projectRoot}/**/*.spec.*"
+    ],
+    "sharedGlobals": [
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/nx.json",
+      "{workspaceRoot}/pyproject.toml"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "cache": true,
+      "inputs": [
+        "production",
+        "^production"
+      ]
+    },
+    "lint": {
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default"
+      ]
+    },
+    "test": {
+      "cache": true,
+      "inputs": [
+        "default",
+        "^default"
+      ]
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "server",
+  "sourceRoot": "apps/server/src",
+  "projectType": "application",
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/server",
+        "command": "uv run --project . uvicorn anima_server.main:app --app-dir src --reload --host 127.0.0.1 --port 3031"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/server",
+        "command": "uv build"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/server",
+        "command": "uv run --project . ruff check src tests"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/server",
+        "command": "uv run --project . pytest"
+      }
+    }
+  },
+  "tags": ["scope:backend", "lang:python"]
+}

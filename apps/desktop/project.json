@@ -1,0 +1,37 @@
+{
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "name": "desktop",
+  "sourceRoot": "apps/desktop/src",
+  "projectType": "application",
+  "targets": {
+    "dev": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/desktop",
+        "command": "bun run dev"
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/desktop",
+        "command": "bun run build"
+      }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/desktop",
+        "command": "bun run tsc --noEmit"
+      }
+    },
+    "preview": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/desktop",
+        "command": "bun run preview"
+      }
+    }
+  },
+  "tags": ["scope:desktop", "lang:ts"]
+}

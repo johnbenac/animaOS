@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anima-server"
+version = "0.1.0"
+description = "Python backend for ANIMA."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.12",
+  "pydantic-settings>=2.11.0",
+  "uvicorn[standard]>=0.35.0"
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28.1",
+  "pytest>=8.4.0",
+  "pytest-asyncio>=1.1.0",
+  "ruff>=0.12.0"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anima_server"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
