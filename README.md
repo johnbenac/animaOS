@@ -45,6 +45,7 @@ From repo root unless noted:
 - `bun run db:server:up`: start local Postgres for `apps/server`
 - `bun run db:server:down`: stop the local Postgres service
 - `bun run db:server:logs`: tail local Postgres logs
+- `bun run db:server:revision -- "<message>"`: create an autogen Alembic revision for `apps/server`
 - `bun run db:server:heads`: show Alembic heads for `apps/server`
 - `bun run db:server:current`: show current Alembic revision for `apps/server`
 - `bun run db:server:upgrade`: apply server migrations to head

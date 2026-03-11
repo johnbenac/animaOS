@@ -27,6 +27,7 @@
     "db:server:up": "docker compose up -d postgres",
     "db:server:down": "docker compose down",
     "db:server:logs": "docker compose logs postgres",
+    "db:server:revision": "node ./scripts/server-db-revision.cjs",
     "db:server:heads": "node ./scripts/run-nx.cjs run server:db-heads",
     "db:server:current": "node ./scripts/run-nx.cjs run server:db-current",
     "db:server:upgrade": "node ./scripts/run-nx.cjs run server:db-upgrade",
