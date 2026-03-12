@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from anima_server.api.deps.unlock import read_unlock_token
 from anima_server.db import get_db
 from anima_server.schemas.auth import (
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
@@ -15,12 +17,13 @@ from anima_server.schemas.auth import (
     UserResponse,
 )
 from anima_server.services.auth import (
+    authenticate_user,
+    change_user_password,
     create_user,
     get_user_by_id,
     get_user_by_username,
     normalize_username,
     serialize_user,
-    verify_password,
 )
 from anima_server.services.sessions import unlock_session_store
 
@@ -48,7 +51,7 @@ def register(
         raise HTTPException(status_code=409, detail="Username already taken")
 
     try:
-        user = create_user(
+        user, dek = create_user(
             db,
             username=username,
             password=payload.password,
@@ -59,7 +62,7 @@ def register(
         raise HTTPException(status_code=409, detail="Username already taken") from None
 
     response = serialize_user(user)
-    response["unlockToken"] = unlock_session_store.create(user.id)
+    response["unlockToken"] = unlock_session_store.create(user.id, dek)
     return response
 
 
@@ -72,15 +75,16 @@ def login(
     if not username:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    user = get_user_by_username(db, username)
-    if user is None or not verify_password(payload.password, user.password_hash):
+    try:
+        user, dek = authenticate_user(db, username, payload.password)
+    except ValueError:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     return {
         "id": user.id,
         "username": user.username,
         "name": user.display_name,
-        "unlockToken": unlock_session_store.create(user.id),
+        "unlockToken": unlock_session_store.create(user.id, dek),
         "message": "Login successful",
     }
 
@@ -105,3 +109,33 @@ def me(
 def logout(request: Request) -> dict[str, bool]:
     unlock_session_store.revoke(read_unlock_token(request))
     return {"success": True}
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    session = unlock_session_store.resolve(read_unlock_token(request))
+    if session is None:
+        raise HTTPException(status_code=401, detail="Session locked. Please sign in again.")
+
+    user = get_user_by_id(db, session.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        change_user_password(
+            db,
+            user,
+            old_password=payload.oldPassword,
+            new_password=payload.newPassword,
+            current_dek=session.dek,
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    unlock_session_store.revoke_user(user.id)
+    new_unlock_token = unlock_session_store.create(user.id, session.dek)
+    return {"success": True, "unlockToken": new_unlock_token}

@@ -30,6 +30,11 @@ export interface AuthResponse extends User {
   unlockToken: string;
 }
 
+export interface ChangePasswordResponse {
+  success: boolean;
+  unlockToken: string;
+}
+
 export type PersonaTemplate = "default" | "alice";
 
 export interface ChatMessage {
@@ -253,6 +258,11 @@ export function createApiClient(options: ApiClientOptions) {
       me: () => request<User>("/auth/me"),
       logout: () =>
         request<{ success: boolean }>("/auth/logout", { method: "POST" }),
+      changePassword: (oldPassword: string, newPassword: string) =>
+        request<ChangePasswordResponse>("/auth/change-password", {
+          method: "POST",
+          body: { oldPassword, newPassword },
+        }),
     },
     users: {
       me: (id: number) => request<User>(`/users/${id}`),

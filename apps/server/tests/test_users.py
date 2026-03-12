@@ -17,6 +17,8 @@ from anima_server.services.auth import hash_password
 from anima_server.services.sessions import unlock_session_store
 from anima_server.services.storage import get_user_data_dir
 
+TEST_DEK = bytes(range(32))
+
 
 @pytest.fixture()
 def session_factory() -> Generator[sessionmaker, None, None]:
@@ -84,7 +86,7 @@ def test_get_user_requires_matching_unlock_session(
     assert unauthorized.status_code == 401
     assert unauthorized.json() == {"error": "Session locked. Please sign in again."}
 
-    token = unlock_session_store.create(user.id)
+    token = unlock_session_store.create(user.id, TEST_DEK)
     response = client.get(
         f"/api/users/{user.id}",
         headers={"x-anima-unlock": token},
@@ -103,7 +105,7 @@ def test_update_user_updates_profile_fields(
     session_factory: sessionmaker,
 ) -> None:
     user = seed_user(session_factory)
-    token = unlock_session_store.create(user.id)
+    token = unlock_session_store.create(user.id, TEST_DEK)
 
     response = client.put(
         f"/api/users/{user.id}",
@@ -131,7 +133,7 @@ def test_delete_user_removes_database_row_and_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = seed_user(session_factory)
-    token = unlock_session_store.create(user.id)
+    token = unlock_session_store.create(user.id, TEST_DEK)
     data_dir = tmp_path / "anima-user-data"
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("anima_server.config.settings.data_dir", data_dir)

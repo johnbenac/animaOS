@@ -17,6 +17,11 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class ChangePasswordRequest(BaseModel):
+    oldPassword: str = Field(min_length=1)
+    newPassword: str = Field(min_length=6)
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -39,3 +44,8 @@ class LoginResponse(UserResponse):
 
 class LogoutResponse(BaseModel):
     success: bool
+
+
+class ChangePasswordResponse(BaseModel):
+    success: bool
+    unlockToken: str

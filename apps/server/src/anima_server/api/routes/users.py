@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from anima_server.api.deps.unlock import require_unlocked_user
 from anima_server.db import get_db
+from anima_server.models import UserKey
 from anima_server.schemas.auth import UserResponse
 from anima_server.schemas.users import DeleteUserResponse, UserUpdateRequest
 from anima_server.services.auth import get_user_by_id, normalize_username, serialize_user
@@ -84,6 +85,7 @@ def delete_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    db.query(UserKey).filter(UserKey.user_id == user_id).delete()
     db.delete(user)
     db.commit()
     unlock_session_store.revoke_user(user_id)
