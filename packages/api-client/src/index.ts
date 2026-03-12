@@ -35,6 +35,13 @@ export interface ChangePasswordResponse {
   unlockToken: string;
 }
 
+export interface VaultImportResponse {
+  status: string;
+  restoredUsers: number;
+  restoredMemoryFiles: number;
+  requiresReauth?: boolean;
+}
+
 export type PersonaTemplate = "default" | "alice";
 
 export interface ChatMessage {
@@ -384,11 +391,7 @@ export function createApiClient(options: ApiClientOptions) {
           body: { passphrase },
         }),
       import: (passphrase: string, vault: string) =>
-        request<{
-          status: string;
-          restoredUsers: number;
-          restoredMemoryFiles: number;
-        }>("/vault/import", {
+        request<VaultImportResponse>("/vault/import", {
           method: "POST",
           body: { passphrase, vault },
         }),

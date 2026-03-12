@@ -8,6 +8,9 @@ import Profile from "./pages/Profile";
 import Chat from "./pages/Chat";
 import Memory from "./pages/Memory";
 import Settings from "./pages/Settings";
+import AiSettings from "./pages/settings/AiSettings";
+import SecuritySettings from "./pages/settings/SecuritySettings";
+import VaultSettings from "./pages/settings/VaultSettings";
 import Soul from "./pages/Soul";
 import Tasks from "./pages/Tasks";
 import Login from "./pages/Login";
@@ -58,7 +61,12 @@ function AppRoutes() {
       <Route path="/chat" element={withLayout(<Chat />)} />
       <Route path="/memory" element={withLayout(<Memory />)} />
       <Route path="/profile" element={withLayout(<Profile />)} />
-      <Route path="/settings" element={withLayout(<Settings />)} />
+      <Route path="/settings" element={withLayout(<Settings />)}>
+        <Route index element={<Navigate to="ai" replace />} />
+        <Route path="ai" element={<AiSettings />} />
+        <Route path="security" element={<SecuritySettings />} />
+        <Route path="vault" element={<VaultSettings />} />
+      </Route>
       <Route path="/tasks" element={withLayout(<Tasks />)} />
       <Route path="/soul" element={withLayout(<Soul />)} />
       <Route path="/login" element={<Login />} />

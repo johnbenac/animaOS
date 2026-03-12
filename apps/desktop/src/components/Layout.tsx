@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { to: "/chat", label: "Chat" },
   { to: "/memory", label: "Memory" },
   { to: "/soul", label: "Soul" },
-  { to: "/settings", label: "Config" },
+  { to: "/settings", label: "Settings" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
