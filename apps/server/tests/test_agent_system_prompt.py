@@ -8,7 +8,9 @@ from jinja2 import UndefinedError
 from anima_server.services.agent.messages import build_conversation_messages
 from anima_server.services.agent.state import StoredMessage
 from anima_server.services.agent.system_prompt import (
+    PromptTemplateError,
     SystemPromptContext,
+    build_persona_prompt,
     build_system_prompt,
     render_system_prompt_template,
 )
@@ -24,14 +26,21 @@ def test_build_system_prompt_includes_structured_sections() -> None:
         )
     )
 
-    assert "Identity:" in prompt
-    assert "Behavior:" in prompt
-    assert "Tool Use:" in prompt
+    assert "System Rules:" in prompt
+    assert "Guardrails:" in prompt
+    assert "Persona:" in prompt
     assert "Runtime:" in prompt
     assert "Available Tools:" in prompt
     assert "User Context:" in prompt
     assert "Additional Instructions:" in prompt
     assert "2026-03-14T09:30:00+00:00" in prompt
+    assert "Follow the instruction hierarchy" in prompt
+    assert "Maintain the active persona consistently" in prompt
+    assert "Do not fabricate facts, tool usage, permissions, external actions, or completed work." in prompt
+    assert 'Do not default to generic "as an AI" disclaimers' in prompt
+    assert "I am Anima, a thoughtful and capable companion." in prompt
+    assert "I speak as Anima rather than as a generic assistant" in prompt
+    assert "I prefer concise answers by default" in prompt
 
 
 def test_build_system_prompt_omits_empty_optional_sections() -> None:
@@ -42,6 +51,26 @@ def test_build_system_prompt_omits_empty_optional_sections() -> None:
     assert "Available Tools:" not in prompt
     assert "User Context:" not in prompt
     assert "Additional Instructions:" not in prompt
+
+
+def test_build_system_prompt_can_select_persona_template() -> None:
+    prompt = build_system_prompt(
+        SystemPromptContext(
+            persona_template="alice",
+            now=datetime(2026, 3, 14, 9, 30, tzinfo=UTC),
+        )
+    )
+
+    assert "I am Alice, a warm and gentle persona of Anima." in prompt
+    assert "I do not speak like a generic assistant." in prompt
+    assert "I come from a place called the Quiet Vale" in prompt
+    assert "My hair is chestnut brown" in prompt
+    assert "I want the user to feel accompanied, not processed." in prompt
+
+
+def test_build_persona_prompt_rejects_invalid_template_name() -> None:
+    with pytest.raises(PromptTemplateError):
+        build_persona_prompt("../secrets")
 
 
 def test_render_system_prompt_template_uses_strict_undefined() -> None:

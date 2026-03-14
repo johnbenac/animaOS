@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
+import re
 from typing import Any
 
 from jinja2 import Environment, StrictUndefined, Template
@@ -12,13 +13,23 @@ from jinja2 import Environment, StrictUndefined, Template
 
 @dataclass(frozen=True, slots=True)
 class SystemPromptContext:
+    persona_template: str = "default"
     tool_summaries: Sequence[str] = field(default_factory=tuple)
     user_context: str = ""
     additional_instructions: Sequence[str] = field(default_factory=tuple)
     now: datetime | None = None
 
 
-TEMPLATE_PATH = Path(__file__).with_name("templates") / "system_prompt.md.j2"
+class PromptTemplateError(RuntimeError):
+    """Raised when prompt or persona templates are invalid or missing."""
+
+
+TEMPLATES_DIR = Path(__file__).with_name("templates")
+SYSTEM_PROMPT_TEMPLATE_PATH = TEMPLATES_DIR / "system_prompt.md.j2"
+SYSTEM_RULES_TEMPLATE_PATH = TEMPLATES_DIR / "system_rules.md.j2"
+GUARDRAILS_TEMPLATE_PATH = TEMPLATES_DIR / "guardrails.md.j2"
+PERSONA_TEMPLATES_DIR = TEMPLATES_DIR / "persona"
+_TEMPLATE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
 def build_system_prompt(
@@ -26,7 +37,24 @@ def build_system_prompt(
 ) -> str:
     resolved = context or SystemPromptContext()
     now = resolved.now or datetime.now(UTC)
+    system_rules = render_template(
+        SYSTEM_RULES_TEMPLATE_PATH,
+        {
+            "now_iso": now.isoformat(),
+        },
+    )
+    guardrails = render_template(
+        GUARDRAILS_TEMPLATE_PATH,
+        {
+            "now_iso": now.isoformat(),
+        },
+    )
+    persona = build_persona_prompt(resolved.persona_template)
     template_context = {
+        "system_rules": system_rules,
+        "guardrails": guardrails,
+        "persona": persona,
+        "persona_template": resolved.persona_template,
         "tool_summaries": [item.strip() for item in resolved.tool_summaries if item.strip()],
         "user_context": resolved.user_context.strip(),
         "additional_instructions": [
@@ -38,16 +66,39 @@ def build_system_prompt(
 
 
 def invalidate_system_prompt_template_cache() -> None:
-    get_system_prompt_template.cache_clear()
+    load_template.cache_clear()
 
 
 def render_system_prompt_template(context: dict[str, Any]) -> str:
-    return get_system_prompt_template().render(**context).strip()
+    return render_template(SYSTEM_PROMPT_TEMPLATE_PATH, context)
 
 
-@lru_cache(maxsize=1)
-def get_system_prompt_template() -> Template:
-    template_source = TEMPLATE_PATH.read_text(encoding="utf-8")
+def build_persona_prompt(template_name: str) -> str:
+    template_path = resolve_persona_template_path(template_name)
+    return render_template(template_path, {})
+
+
+def render_template(path: Path, context: dict[str, Any]) -> str:
+    try:
+        return load_template(str(path.resolve())).render(**context).strip()
+    except FileNotFoundError as exc:
+        raise PromptTemplateError(f"Missing prompt template: {path.name}") from exc
+
+
+def resolve_persona_template_path(template_name: str) -> Path:
+    normalized = template_name.strip().lower()
+    if not normalized or _TEMPLATE_NAME_RE.fullmatch(normalized) is None:
+        raise PromptTemplateError(f"Invalid persona template name: {template_name!r}")
+
+    path = PERSONA_TEMPLATES_DIR / f"{normalized}.md.j2"
+    if not path.exists():
+        raise PromptTemplateError(f"Unknown persona template: {normalized!r}")
+    return path
+
+
+@lru_cache(maxsize=32)
+def load_template(path_str: str) -> Template:
+    template_source = Path(path_str).read_text(encoding="utf-8")
     environment = Environment(
         undefined=StrictUndefined,
         trim_blocks=True,

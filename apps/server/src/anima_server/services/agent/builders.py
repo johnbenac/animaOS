@@ -62,6 +62,7 @@ def build_graph() -> GraphRunner:
     return GraphRunner(
         graph.compile(),
         is_scaffold=False,
+        persona_template=settings.agent_persona_template,
         tool_summaries=tool_summaries,
     )
 
@@ -87,5 +88,6 @@ def build_scaffold_graph() -> GraphRunner:
     return GraphRunner(
         graph.compile(),
         is_scaffold=True,
+        persona_template=settings.agent_persona_template,
         tool_summaries=get_tool_summaries(),
     )

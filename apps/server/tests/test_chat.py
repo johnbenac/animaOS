@@ -166,12 +166,14 @@ def test_chat_stream_returns_sse_events() -> None:
 def test_chat_ollama_provider_returns_error_until_client_is_wired() -> None:
     original_provider = settings.agent_provider
     original_model = settings.agent_model
+    original_persona_template = settings.agent_persona_template
     original_base_url = settings.agent_base_url
     original_api_key = settings.agent_api_key
 
     try:
         settings.agent_provider = "ollama"
         settings.agent_model = "llama3.2"
+        settings.agent_persona_template = "default"
         settings.agent_base_url = ""
         settings.agent_api_key = ""
         invalidate_agent_graph_cache()
@@ -189,9 +191,38 @@ def test_chat_ollama_provider_returns_error_until_client_is_wired() -> None:
     finally:
         settings.agent_provider = original_provider
         settings.agent_model = original_model
+        settings.agent_persona_template = original_persona_template
         settings.agent_base_url = original_base_url
         settings.agent_api_key = original_api_key
         invalidate_agent_graph_cache()
 
     assert response.status_code == 503
     assert "scaffolded only" in response.json()["error"]
+
+
+def test_chat_invalid_persona_template_returns_error() -> None:
+    original_provider = settings.agent_provider
+    original_persona_template = settings.agent_persona_template
+
+    try:
+        settings.agent_provider = "scaffold"
+        settings.agent_persona_template = "../broken"
+        invalidate_agent_graph_cache()
+
+        with _client() as client:
+            user = _register_user(client, username="bad-persona")
+            headers = {"x-anima-unlock": str(user["unlockToken"])}
+            user_id = int(user["id"])
+
+            response = client.post(
+                "/api/chat",
+                headers=headers,
+                json={"message": "hello", "userId": user_id},
+            )
+    finally:
+        settings.agent_provider = original_provider
+        settings.agent_persona_template = original_persona_template
+        invalidate_agent_graph_cache()
+
+    assert response.status_code == 503
+    assert "Invalid persona template name" in response.json()["error"]

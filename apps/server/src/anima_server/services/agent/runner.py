@@ -21,11 +21,21 @@ class GraphRunner:
         graph: Any,
         *,
         is_scaffold: bool = False,
+        persona_template: str = "default",
         tool_summaries: Sequence[str] = (),
     ) -> None:
         self._graph = graph
         self._is_scaffold = is_scaffold
+        self._persona_template = persona_template
         self._tool_summaries = tuple(tool_summaries)
+
+    def prepare_system_prompt(self) -> str:
+        return build_system_prompt(
+            SystemPromptContext(
+                persona_template=self._persona_template,
+                tool_summaries=self._tool_summaries,
+            )
+        )
 
     async def invoke(
         self,
@@ -33,9 +43,7 @@ class GraphRunner:
         user_id: int,
         history: list[StoredMessage],
     ) -> AgentResult:
-        system_prompt = build_system_prompt(
-            SystemPromptContext(tool_summaries=self._tool_summaries)
-        )
+        system_prompt = self.prepare_system_prompt()
         messages = build_conversation_messages(
             history,
             user_message,

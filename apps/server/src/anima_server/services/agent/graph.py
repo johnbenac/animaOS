@@ -26,7 +26,8 @@ def get_or_build_runner() -> GraphRunner:
 
 
 def ensure_agent_ready() -> None:
-    get_or_build_runner()
+    runner = get_or_build_runner()
+    runner.prepare_system_prompt()
 
 
 def invalidate_agent_graph_cache() -> None:

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     data_dir: Path = DEFAULT_DATA_DIR
     agent_provider: str = "scaffold"
     agent_model: str = "llama3.2"
+    agent_persona_template: str = "default"
     agent_base_url: str = ""
     agent_api_key: str = ""
     agent_max_tokens: int = 4096
