@@ -12,7 +12,7 @@ from anima_server.services.agent.llm import create_llm
 from anima_server.services.agent.messages import message_content, render_scaffold_response
 from anima_server.services.agent.runner import GraphRunner
 from anima_server.services.agent.state import AgentState
-from anima_server.services.agent.tools import get_tools
+from anima_server.services.agent.tools import get_tool_summaries, get_tools
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ def build_graph() -> GraphRunner:
 
     llm = create_llm()
     tools = get_tools()
+    tool_summaries = get_tool_summaries(tools)
     llm_with_tools = llm.bind_tools(tools) if tools else llm
 
     async def chatbot(state: AgentState) -> dict[str, list[Any]]:
@@ -58,7 +59,11 @@ def build_graph() -> GraphRunner:
         settings.agent_provider,
         settings.agent_model,
     )
-    return GraphRunner(graph.compile(), is_scaffold=False)
+    return GraphRunner(
+        graph.compile(),
+        is_scaffold=False,
+        tool_summaries=tool_summaries,
+    )
 
 
 def build_scaffold_graph() -> GraphRunner:
@@ -79,4 +84,8 @@ def build_scaffold_graph() -> GraphRunner:
     graph.add_node("scaffold", scaffold_node)
     graph.set_entry_point("scaffold")
     graph.add_edge("scaffold", END)
-    return GraphRunner(graph.compile(), is_scaffold=True)
+    return GraphRunner(
+        graph.compile(),
+        is_scaffold=True,
+        tool_summaries=get_tool_summaries(),
+    )

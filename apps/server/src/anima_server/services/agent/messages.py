@@ -6,17 +6,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from anima_server.services.agent.state import StoredMessage
 
-SYSTEM_PROMPT = (
-    "You are Anima, a thoughtful and capable AI assistant. "
-    "Be concise and direct. Use tools when they would help answer the user's question."
-)
-
 
 def build_conversation_messages(
     history: list[StoredMessage],
     user_message: str,
+    *,
+    system_prompt: str,
 ) -> list[Any]:
-    messages: list[Any] = [SystemMessage(content=SYSTEM_PROMPT)]
+    messages: list[Any] = [SystemMessage(content=system_prompt)]
     messages.extend(to_langchain_message(message) for message in history)
     messages.append(HumanMessage(content=user_message))
     return messages
