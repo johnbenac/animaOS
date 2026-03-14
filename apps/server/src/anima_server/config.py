@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     agent_compaction_trigger_ratio: float = 0.8
     agent_compaction_keep_last_messages: int = 8
     agent_stream_chunk_size: int = 48
+    agent_llm_timeout: float = 120.0
+    agent_stream_queue_max_size: int = 256
     agent_background_memory_enabled: bool = True
     core_passphrase: str = ""
     core_require_encryption: bool = False

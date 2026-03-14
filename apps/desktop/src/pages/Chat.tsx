@@ -58,16 +58,19 @@ export default function Chat() {
   // Load history on mount, then auto-send pending message from dashboard
   useEffect(() => {
     if (!user?.id) return;
-    api.chat.history(user.id).then((hist) => {
-      setMessages(hist);
-      // Auto-send message passed from dashboard
-      const pending = pendingMsgRef.current;
-      if (pending) {
-        pendingMsgRef.current = null;
-        setSearchParams({}, { replace: true });
-        setTimeout(() => sendMessage(pending), 100);
-      }
-    }).catch(console.error);
+    api.chat
+      .history(user.id)
+      .then((hist) => {
+        setMessages(hist);
+        // Auto-send message passed from dashboard
+        const pending = pendingMsgRef.current;
+        if (pending) {
+          pendingMsgRef.current = null;
+          setSearchParams({}, { replace: true });
+          setTimeout(() => sendMessage(pending), 100);
+        }
+      })
+      .catch(console.error);
   }, [user?.id]);
 
   // Poll for new messages (e.g. from task reminders) every 30s
@@ -93,7 +96,8 @@ export default function Chat() {
   const updateScrollState = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    const distanceFromBottom =
+      el.scrollHeight - (el.scrollTop + el.clientHeight);
     setIsAtBottom(distanceFromBottom < 40);
   }, []);
 
@@ -178,6 +182,19 @@ export default function Chat() {
       setStreamBuffer("");
     } catch (err: any) {
       setError(err.message || "Connection failed");
+      // Preserve any partial streamed content as a visible message
+      setStreamBuffer((partial) => {
+        if (partial) {
+          const partialMsg: ChatMessage = {
+            id: Date.now() + 1,
+            userId: user.id,
+            role: "assistant",
+            content: partial + "\n\n*[connection interrupted]*",
+          };
+          setMessages((prev) => [...prev, partialMsg]);
+        }
+        return "";
+      });
     } finally {
       setStreaming(false);
       inputRef.current?.focus();
@@ -216,7 +233,7 @@ export default function Chat() {
             Chat
           </span>
           <div className="flex items-center gap-3">
-          {/* Language selector */}
+            {/* Language selector */}
             <div className="relative" ref={langDropdownRef}>
               <button
                 onClick={() => setShowLangSettings((v) => !v)}
@@ -276,10 +293,14 @@ export default function Chat() {
           )}
 
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} translateLang={translateLang} />
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              translateLang={translateLang}
+            />
           ))}
 
-        {/* Streaming indicator */}
+          {/* Streaming indicator */}
           {streaming && streamBuffer && (
             <div className="flex gap-3 animate-in fade-in duration-200">
               <div className="text-[10px] text-(--color-text-muted)/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
@@ -409,7 +430,9 @@ function MessageBubble({
           {isSystem ? "SYS" : AI_LABEL}
         </div>
       )}
-      <div className={`flex flex-col max-w-[86%] md:max-w-[74%] xl:max-w-[64%] ${isUser ? "items-end" : ""}`}>
+      <div
+        className={`flex flex-col max-w-[86%] md:max-w-[74%] xl:max-w-[64%] ${isUser ? "items-end" : ""}`}
+      >
         <div
           className={`rounded-md px-3 py-2.5 md:px-4 md:py-3 shadow-[0_0_0_1px_rgba(255,255,255,0.02)] ${
             isUser

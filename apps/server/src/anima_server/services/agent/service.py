@@ -78,7 +78,8 @@ async def _execute_agent_turn(
     user_id: int,
     db: Session,
     *,
-    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+    event_callback: Callable[[AgentStreamEvent],
+                             Awaitable[None]] | None = None,
 ) -> AgentResult:
     user_lock = get_user_lock(user_id)
     async with user_lock:
@@ -92,7 +93,8 @@ async def _execute_agent_turn_locked(
     user_id: int,
     db: Session,
     *,
-    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+    event_callback: Callable[[AgentStreamEvent],
+                             Awaitable[None]] | None = None,
 ) -> AgentResult:
     # Stage 1: Prepare turn context
     thread, run, user_msg, initial_sequence_id, turn_ctx = await _prepare_turn_context(
@@ -140,7 +142,8 @@ async def _prepare_turn_context(
     user_id: int,
     db: Session,
     *,
-    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+    event_callback: Callable[[AgentStreamEvent],
+                             Awaitable[None]] | None = None,
 ) -> tuple[AgentThread, AgentRun, AgentMessage, int, _TurnContext]:
     """Stage 1: Load thread, persist user message, build memory context."""
     thread = get_or_create_thread(db, user_id)
@@ -176,7 +179,8 @@ async def _prepare_turn_context(
             limit=8, similarity_threshold=0.35,
         )
         if hits:
-            semantic_results = [(item.id, item.content, score) for item, score in hits]
+            semantic_results = [(item.id, item.content, score)
+                                for item, score in hits]
     except Exception:  # noqa: BLE001
         pass
 
@@ -215,7 +219,8 @@ async def _invoke_turn_runtime(
     run: AgentRun,
     user_msg: AgentMessage,
     turn_ctx: _TurnContext,
-    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+    event_callback: Callable[[AgentStreamEvent],
+                             Awaitable[None]] | None = None,
 ) -> AgentResult:
     """Stage 2: Set tool context and invoke the agent runtime."""
     set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
@@ -272,9 +277,11 @@ def _persist_turn_result(
         run_id=run.id,
         trigger_token_limit=max(
             1,
-            int(settings.agent_max_tokens * settings.agent_compaction_trigger_ratio),
+            int(settings.agent_max_tokens *
+                settings.agent_compaction_trigger_ratio),
         ),
-        keep_last_messages=max(1, settings.agent_compaction_keep_last_messages),
+        keep_last_messages=max(
+            1, settings.agent_compaction_keep_last_messages),
         reserved_prompt_tokens=(
             result.prompt_budget.system_prompt_token_estimate
             if result.prompt_budget is not None
@@ -311,7 +318,9 @@ async def stream_agent(
     user_id: int,
     db: Session,
 ) -> AsyncGenerator[AgentStreamEvent, None]:
-    queue: asyncio.Queue[AgentStreamEvent | None] = asyncio.Queue()
+    queue: asyncio.Queue[AgentStreamEvent | None] = asyncio.Queue(
+        maxsize=settings.agent_stream_queue_max_size,
+    )
 
     async def emit(event: AgentStreamEvent) -> None:
         await queue.put(event)

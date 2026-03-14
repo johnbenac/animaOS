@@ -56,6 +56,7 @@ def create_llm() -> ChatClient:
         model=settings.agent_model,
         base_url=resolve_base_url(provider),
         headers=build_provider_headers(provider),
+        timeout=settings.agent_llm_timeout,
     )
 
 

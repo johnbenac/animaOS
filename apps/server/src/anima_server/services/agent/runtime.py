@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 from typing import Any
@@ -66,7 +67,8 @@ class AgentRuntime:
         self._tool_rules = tuple(tool_rules)
         self._persona_template = persona_template
         self._tool_summaries = tuple(tool_summaries)
-        self._tool_executor = tool_executor or ToolExecutor(list(self._tool_registry.values()))
+        self._tool_executor = tool_executor or ToolExecutor(
+            list(self._tool_registry.values()))
         self._max_steps = max_steps
 
     def prepare_system_prompt(self) -> str:
@@ -88,7 +90,8 @@ class AgentRuntime:
         memory_blocks: Sequence[MemoryBlock] = (),
     ) -> tuple[str, PromptBudgetTrace | None]:
         self._adapter.prepare()
-        dynamic_identity, prompt_memory_blocks = split_prompt_memory_blocks(memory_blocks)
+        dynamic_identity, prompt_memory_blocks = split_prompt_memory_blocks(
+            memory_blocks)
         budget_plan = plan_prompt_budget(prompt_memory_blocks)
         system_prompt = build_system_prompt(
             SystemPromptContext(
@@ -352,19 +355,26 @@ class AgentRuntime:
         )
         streamed_assistant_text = False
 
+        timeout = settings.agent_llm_timeout
         if event_callback is None:
-            step_result = await self._adapter.invoke(request)
+            step_result = await asyncio.wait_for(
+                self._adapter.invoke(request), timeout=timeout,
+            )
         else:
             step_result = None
-            async for stream_event in self._adapter.stream(request):
-                if stream_event.content_delta:
-                    streamed_assistant_text = True
-                    await event_callback(build_chunk_event(stream_event.content_delta))
-                if stream_event.result is not None:
-                    step_result = stream_event.result
+            try:
+                async for stream_event in self._adapter.stream(request):
+                    if stream_event.content_delta:
+                        streamed_assistant_text = True
+                        await event_callback(build_chunk_event(stream_event.content_delta))
+                    if stream_event.result is not None:
+                        step_result = stream_event.result
+            except asyncio.TimeoutError:
+                raise
 
             if step_result is None:
-                raise RuntimeError("Adapter stream ended without a final step result.")
+                raise RuntimeError(
+                    "Adapter stream ended without a final step result.")
 
         if step_result.assistant_text or step_result.tool_calls:
             messages.append(
@@ -447,7 +457,8 @@ def _snapshot_messages(messages: list[object]) -> tuple[MessageSnapshot, ...]:
                 content=message_content(message),
                 tool_name=getattr(message, "name", None),
                 tool_call_id=getattr(message, "tool_call_id", None),
-                tool_calls=_snapshot_tool_calls(getattr(message, "tool_calls", ())),
+                tool_calls=_snapshot_tool_calls(
+                    getattr(message, "tool_calls", ())),
             )
         )
 
@@ -468,7 +479,8 @@ def _snapshot_tool_calls(raw_tool_calls: object) -> tuple[ToolCall, ...]:
             raw_arguments = raw_tool_call.get("raw_arguments")
         else:
             name = str(getattr(raw_tool_call, "name", "")).strip()
-            call_id = str(getattr(raw_tool_call, "id", None) or f"tool-call-{index}")
+            call_id = str(getattr(raw_tool_call, "id", None)
+                          or f"tool-call-{index}")
             arguments = getattr(raw_tool_call, "args", {})
             parse_error = getattr(raw_tool_call, "parse_error", None)
             raw_arguments = getattr(raw_tool_call, "raw_arguments", None)
