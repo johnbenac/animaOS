@@ -129,12 +129,13 @@ def persist_agent_result(
 ) -> None:
     sequence_id = initial_sequence_id
 
-    for trace in result.step_traces:
+    for trace_index, trace in enumerate(result.step_traces):
         step = create_step(
             db,
             thread_id=thread.id,
             run_id=run.id,
             trace=trace,
+            prompt_budget=result.prompt_budget if trace_index == 0 else None,
         )
 
         if trace.assistant_text or trace.tool_calls:
@@ -252,17 +253,22 @@ def create_step(
     thread_id: int,
     run_id: int,
     trace: StepTrace,
+    prompt_budget: object | None = None,
 ) -> AgentStep:
+    request_json: dict[str, object] = {
+        "messages": [asdict(message) for message in trace.request_messages],
+        "allowed_tools": list(trace.allowed_tools),
+        "force_tool_call": trace.force_tool_call,
+    }
+    if prompt_budget is not None:
+        request_json["prompt_budget"] = asdict(prompt_budget)
+
     step = AgentStep(
         thread_id=thread_id,
         run_id=run_id,
         step_index=trace.step_index,
         status="completed",
-        request_json={
-            "messages": [asdict(message) for message in trace.request_messages],
-            "allowed_tools": list(trace.allowed_tools),
-            "force_tool_call": trace.force_tool_call,
-        },
+        request_json=request_json,
         response_json={
             "assistant_text": trace.assistant_text,
             "tool_results": [asdict(result) for result in trace.tool_results],

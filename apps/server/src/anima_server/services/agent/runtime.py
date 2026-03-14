@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from anima_server.config import settings
 from anima_server.services.agent.adapters import build_adapter
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
+from anima_server.services.agent.compaction import estimate_message_tokens
 from anima_server.services.agent.executor import ToolExecutor
 from anima_server.services.agent.memory_blocks import MemoryBlock
 from anima_server.services.agent.messages import (
@@ -31,8 +33,12 @@ from anima_server.services.agent.streaming import (
     build_tool_call_event,
     build_tool_return_event,
 )
-from anima_server.services.agent.prompt_budget import apply_prompt_budget
-from anima_server.services.agent.system_prompt import SystemPromptContext, build_system_prompt
+from anima_server.services.agent.prompt_budget import PromptBudgetTrace, plan_prompt_budget
+from anima_server.services.agent.system_prompt import (
+    SystemPromptContext,
+    build_system_prompt,
+    split_prompt_memory_blocks,
+)
 from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
 
 StreamEventCallback = Callable[[AgentStreamEvent], Awaitable[None]]
@@ -71,15 +77,43 @@ class AgentRuntime:
         *,
         memory_blocks: Sequence[MemoryBlock] = (),
     ) -> str:
+        system_prompt, _prompt_budget = self.build_system_prompt_with_budget(
+            memory_blocks=memory_blocks
+        )
+        return system_prompt
+
+    def build_system_prompt_with_budget(
+        self,
+        *,
+        memory_blocks: Sequence[MemoryBlock] = (),
+    ) -> tuple[str, PromptBudgetTrace | None]:
         self._adapter.prepare()
-        budgeted_blocks = apply_prompt_budget(memory_blocks)
-        return build_system_prompt(
+        dynamic_identity, prompt_memory_blocks = split_prompt_memory_blocks(memory_blocks)
+        budget_plan = plan_prompt_budget(prompt_memory_blocks)
+        system_prompt = build_system_prompt(
             SystemPromptContext(
                 persona_template=self._persona_template,
                 tool_summaries=self._tool_summaries,
-                memory_blocks=budgeted_blocks,
+                memory_blocks=budget_plan.blocks,
+                dynamic_identity=dynamic_identity,
             )
         )
+        prompt_budget = replace(
+            budget_plan.trace,
+            dynamic_identity_chars=len(dynamic_identity),
+            dynamic_identity_token_estimate=estimate_message_tokens(
+                content_text=dynamic_identity,
+                content_json=None,
+                tool_name=None,
+            ),
+            system_prompt_chars=len(system_prompt),
+            system_prompt_token_estimate=estimate_message_tokens(
+                content_text=system_prompt,
+                content_json=None,
+                tool_name=None,
+            ),
+        )
+        return system_prompt, prompt_budget
 
     async def invoke(
         self,
@@ -91,7 +125,9 @@ class AgentRuntime:
         memory_blocks: Sequence[MemoryBlock] = (),
         event_callback: StreamEventCallback | None = None,
     ) -> AgentResult:
-        system_prompt = self.build_system_prompt(memory_blocks=memory_blocks)
+        system_prompt, prompt_budget = self.build_system_prompt_with_budget(
+            memory_blocks=memory_blocks
+        )
         messages = build_conversation_messages(
             history,
             user_message,
@@ -285,6 +321,7 @@ class AgentRuntime:
             stop_reason=stop_reason.value,
             tools_used=tools_used,
             step_traces=step_traces,
+            prompt_budget=prompt_budget,
         )
 
     async def _run_step(

@@ -931,6 +931,22 @@ def test_prompt_budget_drops_lowest_tier_first() -> None:
     assert "recent_episodes" not in labels
 
 
+def test_prompt_budget_prioritizes_current_focus_over_human_within_tier() -> None:
+    from anima_server.services.agent.memory_blocks import MemoryBlock
+    from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
+
+    blocks = [
+        MemoryBlock(label="human", value="H" * 80, description=""),
+        MemoryBlock(label="current_focus", value="focus", description=""),
+        MemoryBlock(label="thread_summary", value="summary", description=""),
+    ]
+    result = apply_prompt_budget(blocks, BudgetConfig(
+        total_budget=32, tier_0_budget=0, tier_1_budget=12,
+        tier_2_budget=0, tier_3_budget=0,
+    ))
+    assert [block.label for block in result] == ["current_focus", "thread_summary"]
+
+
 # --- Invariant Tests: Provider Config ---
 
 

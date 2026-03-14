@@ -18,6 +18,7 @@ class SystemPromptContext:
     persona_template: str = "default"
     tool_summaries: Sequence[str] = field(default_factory=tuple)
     memory_blocks: Sequence[MemoryBlock] = field(default_factory=tuple)
+    dynamic_identity: str = ""
     user_context: str = ""
     additional_instructions: Sequence[str] = field(default_factory=tuple)
     now: datetime | None = None
@@ -54,18 +55,14 @@ def build_system_prompt(
         },
     )
     persona = build_persona_prompt(resolved.persona_template)
-
-    # Extract self-model identity from memory blocks to use as dynamic persona.
-    # When present, identity shapes the agent's voice; remove it from memory
-    # blocks to avoid duplication.
-    all_blocks = list(resolved.memory_blocks)
-    dynamic_identity = ""
-    filtered_blocks: list[Any] = []
-    for block in all_blocks:
-        if block.label == "self_identity":
-            dynamic_identity = block.value.strip()
-        else:
-            filtered_blocks.append(block)
+    dynamic_identity = resolved.dynamic_identity.strip()
+    filtered_blocks = tuple(resolved.memory_blocks)
+    if dynamic_identity:
+        filtered_blocks = tuple(
+            block for block in filtered_blocks if block.label != "self_identity"
+        )
+    else:
+        dynamic_identity, filtered_blocks = split_prompt_memory_blocks(filtered_blocks)
 
     memory_blocks = serialize_memory_blocks(filtered_blocks)
     template_context = {
@@ -108,6 +105,23 @@ def render_memory_blocks_template(memory_blocks: list[dict[str, object]]) -> str
 def build_persona_prompt(template_name: str) -> str:
     template_path = resolve_persona_template_path(template_name)
     return render_template(template_path, {})
+
+
+def split_prompt_memory_blocks(
+    memory_blocks: Sequence[MemoryBlock],
+) -> tuple[str, tuple[MemoryBlock, ...]]:
+    dynamic_identity = ""
+    filtered_blocks: list[Any] = []
+
+    for block in memory_blocks:
+        if block.label == "self_identity" and not dynamic_identity:
+            dynamic_identity = block.value.strip()
+            continue
+        if block.label == "self_identity":
+            continue
+        filtered_blocks.append(block)
+
+    return dynamic_identity, tuple(filtered_blocks)
 
 
 def render_template(path: Path, context: dict[str, Any]) -> str:

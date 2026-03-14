@@ -275,6 +275,11 @@ def _persist_turn_result(
             int(settings.agent_max_tokens * settings.agent_compaction_trigger_ratio),
         ),
         keep_last_messages=max(1, settings.agent_compaction_keep_last_messages),
+        reserved_prompt_tokens=(
+            result.prompt_budget.system_prompt_token_estimate
+            if result.prompt_budget is not None
+            else 0
+        ),
     )
     db.commit()
 

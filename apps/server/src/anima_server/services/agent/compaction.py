@@ -21,6 +21,8 @@ class CompactionResult:
     summary_sequence_id: int
     estimated_tokens_before: int
     estimated_tokens_after: int
+    reserved_prompt_tokens: int
+    effective_trigger_token_limit: int
 
 
 def estimate_message_tokens(
@@ -50,6 +52,7 @@ def compact_thread_context(
     run_id: int | None,
     trigger_token_limit: int,
     keep_last_messages: int,
+    reserved_prompt_tokens: int = 0,
 ) -> CompactionResult | None:
     in_context_rows = db.scalars(
         select(AgentMessage)
@@ -77,7 +80,11 @@ def compact_thread_context(
         )
         for row in in_context_rows
     )
-    if estimated_tokens_before <= trigger_token_limit:
+    effective_trigger_token_limit = max(
+        1,
+        trigger_token_limit - max(0, reserved_prompt_tokens),
+    )
+    if estimated_tokens_before <= effective_trigger_token_limit:
         return None
 
     existing_summary_rows = [row for row in in_context_rows if row.role == "summary"]
@@ -144,6 +151,8 @@ def compact_thread_context(
         summary_sequence_id=summary_sequence_id,
         estimated_tokens_before=estimated_tokens_before,
         estimated_tokens_after=estimated_tokens_after,
+        reserved_prompt_tokens=max(0, reserved_prompt_tokens),
+        effective_trigger_token_limit=effective_trigger_token_limit,
     )
 
 

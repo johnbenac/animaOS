@@ -309,6 +309,43 @@ async def test_runtime_renders_memory_blocks_into_system_prompt() -> None:
     assert "User likes green tea." in system_prompt
 
 
+@pytest.mark.asyncio
+async def test_runtime_preserves_dynamic_identity_without_spending_block_budget() -> None:
+    adapter = QueueAdapter([StepExecutionResult(assistant_text="ok")])
+    runtime = AgentRuntime(adapter=adapter, max_steps=1)
+
+    result = await runtime.invoke(
+        "hello",
+        user_id=1,
+        history=[],
+        memory_blocks=(
+            MemoryBlock(
+                label="self_identity",
+                description="Who I am in this relationship.",
+                value="I am Anima.\n" + ("identity " * 700),
+            ),
+            MemoryBlock(
+                label="current_focus",
+                description="User's current focus.",
+                value="Finish the runtime migration",
+            ),
+        ),
+    )
+
+    system_prompt = adapter.requests[0].messages[0].content
+
+    assert "My Self-Understanding" in system_prompt
+    assert "Finish the runtime migration" in system_prompt
+    assert "<current_focus>" in system_prompt
+    assert result.prompt_budget is not None
+    assert result.prompt_budget.dynamic_identity_chars > 0
+    assert result.prompt_budget.system_prompt_token_estimate > 0
+    assert any(
+        decision.label == "current_focus" and decision.status == "kept"
+        for decision in result.prompt_budget.decisions
+    )
+
+
 def test_assistant_tool_calls_round_trip_from_persistence() -> None:
     with _db_session() as session:
         user = User(
