@@ -5,7 +5,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
-from langchain_core.tools import tool
+from anima_server.services.agent.tools import tool
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker

@@ -15,17 +15,16 @@ dependencies = [
   "fastapi>=0.115.12",
   "httpx>=0.28.1",
   "jinja2>=3.1.6",
-  "langchain-core>=1.2.18",
   "pydantic-settings>=2.11.0",
-  "psycopg[binary]>=3.2.9",
   "sqlalchemy>=2.0.43",
   "uvicorn[standard]>=0.35.0"
 ]
 
 [dependency-groups]
+postgres = ["psycopg[binary]>=3.2.9"]
 dev = [
   "pytest>=8.4.0",
-  "pytest-asyncio>=1.1.0",
+  "pytest-asyncio>=1.3.0",
   "ruff>=0.12.0"
 ]
 

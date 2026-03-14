@@ -4,7 +4,7 @@ import json
 
 import httpx
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from anima_server.services.agent.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from anima_server.services.agent.openai_compatible_client import (
     OpenAICompatibleChatClient,

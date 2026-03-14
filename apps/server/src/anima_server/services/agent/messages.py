@@ -1,12 +1,40 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from typing import Any
-
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from anima_server.services.agent.runtime_types import ToolCall
 from anima_server.services.agent.state import StoredMessage
+
+
+@dataclass
+class SystemMessage:
+    content: str
+    type: str = "system"
+
+
+@dataclass
+class HumanMessage:
+    content: str
+    type: str = "human"
+
+
+@dataclass
+class AIMessage:
+    content: str
+    tool_calls: list[dict[str, object]] = field(default_factory=list)
+    usage_metadata: dict[str, object] | None = None
+    response_metadata: dict[str, object] | None = None
+    type: str = "ai"
+
+
+@dataclass
+class ToolMessage:
+    content: str
+    tool_call_id: str
+    name: str | None = None
+    type: str = "tool"
 
 
 def build_conversation_messages(
