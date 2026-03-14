@@ -16,7 +16,9 @@ from anima_server.models import MemoryDailyLog, MemoryItem, User
 from anima_server.services.agent import invalidate_agent_runtime_cache, run_agent
 from anima_server.services.agent.consolidation import (
     consolidate_turn_memory,
+    consolidate_turn_memory_with_llm,
     drain_background_memory_tasks,
+    LLMExtractionResult,
 )
 from anima_server.services.agent.memory_store import get_memory_items
 
@@ -142,6 +144,157 @@ def test_consolidate_turn_memory_deduplicates_bullet_memory() -> None:
             prefs = get_memory_items(db2, user_id=user.id, category="preference")
             matching = [p for p in prefs if "green tea" in p.content.lower()]
             assert len(matching) == 1
+
+
+def test_consolidate_turn_memory_supersedes_conflicting_preference() -> None:
+    with _db_session() as session:
+        user = User(
+            username="conflict-test",
+            password_hash="not-used",
+            display_name="Conflict Test",
+        )
+        session.add(user)
+        session.commit()
+
+        eng = session.get_bind()
+        test_factory = sessionmaker(
+            bind=eng,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+            class_=Session,
+        )
+
+        first = consolidate_turn_memory(
+            user_id=user.id,
+            user_message="I love green tea.",
+            assistant_response="Noted.",
+            db_factory=test_factory,
+        )
+        second = consolidate_turn_memory(
+            user_id=user.id,
+            user_message="Actually I hate green tea now.",
+            assistant_response="Updated.",
+            db_factory=test_factory,
+        )
+
+        assert first.preferences_added == ["Likes green tea"]
+        assert second.preferences_added == []
+        assert second.conflicts_resolved == ["Likes green tea -> Dislikes green tea now"]
+
+        with test_factory() as db2:
+            active_prefs = get_memory_items(db2, user_id=user.id, category="preference")
+            all_prefs = get_memory_items(
+                db2, user_id=user.id, category="preference", active_only=False
+            )
+
+    assert len(active_prefs) == 1
+    assert active_prefs[0].content == "Dislikes green tea now"
+    assert len(all_prefs) == 2
+    assert any(item.superseded_by is not None for item in all_prefs)
+
+
+def test_consolidate_turn_memory_keeps_focus_stable_when_unchanged() -> None:
+    with _db_session() as session:
+        user = User(
+            username="focus-dedup-test",
+            password_hash="not-used",
+            display_name="Focus Dedup Test",
+        )
+        session.add(user)
+        session.commit()
+
+        eng = session.get_bind()
+        test_factory = sessionmaker(
+            bind=eng,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+            class_=Session,
+        )
+
+        consolidate_turn_memory(
+            user_id=user.id,
+            user_message="My current focus is finishing the runtime migration.",
+            assistant_response="Noted.",
+            db_factory=test_factory,
+        )
+        second = consolidate_turn_memory(
+            user_id=user.id,
+            user_message="My main focus is finishing the runtime migration.",
+            assistant_response="Still noted.",
+            db_factory=test_factory,
+        )
+
+        with test_factory() as db2:
+            focus_items = get_memory_items(
+                db2, user_id=user.id, category="focus", active_only=False
+            )
+
+    assert second.current_focus_updated == "finishing the runtime migration"
+    assert len(focus_items) == 1
+
+
+@pytest.mark.asyncio
+async def test_consolidate_turn_memory_with_llm_deduplicates_slot_paraphrase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _db_session() as session:
+        user = User(
+            username="llm-dedup-test",
+            password_hash="not-used",
+            display_name="LLM Dedup Test",
+        )
+        session.add(user)
+        session.commit()
+
+        eng = session.get_bind()
+        test_factory = sessionmaker(
+            bind=eng,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+            class_=Session,
+        )
+
+        async def fake_extract(**kwargs: object) -> LLMExtractionResult:
+            del kwargs
+            return LLMExtractionResult(
+                memories=[
+                    {
+                        "content": "Works as product designer",
+                        "category": "fact",
+                        "importance": 4,
+                    }
+                ]
+            )
+
+        async def fail_conflict(**kwargs: object) -> str:
+            raise AssertionError("resolve_conflict should not be called for slot duplicates")
+
+        monkeypatch.setattr(
+            "anima_server.services.agent.consolidation.extract_memories_via_llm",
+            fake_extract,
+        )
+        monkeypatch.setattr(
+            "anima_server.services.agent.consolidation.resolve_conflict",
+            fail_conflict,
+        )
+
+        result = await consolidate_turn_memory_with_llm(
+            user_id=user.id,
+            user_message="I work as a product designer.",
+            assistant_response="Noted.",
+            db_factory=test_factory,
+        )
+
+        with test_factory() as db2:
+            facts = get_memory_items(db2, user_id=user.id, category="fact")
+
+    assert result.facts_added == ["Works as a product designer"]
+    assert result.llm_items_added == []
+    assert len(facts) == 1
+    assert facts[0].content == "Works as a product designer"
 
 
 @pytest.mark.asyncio

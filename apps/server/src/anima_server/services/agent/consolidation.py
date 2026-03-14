@@ -13,9 +13,8 @@ from typing import Any
 from anima_server.config import settings
 from anima_server.services.agent.memory_store import (
     add_daily_log,
-    add_memory_item,
-    find_similar_items,
     set_current_focus,
+    store_memory_item,
     supersede_memory_item,
 )
 
@@ -164,26 +163,36 @@ def consolidate_turn_memory(
         extracted = extract_turn_memory(user_message)
 
         for fact in extracted.facts:
-            item = add_memory_item(
+            write_result = store_memory_item(
                 db,
                 user_id=user_id,
                 content=fact,
                 category="fact",
                 source="extraction",
+                allow_update=True,
             )
-            if item is not None:
+            if write_result.action == "added":
                 result.facts_added.append(fact)
+            elif write_result.action == "superseded":
+                result.conflicts_resolved.append(
+                    f"{write_result.matched_item.content} -> {fact}"
+                )
 
         for pref in extracted.preferences:
-            item = add_memory_item(
+            write_result = store_memory_item(
                 db,
                 user_id=user_id,
                 content=pref,
                 category="preference",
                 source="extraction",
+                allow_update=True,
             )
-            if item is not None:
+            if write_result.action == "added":
                 result.preferences_added.append(pref)
+            elif write_result.action == "superseded":
+                result.conflicts_resolved.append(
+                    f"{write_result.matched_item.content} -> {pref}"
+                )
 
         if extracted.current_focus:
             set_current_focus(db, user_id=user_id, focus=extracted.current_focus)
@@ -260,31 +269,50 @@ async def consolidate_turn_memory_with_llm(
             if not isinstance(importance, int) or not 1 <= importance <= 5:
                 importance = 3
 
-            similar = find_similar_items(
+            write_result = store_memory_item(
                 db,
                 user_id=user_id,
                 content=content,
                 category=category,
+                importance=importance,
+                source="extraction",
+                allow_update=True,
+                defer_on_similar=True,
             )
 
-            if similar:
+            if write_result.action == "added":
+                result.llm_items_added.append(content)
+                continue
+
+            if write_result.action == "superseded":
+                result.conflicts_resolved.append(
+                    f"{write_result.matched_item.content} -> {content}"
+                )
+                result.llm_items_added.append(content)
+                continue
+
+            if write_result.action == "duplicate":
+                continue
+
+            if write_result.action == "similar" and write_result.similar_items:
                 resolution = await resolve_conflict(
-                    existing_content=similar[0].content,
+                    existing_content=write_result.similar_items[0].content,
                     new_content=content,
                 )
                 if resolution == "UPDATE":
-                    supersede_memory_item(
+                    updated_item = supersede_memory_item(
                         db,
-                        old_item_id=similar[0].id,
+                        old_item_id=write_result.similar_items[0].id,
                         new_content=content,
                         importance=importance,
                     )
-                    result.conflicts_resolved.append(
-                        f"{similar[0].content} -> {content}"
-                    )
-                    result.llm_items_added.append(content)
-                else:
-                    item = add_memory_item(
+                    if updated_item is not None:
+                        result.conflicts_resolved.append(
+                            f"{write_result.similar_items[0].content} -> {content}"
+                        )
+                        result.llm_items_added.append(content)
+                elif resolution == "DIFFERENT":
+                    create_result = store_memory_item(
                         db,
                         user_id=user_id,
                         content=content,
@@ -292,19 +320,8 @@ async def consolidate_turn_memory_with_llm(
                         importance=importance,
                         source="extraction",
                     )
-                    if item is not None:
+                    if create_result.action == "added":
                         result.llm_items_added.append(content)
-            else:
-                item = add_memory_item(
-                    db,
-                    user_id=user_id,
-                    content=content,
-                    category=category,
-                    importance=importance,
-                    source="extraction",
-                )
-                if item is not None:
-                    result.llm_items_added.append(content)
 
         db.commit()
 

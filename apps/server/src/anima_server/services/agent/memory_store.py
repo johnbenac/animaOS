@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
+import re
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -14,6 +16,44 @@ _DECAY_HALF_LIFE_DAYS = 14.0
 _WEIGHT_IMPORTANCE = 0.4
 _WEIGHT_RECENCY = 0.35
 _WEIGHT_ACCESS = 0.25
+_WORD_RE = re.compile(r"[a-z0-9']+")
+_TOKEN_STOPWORDS = frozenset({
+    "a", "an", "the", "i", "me", "my", "am", "is", "are", "was", "were",
+    "as", "at", "in", "to", "for", "of", "on", "with", "and",
+    "now", "today", "currently", "actually", "really", "very",
+})
+_FACT_SLOT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^age:\s*(?P<value>.+)$", re.IGNORECASE), "age"),
+    (re.compile(r"^birthday:\s*(?P<value>.+)$", re.IGNORECASE), "birthday"),
+    (re.compile(r"^works as\s+(?P<value>.+)$", re.IGNORECASE), "occupation"),
+    (re.compile(r"^works at\s+(?P<value>.+)$", re.IGNORECASE), "employer"),
+    (re.compile(r"^lives in\s+(?P<value>.+)$", re.IGNORECASE), "location"),
+    (re.compile(r"^display name:\s*(?P<value>.+)$", re.IGNORECASE), "display_name"),
+    (re.compile(r"^username:\s*(?P<value>.+)$", re.IGNORECASE), "username"),
+    (re.compile(r"^gender:\s*(?P<value>.+)$", re.IGNORECASE), "gender"),
+)
+_PREFERENCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^(?:likes|love(?:s)?|enjoy(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
+    (re.compile(r"^prefers?\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
+    (re.compile(r"^(?:dislikes?|hate(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "negative"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryWriteAnalysis:
+    action: str
+    matched_item: MemoryItem | None = None
+    similar_items: tuple[MemoryItem, ...] = ()
+    reason: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryWriteResult:
+    action: str
+    item: MemoryItem | None = None
+    matched_item: MemoryItem | None = None
+    similar_items: tuple[MemoryItem, ...] = ()
+    reason: str = ""
 
 
 def add_memory_item(
@@ -25,9 +65,13 @@ def add_memory_item(
     importance: int = 3,
     source: str = "extraction",
 ) -> MemoryItem | None:
+    content = _clean_memory_text(content)
+    if not content:
+        return None
+
     existing = get_memory_items(db, user_id=user_id, category=category)
     for item in existing:
-        if _is_duplicate(item.content, content):
+        if _classify_memory_relation(item.content, content, category) == "duplicate":
             return None
 
     memory_item = MemoryItem(
@@ -40,6 +84,121 @@ def add_memory_item(
     db.add(memory_item)
     db.flush()
     return memory_item
+
+
+def analyze_memory_item(
+    db: Session,
+    *,
+    user_id: int,
+    content: str,
+    category: str,
+    similarity_threshold: float = 0.5,
+) -> MemoryWriteAnalysis:
+    content = _clean_memory_text(content)
+    if not content:
+        return MemoryWriteAnalysis(action="rejected", reason="empty_content")
+
+    existing = get_memory_items(db, user_id=user_id, category=category)
+    similar_items: list[MemoryItem] = []
+
+    for item in existing:
+        relation = _classify_memory_relation(item.content, content, category)
+        if relation == "duplicate":
+            return MemoryWriteAnalysis(
+                action="duplicate",
+                matched_item=item,
+                reason="equivalent_memory",
+            )
+        if relation == "update":
+            return MemoryWriteAnalysis(
+                action="update",
+                matched_item=item,
+                reason="same_slot_new_value",
+            )
+        if _similarity(item.content, content) > similarity_threshold:
+            similar_items.append(item)
+
+    if similar_items:
+        return MemoryWriteAnalysis(
+            action="similar",
+            similar_items=tuple(similar_items),
+            reason="semantic_overlap",
+        )
+
+    return MemoryWriteAnalysis(action="add", reason="new_memory")
+
+
+def store_memory_item(
+    db: Session,
+    *,
+    user_id: int,
+    content: str,
+    category: str,
+    importance: int = 3,
+    source: str = "extraction",
+    allow_update: bool = False,
+    defer_on_similar: bool = False,
+) -> MemoryWriteResult:
+    cleaned_content = _clean_memory_text(content)
+    analysis = analyze_memory_item(
+        db,
+        user_id=user_id,
+        content=cleaned_content,
+        category=category,
+    )
+
+    if analysis.action == "duplicate":
+        return MemoryWriteResult(
+            action="duplicate",
+            matched_item=analysis.matched_item,
+            reason=analysis.reason,
+        )
+
+    if analysis.action == "update":
+        if not allow_update or analysis.matched_item is None:
+            return MemoryWriteResult(
+                action="conflict",
+                matched_item=analysis.matched_item,
+                reason=analysis.reason,
+            )
+        item = supersede_memory_item(
+            db,
+            old_item_id=analysis.matched_item.id,
+            new_content=cleaned_content,
+            importance=importance,
+        )
+        return MemoryWriteResult(
+            action="superseded",
+            item=item,
+            matched_item=analysis.matched_item,
+            reason=analysis.reason,
+        )
+
+    if analysis.action == "similar" and defer_on_similar:
+        return MemoryWriteResult(
+            action="similar",
+            similar_items=analysis.similar_items,
+            reason=analysis.reason,
+        )
+
+    if analysis.action == "rejected":
+        return MemoryWriteResult(action="rejected", reason=analysis.reason)
+
+    item = MemoryItem(
+        user_id=user_id,
+        content=cleaned_content,
+        category=category,
+        importance=importance,
+        source=source,
+    )
+    db.add(item)
+    db.flush()
+    return MemoryWriteResult(
+        action="added",
+        item=item,
+        similar_items=analysis.similar_items,
+        reason=analysis.reason,
+    )
 
 
 def get_memory_items(
@@ -214,6 +373,7 @@ def set_current_focus(
     user_id: int,
     focus: str,
 ) -> MemoryItem:
+    focus = _clean_memory_text(focus)
     existing = db.scalar(
         select(MemoryItem)
         .where(
@@ -225,6 +385,9 @@ def set_current_focus(
         .limit(1)
     )
     if existing is not None:
+        relation = _classify_memory_relation(existing.content, focus, "focus")
+        if relation == "duplicate":
+            return existing
         return supersede_memory_item(
             db,
             old_item_id=existing.id,
@@ -255,20 +418,93 @@ def find_similar_items(
     return [
         item for item in existing
         if _similarity(item.content, content) > threshold
-        and not _is_duplicate(item.content, content)
+        and _classify_memory_relation(item.content, content, category) != "duplicate"
     ]
 
 
 def _is_duplicate(existing_content: str, new_content: str) -> bool:
-    return existing_content.strip().lower() == new_content.strip().lower()
+    return _clean_memory_text(existing_content).casefold() == _clean_memory_text(new_content).casefold()
+
+
+def _classify_memory_relation(
+    existing_content: str,
+    new_content: str,
+    category: str,
+) -> str:
+    normalized_existing = _clean_memory_text(existing_content)
+    normalized_new = _clean_memory_text(new_content)
+
+    if not normalized_existing or not normalized_new:
+        return "different"
+    if normalized_existing.casefold() == normalized_new.casefold():
+        return "duplicate"
+
+    if category == "fact":
+        existing_slot = _extract_fact_slot(normalized_existing)
+        new_slot = _extract_fact_slot(normalized_new)
+        if existing_slot is not None and new_slot is not None and existing_slot[0] == new_slot[0]:
+            return "duplicate" if existing_slot[1] == new_slot[1] else "update"
+
+    if category == "preference":
+        existing_pref = _extract_preference_signal(normalized_existing)
+        new_pref = _extract_preference_signal(normalized_new)
+        if (
+            existing_pref is not None
+            and new_pref is not None
+            and existing_pref[0] == new_pref[0]
+        ):
+            return "duplicate" if existing_pref[1] == new_pref[1] else "update"
+
+    if category == "focus":
+        return "duplicate" if _normalize_subject(normalized_existing) == _normalize_subject(normalized_new) else "update"
+
+    return "different"
 
 
 def _similarity(a: str, b: str) -> float:
     """Simple word-overlap (Jaccard) similarity. Returns 0.0-1.0."""
-    words_a = set(a.lower().split())
-    words_b = set(b.lower().split())
+    words_a = set(_tokenize(a))
+    words_b = set(_tokenize(b))
     if not words_a or not words_b:
         return 0.0
     intersection = words_a & words_b
     union = words_a | words_b
     return len(intersection) / len(union)
+
+
+def _clean_memory_text(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip(" \t\r\n\"'`.,;:!?")
+
+
+def _tokenize(value: str) -> list[str]:
+    return [
+        token
+        for token in _WORD_RE.findall(value.lower())
+        if token not in _TOKEN_STOPWORDS
+    ]
+
+
+def _normalize_subject(value: str) -> str:
+    return " ".join(_tokenize(value))
+
+
+def _extract_fact_slot(value: str) -> tuple[str, str] | None:
+    for pattern, slot in _FACT_SLOT_PATTERNS:
+        match = pattern.match(value)
+        if match is None:
+            continue
+        normalized = _normalize_subject(match.group("value"))
+        if normalized:
+            return slot, normalized
+    return None
+
+
+def _extract_preference_signal(value: str) -> tuple[str, str] | None:
+    for pattern, polarity in _PREFERENCE_PATTERNS:
+        match = pattern.match(value)
+        if match is None:
+            continue
+        normalized = _normalize_subject(match.group("value"))
+        if normalized:
+            return normalized, polarity
+    return None
