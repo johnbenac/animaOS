@@ -22,6 +22,7 @@ def schedule_reflection(
     *,
     user_id: int,
     thread_id: int | None = None,
+    db_factory: Callable[..., object] | None = None,
 ) -> None:
     """Schedule a reflection task after a period of inactivity.
 
@@ -48,6 +49,7 @@ def schedule_reflection(
                 user_id=user_id,
                 thread_id=thread_id,
                 scheduled_at=now,
+                db_factory=db_factory,
             )
         )
 
@@ -57,6 +59,7 @@ async def _delayed_reflection(
     user_id: int,
     thread_id: int | None,
     scheduled_at: datetime,
+    db_factory: Callable[..., object] | None,
 ) -> None:
     """Wait for the inactivity period, then run reflection if no new activity occurred."""
     try:
@@ -69,7 +72,7 @@ async def _delayed_reflection(
         if last is not None and last > scheduled_at:
             return
 
-    await run_reflection(user_id=user_id, thread_id=thread_id)
+    await run_reflection(user_id=user_id, thread_id=thread_id, db_factory=db_factory)
 
 
 async def run_reflection(
@@ -134,22 +137,20 @@ async def run_reflection(
 
 async def cancel_pending_reflection(*, user_id: int | None = None) -> None:
     """Cancel pending reflection tasks. If user_id given, cancel only that user's."""
+    tasks_to_await: list[asyncio.Task[None]] = []
     with _reflection_lock:
         if user_id is not None:
             task = _pending_reflections.pop(user_id, None)
             if task is not None and not task.done():
                 task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                tasks_to_await.append(task)
+            _last_activities.pop(user_id, None)
         else:
-            for uid, task in list(_pending_reflections.items()):
+            for task in list(_pending_reflections.values()):
                 if not task.done():
                     task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+                    tasks_to_await.append(task)
             _pending_reflections.clear()
             _last_activities.clear()
+    if tasks_to_await:
+        await asyncio.gather(*tasks_to_await, return_exceptions=True)

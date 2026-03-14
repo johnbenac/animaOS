@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -52,11 +53,21 @@ def create_app() -> FastAPI:
         _request: Request,
         exc: RequestValidationError,
     ) -> JSONResponse:
+        details = []
+        for error in exc.errors():
+            normalized = dict(error)
+            ctx = normalized.get("ctx")
+            if isinstance(ctx, dict):
+                normalized["ctx"] = {
+                    key: str(value) if isinstance(value, Exception) else value
+                    for key, value in ctx.items()
+                }
+            details.append(normalized)
         return JSONResponse(
             status_code=422,
             content={
                 "error": "Invalid request",
-                "details": exc.errors(),
+                "details": jsonable_encoder(details),
             },
         )
 

@@ -43,12 +43,12 @@ from anima_server.services.crypto import (
 VAULT_VERSION = 2
 
 
-def export_vault(db: Session, passphrase: str) -> dict[str, Any]:
+def export_vault(db: Session, passphrase: str, *, user_id: int | None = None) -> dict[str, Any]:
     payload = {
         "version": VAULT_VERSION,
         "createdAt": datetime.now(UTC).isoformat(),
-        "database": export_database_snapshot(db),
-        "userFiles": read_data_snapshot(),
+        "database": export_database_snapshot(db, user_id=user_id),
+        "userFiles": read_data_snapshot(user_id=user_id),
     }
     plaintext = json.dumps(payload)
     envelope = encrypt_string(plaintext, passphrase)
@@ -61,7 +61,17 @@ def export_vault(db: Session, passphrase: str) -> dict[str, Any]:
     }
 
 
-def import_vault(db: Session, vault: str, passphrase: str) -> dict[str, Any]:
+def import_vault(db: Session, vault: str, passphrase: str, *, user_id: int | None = None) -> dict[str, Any]:
+    """Import an encrypted vault, performing a full local restore.
+
+    NOTE: This is a whole-app restore — ``restore_database_snapshot`` clears
+    ALL tables before inserting the vault's data, regardless of ``user_id``.
+    The ``user_id`` param is accepted for API symmetry with ``export_vault``
+    but is not used to scope the restore.  This is intentional for the
+    single-user local deployment model: import replaces the entire local
+    state with the vault contents.  A true per-user merge would require
+    conflict resolution logic across every table.
+    """
     try:
         envelope = json.loads(vault)
     except json.JSONDecodeError as exc:
@@ -181,55 +191,79 @@ def decrypt_string(envelope: dict[str, Any], passphrase: str) -> str:
     return plaintext.decode("utf-8")
 
 
-def export_database_snapshot(db: Session) -> dict[str, list[dict[str, Any]]]:
-    users = [serialize_user_record(user) for user in db.scalars(select(User)).all()]
+def export_database_snapshot(db: Session, *, user_id: int | None = None) -> dict[str, list[dict[str, Any]]]:
+    def _scoped(query, model):  # type: ignore[no-untyped-def]
+        if user_id is not None and hasattr(model, "user_id"):
+            return query.where(model.user_id == user_id)
+        return query
+
+    if user_id is not None:
+        users = [serialize_user_record(u) for u in db.scalars(select(User).where(User.id == user_id)).all()]
+    else:
+        users = [serialize_user_record(u) for u in db.scalars(select(User)).all()]
     user_keys = [
         serialize_user_key_record(user_key)
-        for user_key in db.scalars(select(UserKey)).all()
+        for user_key in db.scalars(_scoped(select(UserKey), UserKey)).all()
     ]
     memory_items = [
         serialize_memory_item_record(item)
-        for item in db.scalars(select(MemoryItem)).all()
+        for item in db.scalars(_scoped(select(MemoryItem), MemoryItem)).all()
     ]
     memory_episodes = [
         serialize_memory_episode_record(ep)
-        for ep in db.scalars(select(MemoryEpisode)).all()
+        for ep in db.scalars(_scoped(select(MemoryEpisode), MemoryEpisode)).all()
     ]
     memory_daily_logs = [
         serialize_memory_daily_log_record(log)
-        for log in db.scalars(select(MemoryDailyLog)).all()
+        for log in db.scalars(_scoped(select(MemoryDailyLog), MemoryDailyLog)).all()
     ]
     tasks = [
         serialize_task_record(task)
-        for task in db.scalars(select(Task)).all()
+        for task in db.scalars(_scoped(select(Task), Task)).all()
     ]
     agent_threads = [
         serialize_agent_thread_record(t)
-        for t in db.scalars(select(AgentThread)).all()
+        for t in db.scalars(_scoped(select(AgentThread), AgentThread)).all()
     ]
+    # Scope runs/steps/messages via user_id on runs, thread_id on steps/messages
     agent_runs = [
         serialize_agent_run_record(r)
-        for r in db.scalars(select(AgentRun)).all()
+        for r in db.scalars(_scoped(select(AgentRun), AgentRun)).all()
     ]
-    agent_steps = [
-        serialize_agent_step_record(s)
-        for s in db.scalars(select(AgentStep)).all()
-    ]
-    agent_messages = [
-        serialize_agent_message_record(m)
-        for m in db.scalars(select(AgentMessage)).all()
-    ]
+    if user_id is not None:
+        scoped_thread_ids = [t["id"] for t in agent_threads]
+        agent_steps = [
+            serialize_agent_step_record(s)
+            for s in db.scalars(
+                select(AgentStep).where(AgentStep.thread_id.in_(scoped_thread_ids))
+            ).all()
+        ] if scoped_thread_ids else []
+        agent_messages = [
+            serialize_agent_message_record(m)
+            for m in db.scalars(
+                select(AgentMessage).where(AgentMessage.thread_id.in_(scoped_thread_ids))
+            ).all()
+        ] if scoped_thread_ids else []
+    else:
+        agent_steps = [
+            serialize_agent_step_record(s)
+            for s in db.scalars(select(AgentStep)).all()
+        ]
+        agent_messages = [
+            serialize_agent_message_record(m)
+            for m in db.scalars(select(AgentMessage)).all()
+        ]
     session_notes = [
         serialize_session_note_record(n)
-        for n in db.scalars(select(SessionNote)).all()
+        for n in db.scalars(_scoped(select(SessionNote), SessionNote)).all()
     ]
     self_model_blocks = [
         serialize_self_model_block_record(b)
-        for b in db.scalars(select(SelfModelBlock)).all()
+        for b in db.scalars(_scoped(select(SelfModelBlock), SelfModelBlock)).all()
     ]
     emotional_signals = [
         serialize_emotional_signal_record(s)
-        for s in db.scalars(select(EmotionalSignal)).all()
+        for s in db.scalars(_scoped(select(EmotionalSignal), EmotionalSignal)).all()
     ]
     return {
         "users": users,
@@ -533,7 +567,7 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
         raise
 
 
-def read_data_snapshot() -> dict[str, str]:
+def read_data_snapshot(*, user_id: int | None = None) -> dict[str, str]:
     root = settings.data_dir
     if not root.exists():
         return {}
@@ -545,6 +579,13 @@ def read_data_snapshot() -> dict[str, str]:
         relative_path = path.relative_to(root)
         if relative_path.parts and relative_path.parts[0] == "chroma":
             continue
+        # Scope to user directory if user_id is set (files are stored under users/{id}/)
+        if user_id is not None and relative_path.parts:
+            if relative_path.parts[0] == "users" and len(relative_path.parts) > 1:
+                if relative_path.parts[1] != str(user_id):
+                    continue
+            elif relative_path.parts[0] == "users":
+                continue
         snapshot[relative_path.as_posix()] = path.read_text(encoding="utf-8")
     return snapshot
 

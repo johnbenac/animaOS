@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from anima_server.db.base import Base
 from anima_server.models import MemoryDailyLog, MemoryEpisode, User
+from anima_server.services.agent import reflection as reflection_service
 from anima_server.services.agent.reflection import run_reflection
 
 
@@ -110,3 +112,17 @@ async def test_run_reflection_does_not_fail_with_no_turns() -> None:
         with test_factory() as db2:
             episodes = db2.query(MemoryEpisode).filter_by(user_id=user.id).all()
             assert len(episodes) == 0
+
+
+@pytest.mark.asyncio
+async def test_cancel_pending_reflection_clears_user_state() -> None:
+    user_id = 999
+    reflection_service._last_activities[user_id] = datetime.now(UTC)
+    task = asyncio.create_task(asyncio.sleep(60))
+    reflection_service._pending_reflections[user_id] = task
+
+    await reflection_service.cancel_pending_reflection(user_id=user_id)
+
+    assert user_id not in reflection_service._pending_reflections
+    assert user_id not in reflection_service._last_activities
+    assert task.cancelled() or task.done()

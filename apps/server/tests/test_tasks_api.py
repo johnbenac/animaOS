@@ -133,3 +133,31 @@ def test_tasks_require_auth() -> None:
     with _client() as client:
         resp = client.get("/api/tasks?userId=1")
         assert resp.status_code == 401
+
+
+def test_tasks_reject_invalid_due_date() -> None:
+    with _client() as client:
+        reg = _register_user(client)
+        user_id = reg["id"]
+        headers = {"x-anima-unlock": reg["unlockToken"]}
+
+        resp = client.post(
+            "/api/tasks",
+            headers=headers,
+            json={"userId": user_id, "text": "Buy groceries", "dueDate": "tomorrow"},
+        )
+        assert resp.status_code == 422
+
+
+def test_tasks_reject_blank_text() -> None:
+    with _client() as client:
+        reg = _register_user(client)
+        user_id = reg["id"]
+        headers = {"x-anima-unlock": reg["unlockToken"]}
+
+        resp = client.post(
+            "/api/tasks",
+            headers=headers,
+            json={"userId": user_id, "text": "   "},
+        )
+        assert resp.status_code == 422

@@ -55,6 +55,12 @@ async def get_config(
     request: Request,
     db: Session = Depends(get_db),
 ) -> AgentConfigResponse:
+    """Return the active agent config.
+
+    NOTE: Config is process-global, not per-user storage.  The ``user_id``
+    path param exists only for auth gating (single-user local app).  If
+    multi-tenant support is needed, migrate to a ``user_config`` DB table.
+    """
     require_unlocked_user(request, user_id)
     return AgentConfigResponse(
         provider=settings.agent_provider,
@@ -71,6 +77,7 @@ async def update_config(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
+    """Update the active agent config (process-global — see GET docstring)."""
     require_unlocked_user(request, user_id)
 
     if payload.provider not in VALID_PROVIDERS:

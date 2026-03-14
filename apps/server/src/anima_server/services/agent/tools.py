@@ -193,6 +193,7 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     """
     from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.models.task import Task
+    from anima_server.schemas.task import normalize_due_date, normalize_task_text
 
     ctx = get_tool_context()
     pri = 2
@@ -201,11 +202,14 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     except (ValueError, TypeError):
         pass
 
+    normalized_text = normalize_task_text(text)
+    normalized_due_date = normalize_due_date(due_date)
+
     task = Task(
         user_id=ctx.user_id,
-        text=text.strip(),
+        text=normalized_text,
         priority=pri,
-        due_date=due_date.strip() if due_date.strip() else None,
+        due_date=normalized_due_date,
     )
     ctx.db.add(task)
     ctx.db.flush()

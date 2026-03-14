@@ -3,6 +3,10 @@
 Generates embeddings via LLM providers and stores them in both:
 - ChromaDB (for fast HNSW-indexed similarity search)
 - MemoryItem.embedding_json (for vault export/import portability)
+
+All supported providers (ollama, openrouter, vllm) expose an
+OpenAI-compatible /v1/embeddings endpoint, so we use a single
+httpx-based implementation for all of them.
 """
 
 from __future__ import annotations
@@ -17,52 +21,97 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryItem
+from anima_server.services.agent.llm import (
+    SUPPORTED_PROVIDERS,
+    resolve_base_url,
+    build_provider_headers,
+)
 
 logger = logging.getLogger(__name__)
+
+# Default embedding models per provider.  Users can override via
+# ANIMA_AGENT_EXTRACTION_MODEL.
+_DEFAULT_EMBEDDING_MODELS: dict[str, str] = {
+    "ollama": "nomic-embed-text",
+    "openrouter": "openai/text-embedding-3-small",
+    "vllm": "text-embedding-3-small",
+}
+
+
+def _resolve_embedding_model() -> str:
+    """Return the embedding model to use, preferring the user-configured one."""
+    configured = settings.agent_extraction_model.strip()
+    if configured:
+        return configured
+    return _DEFAULT_EMBEDDING_MODELS.get(settings.agent_provider, "nomic-embed-text")
+
+
+def _resolve_embedding_base_url() -> str:
+    """Resolve the base URL for embeddings.
+
+    For ollama, the native /api/embed endpoint is used instead of the
+    OpenAI-compatible /v1/embeddings because ollama's /v1/embeddings
+    may not be available in older versions.
+    """
+    provider = settings.agent_provider
+    return resolve_base_url(provider)
 
 
 async def generate_embedding(text: str) -> list[float] | None:
     """Generate an embedding vector for the given text using the configured provider."""
-    if settings.agent_provider == "scaffold":
+    provider = settings.agent_provider
+
+    if provider == "scaffold":
         return None
 
-    provider = settings.agent_provider
+    if provider not in SUPPORTED_PROVIDERS:
+        return None
+
     try:
-        if provider == "openai":
-            return await _embed_openai(text)
         if provider == "ollama":
             return await _embed_ollama(text)
-        if provider == "anthropic":
-            # Anthropic doesn't have an embedding API; fall back to ollama if available
-            return await _embed_ollama(text)
-        return None
+        # openrouter, vllm — all OpenAI-compatible
+        return await _embed_openai_compatible(text)
     except Exception:  # noqa: BLE001
         logger.exception("Embedding generation failed for provider %s", provider)
         return None
 
 
-async def _embed_openai(text: str) -> list[float] | None:
-    try:
-        import openai
-    except ImportError:
-        logger.warning("openai package not installed, skipping embedding")
-        return None
+async def _embed_openai_compatible(text: str) -> list[float] | None:
+    """Generate embeddings via any OpenAI-compatible /v1/embeddings endpoint."""
+    import httpx
 
-    api_key = settings.agent_api_key
-    if not api_key:
-        return None
+    base_url = _resolve_embedding_base_url()
+    model = _resolve_embedding_model()
+    headers = build_provider_headers(settings.agent_provider)
+    headers["Content-Type"] = "application/json"
 
-    client = openai.AsyncOpenAI(api_key=api_key)
-    model = settings.agent_extraction_model or "text-embedding-3-small"
-    response = await client.embeddings.create(input=[text], model=model)
-    return response.data[0].embedding
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{base_url}/embeddings",
+            headers=headers,
+            json={"model": model, "input": [text]},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        entries = data.get("data", [])
+        if entries and isinstance(entries[0], dict):
+            embedding = entries[0].get("embedding")
+            if isinstance(embedding, list):
+                return embedding
+        return None
 
 
 async def _embed_ollama(text: str) -> list[float] | None:
+    """Generate embeddings via ollama's native /api/embed endpoint."""
     import httpx
 
-    base_url = settings.agent_base_url or "http://localhost:11434"
-    model = settings.agent_extraction_model or "nomic-embed-text"
+    # For ollama, use the raw base URL (without /v1 suffix)
+    configured = settings.agent_base_url.strip()
+    base_url = configured if configured else "http://127.0.0.1:11434"
+    # Strip /v1 suffix if present (resolve_base_url adds it for chat)
+    base_url = base_url.removesuffix("/v1")
+    model = _resolve_embedding_model()
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(

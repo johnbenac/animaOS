@@ -209,13 +209,14 @@ async def consolidate_turn_memory_with_llm(
         db_factory=db_factory,
     )
 
-    llm_items = await extract_memories_via_llm(
+    extraction = await extract_memories_via_llm(
         user_message=user_message,
         assistant_response=assistant_response,
     )
+    llm_items = extraction.memories
 
     # Record any emotional signal extracted alongside memories
-    emotion_data = pop_last_extracted_emotion()
+    emotion_data = extraction.emotion
     if emotion_data and emotion_data.get("emotion"):
         try:
             from anima_server.services.agent.emotional_intelligence import record_emotional_signal
@@ -310,14 +311,20 @@ async def consolidate_turn_memory_with_llm(
     return result
 
 
+@dataclass(slots=True)
+class LLMExtractionResult:
+    memories: list[dict[str, Any]] = field(default_factory=list)
+    emotion: dict[str, Any] | None = None
+
+
 async def extract_memories_via_llm(
     *,
     user_message: str,
     assistant_response: str,
-) -> list[dict[str, Any]]:
+) -> LLMExtractionResult:
     """Call the LLM to extract structured memories and emotion from a conversation turn."""
     if settings.agent_provider == "scaffold":
-        return []
+        return LLMExtractionResult()
 
     try:
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
@@ -336,36 +343,25 @@ async def extract_memories_via_llm(
         if not isinstance(content, str):
             content = str(content)
 
+        result = LLMExtractionResult()
+
         # Try parsing as object with "memories" and "emotion" fields
         obj = _parse_json_object(content)
         if obj is not None:
             memories = obj.get("memories", [])
             if isinstance(memories, list):
-                # Stash emotion data for the caller to retrieve
+                result.memories = [m for m in memories if isinstance(m, dict)]
                 emotion = obj.get("emotion")
                 if emotion and isinstance(emotion, dict):
-                    _last_extracted_emotion.clear()
-                    _last_extracted_emotion.update(emotion)
-                return [m for m in memories if isinstance(m, dict)]
+                    result.emotion = emotion
+                return result
 
         # Fallback: try as plain array (backward compat)
-        return _parse_json_array(content)
+        result.memories = _parse_json_array(content)
+        return result
     except Exception:  # noqa: BLE001
         logger.exception("LLM memory extraction failed")
-        return []
-
-
-# Temporary storage for emotion extracted alongside memories
-_last_extracted_emotion: dict[str, Any] = {}
-
-
-def pop_last_extracted_emotion() -> dict[str, Any] | None:
-    """Retrieve and clear the last extracted emotion from LLM extraction."""
-    if not _last_extracted_emotion:
-        return None
-    result = dict(_last_extracted_emotion)
-    _last_extracted_emotion.clear()
-    return result
+        return LLMExtractionResult()
 
 
 async def resolve_conflict(
@@ -495,6 +491,7 @@ async def run_background_memory_consolidation(
     user_id: int,
     user_message: str,
     assistant_response: str,
+    db_factory: Callable[..., object] | None = None,
 ) -> None:
     try:
         if settings.agent_provider != "scaffold":
@@ -502,31 +499,38 @@ async def run_background_memory_consolidation(
                 user_id=user_id,
                 user_message=user_message,
                 assistant_response=assistant_response,
+                db_factory=db_factory,
             )
         else:
             consolidate_turn_memory(
                 user_id=user_id,
                 user_message=user_message,
                 assistant_response=assistant_response,
+                db_factory=db_factory,
             )
     except Exception:  # noqa: BLE001
         logger.exception("Background memory consolidation failed for user %s", user_id)
 
     # Opportunistic embedding backfill for items without embeddings
     try:
-        await _backfill_user_embeddings(user_id)
+        await _backfill_user_embeddings(user_id, db_factory=db_factory)
     except Exception:  # noqa: BLE001
         logger.debug("Embedding backfill skipped for user %s", user_id)
 
 
-async def _backfill_user_embeddings(user_id: int) -> None:
+async def _backfill_user_embeddings(
+    user_id: int,
+    *,
+    db_factory: Callable[..., object] | None = None,
+) -> None:
     """Embed any memory items that don't have embeddings yet."""
     if settings.agent_provider == "scaffold":
         return
     from anima_server.db.session import SessionLocal
     from anima_server.services.agent.embeddings import backfill_embeddings
 
-    with SessionLocal() as db:
+    factory = db_factory or SessionLocal
+    with factory() as db:
         count = await backfill_embeddings(db, user_id=user_id, batch_size=10)
         if count > 0:
             db.commit()
@@ -538,6 +542,7 @@ def schedule_background_memory_consolidation(
     user_id: int,
     user_message: str,
     assistant_response: str,
+    db_factory: Callable[..., object] | None = None,
 ) -> None:
     if not settings.agent_background_memory_enabled:
         return
@@ -552,6 +557,7 @@ def schedule_background_memory_consolidation(
             user_id=user_id,
             user_message=user_message,
             assistant_response=assistant_response,
+            db_factory=db_factory,
         )
     )
     with _background_tasks_lock:

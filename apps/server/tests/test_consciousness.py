@@ -676,6 +676,40 @@ def test_create_task_tool_no_due_date() -> None:
             clear_tool_context()
 
 
+def test_create_task_tool_rejects_blank_text() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task
+        import pytest
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            with pytest.raises(ValueError, match="Task text cannot be empty"):
+                create_task("   ")
+        finally:
+            clear_tool_context()
+
+
+def test_create_task_tool_rejects_invalid_due_date() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task
+        import pytest
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            with pytest.raises(ValueError, match="YYYY-MM-DD"):
+                create_task("Buy groceries", due_date="tomorrow")
+        finally:
+            clear_tool_context()
+
+
 def test_list_tasks_tool() -> None:
     with _db_session() as db:
         user, thread = _setup(db)

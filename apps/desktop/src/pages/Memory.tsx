@@ -5,6 +5,7 @@ import {
   type MemoryItemData,
   type MemoryEpisodeData,
   type MemoryOverviewData,
+  type MemorySearchResult,
 } from "../lib/api";
 
 type Tab = "facts" | "preferences" | "goals" | "relationships" | "episodes";
@@ -31,6 +32,9 @@ export default function Memory() {
   const [showCreate, setShowCreate] = useState(false);
   const [newContent, setNewContent] = useState("");
   const [newImportance, setNewImportance] = useState(3);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<MemorySearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -116,6 +120,24 @@ export default function Memory() {
     }
   };
 
+  const handleSearch = async () => {
+    if (!user?.id || !searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await api.memory.search(user.id, searchQuery.trim());
+      setSearchResults(res.results);
+    } catch {
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    setSearchResults(null);
+  };
+
   const categoryForTab = (t: Tab): string =>
     t === "facts" ? "fact" : t === "preferences" ? "preference" : t === "goals" ? "goal" : "relationship";
 
@@ -145,12 +167,38 @@ export default function Memory() {
               </span>
             )}
           </div>
-          {overview?.currentFocus && (
-            <div className="text-[10px] text-(--color-text-muted)">
-              <span className="text-(--color-text-muted)/50 uppercase tracking-wider mr-1.5">Focus:</span>
-              {overview.currentFocus}
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            {overview?.currentFocus && (
+              <div className="text-[10px] text-(--color-text-muted)">
+                <span className="text-(--color-text-muted)/50 uppercase tracking-wider mr-1.5">Focus:</span>
+                {overview.currentFocus}
+              </div>
+            )}
+            <form
+              onSubmit={(e) => { e.preventDefault(); handleSearch(); }}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (!e.target.value.trim()) clearSearch();
+                }}
+                placeholder="Search memories..."
+                className="w-36 bg-(--color-bg-input) border border-(--color-border) rounded-sm px-2 py-0.5 text-[11px] text-(--color-text) placeholder:text-(--color-text-muted)/30 outline-none focus:border-(--color-primary) focus:w-48 transition-all"
+              />
+              {searchResults !== null && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="text-[10px] text-(--color-text-muted)/40 hover:text-(--color-text-muted)"
+                >
+                  ×
+                </button>
+              )}
+            </form>
+          </div>
         </div>
       </div>
 
@@ -176,6 +224,43 @@ export default function Memory() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
+        {/* Search results overlay */}
+        {searchResults !== null && (
+          <div className="space-y-2 max-w-2xl mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-[10px] text-(--color-text-muted) uppercase tracking-wider">
+                {searching ? "Searching..." : `${searchResults.length} result${searchResults.length !== 1 ? "s" : ""} for "${searchQuery}"`}
+              </span>
+              <button
+                onClick={clearSearch}
+                className="text-[10px] text-(--color-text-muted)/50 hover:text-(--color-text-muted) uppercase tracking-wider"
+              >
+                Clear
+              </button>
+            </div>
+            {searchResults.map((r) => (
+              <div
+                key={`${r.type}-${r.id}`}
+                className="bg-(--color-bg-card) border border-(--color-border) rounded-md px-4 py-2.5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-sm text-(--color-text) leading-relaxed flex-1">
+                    {r.content}
+                  </p>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className="text-[9px] px-1.5 py-0.5 bg-(--color-bg-input) border border-(--color-border) rounded uppercase tracking-wider text-(--color-text-muted)">
+                      {r.type === "episode" ? "episode" : r.category}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {searchResults.length === 0 && !searching && (
+              <p className="text-xs text-(--color-text-muted)/60">No matches found.</p>
+            )}
+          </div>
+        )}
+
         {loading && (
           <div className="text-xs text-(--color-text-muted) animate-pulse">Loading...</div>
         )}

@@ -48,8 +48,9 @@ async def maybe_generate_episode(
     with factory() as db:
         today = datetime.now(UTC).date().isoformat()
 
-        existing_episode_count = db.scalar(
-            select(func.count(MemoryEpisode.id)).where(
+        # Sum actual turn_count from existing episodes to avoid offset overlap
+        consumed_turns = db.scalar(
+            select(func.coalesce(func.sum(MemoryEpisode.turn_count), 0)).where(
                 MemoryEpisode.user_id == user_id,
                 MemoryEpisode.date == today,
             )
@@ -66,8 +67,7 @@ async def maybe_generate_episode(
             ).all()
         )
 
-        offset = existing_episode_count * EPISODE_MIN_TURNS
-        remaining_logs = logs[offset:]
+        remaining_logs = logs[consumed_turns:]
 
         if len(remaining_logs) < EPISODE_MIN_TURNS:
             return None

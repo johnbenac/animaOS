@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
 import {
   api,
@@ -38,6 +38,9 @@ export default function Consciousness() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [reflecting, setReflecting] = useState(false);
+  const [sleeping, setSleeping] = useState(false);
+  const [actionMessage, setActionMessage] = useState("");
 
   useEffect(() => {
     if (!user?.id) return;
@@ -104,6 +107,59 @@ export default function Consciousness() {
     if (e.key === "Escape") cancelEdit();
   };
 
+  const reload = useCallback(() => {
+    if (!user?.id) return;
+    Promise.all([
+      api.consciousness.getSelfModel(user.id),
+      api.consciousness.getEmotions(user.id),
+    ]).then(([sm, em]) => {
+      setSelfModel(sm);
+      setEmotions(em);
+    }).catch(() => {});
+  }, [user?.id]);
+
+  const handleReflect = async () => {
+    if (!user?.id || reflecting) return;
+    setReflecting(true);
+    setActionMessage("");
+    try {
+      const result = await api.chat.reflect(user.id) as Record<string, unknown>;
+      const parts: string[] = [];
+      if (result.identityUpdated) parts.push("identity");
+      if (result.innerStateUpdated) parts.push("inner state");
+      if (result.growthLogEntryAdded) parts.push("growth log");
+      if (result.intentionsUpdated) parts.push("intentions");
+      setActionMessage(parts.length ? `Updated: ${parts.join(", ")}` : "No changes needed");
+      reload();
+    } catch (err: any) {
+      setActionMessage(`Failed: ${err.message}`);
+    } finally {
+      setReflecting(false);
+      setTimeout(() => setActionMessage(""), 5000);
+    }
+  };
+
+  const handleSleep = async () => {
+    if (!user?.id || sleeping) return;
+    setSleeping(true);
+    setActionMessage("");
+    try {
+      const result = await api.chat.sleep(user.id) as Record<string, unknown>;
+      const parts: string[] = [];
+      if ((result.contradictionsResolved as number) > 0) parts.push(`${result.contradictionsResolved} contradictions resolved`);
+      if ((result.itemsMerged as number) > 0) parts.push(`${result.itemsMerged} items merged`);
+      if ((result.episodesGenerated as number) > 0) parts.push(`${result.episodesGenerated} episodes generated`);
+      if ((result.embeddingsBackfilled as number) > 0) parts.push(`${result.embeddingsBackfilled} embeddings`);
+      setActionMessage(parts.length ? parts.join(", ") : "Maintenance complete — no changes needed");
+      reload();
+    } catch (err: any) {
+      setActionMessage(`Failed: ${err.message}`);
+    } finally {
+      setSleeping(false);
+      setTimeout(() => setActionMessage(""), 5000);
+    }
+  };
+
   const isEditable = tab !== "emotions" && tab !== "growth_log";
 
   return (
@@ -122,6 +178,25 @@ export default function Consciousness() {
             )}
           </div>
           <div className="flex items-center gap-3">
+            {actionMessage && (
+              <span className="text-[10px] text-(--color-text-muted) tracking-wider">
+                {actionMessage}
+              </span>
+            )}
+            <button
+              onClick={handleReflect}
+              disabled={reflecting || sleeping}
+              className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) uppercase tracking-wider transition-colors disabled:opacity-30"
+            >
+              {reflecting ? "Reflecting..." : "Reflect"}
+            </button>
+            <button
+              onClick={handleSleep}
+              disabled={sleeping || reflecting}
+              className="text-[10px] text-(--color-text-muted) hover:text-(--color-text) uppercase tracking-wider transition-colors disabled:opacity-30"
+            >
+              {sleeping ? "Running..." : "Sleep tasks"}
+            </button>
             {saved && (
               <span className="text-[10px] text-(--color-primary) tracking-wider uppercase">
                 Saved

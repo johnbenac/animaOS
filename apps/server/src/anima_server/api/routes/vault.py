@@ -23,8 +23,8 @@ def export_encrypted_vault(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    require_unlocked_session(request)
-    return export_vault(db, payload.passphrase)
+    session = require_unlocked_session(request)
+    return export_vault(db, payload.passphrase, user_id=session.user_id)
 
 
 @router.post("/import", response_model=VaultImportResponse)
@@ -33,9 +33,9 @@ def import_encrypted_vault(
     request: Request,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    require_unlocked_session(request)
+    session = require_unlocked_session(request)
     try:
-        result = import_vault(db, payload.vault, payload.passphrase)
+        result = import_vault(db, payload.vault, payload.passphrase, user_id=session.user_id)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

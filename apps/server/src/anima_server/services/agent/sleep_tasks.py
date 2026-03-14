@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -145,12 +146,14 @@ async def scan_contradictions(
                 continue
 
             # Find pairs with moderate similarity (potential conflicts)
+            # items are newest-first; swap so item_a=older, item_b=newer
+            # to match the contradiction prompt labels ("Memory A (older)")
             pairs: list[tuple[MemoryItem, MemoryItem]] = []
-            for i, item_a in enumerate(items):
-                for item_b in items[i + 1:]:
-                    sim = _similarity(item_a.content, item_b.content)
+            for i, newer_item in enumerate(items):
+                for older_item in items[i + 1:]:
+                    sim = _similarity(older_item.content, newer_item.content)
                     if 0.3 < sim < 0.95:  # Similar but not duplicate
-                        pairs.append((item_a, item_b))
+                        pairs.append((older_item, newer_item))
 
             for item_a, item_b in pairs[:10]:  # Cap per category
                 found += 1
@@ -182,14 +185,13 @@ async def scan_contradictions(
                     )
                     resolved += 1
                 elif action == "MERGE" and merged:
-                    supersede_memory_item(
+                    # Create one merged item, point both old items at it
+                    merged_item = supersede_memory_item(
                         db, old_item_id=item_a.id, new_content=merged,
                         importance=max(item_a.importance, item_b.importance),
                     )
-                    supersede_memory_item(
-                        db, old_item_id=item_b.id, new_content=merged,
-                        importance=max(item_a.importance, item_b.importance),
-                    )
+                    item_b.superseded_by = merged_item.id
+                    item_b.updated_at = datetime.now(UTC)
                     resolved += 1
 
             db.commit()
@@ -229,13 +231,16 @@ async def synthesize_profile(
                 continue
 
             max_importance = max(item.importance for item in merge_items)
-            for item in merge_items:
-                supersede_memory_item(
-                    db,
-                    old_item_id=item.id,
-                    new_content=merged_content,
-                    importance=max_importance,
-                )
+            # Create one merged item from the first, point remaining at it
+            merged_item = supersede_memory_item(
+                db,
+                old_item_id=merge_items[0].id,
+                new_content=merged_content,
+                importance=max_importance,
+            )
+            for item in merge_items[1:]:
+                item.superseded_by = merged_item.id
+                item.updated_at = datetime.now(UTC)
             merged_count += 1
 
         if merged_count > 0:

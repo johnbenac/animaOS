@@ -36,7 +36,7 @@ from anima_server.services.agent.streaming import (
 )
 from anima_server.services.agent.system_prompt import invalidate_system_prompt_template_cache
 from anima_server.models import AgentMessage, AgentRun, AgentThread
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 _runner_lock = Lock()
 _cached_runner: AgentRuntime | None = None
@@ -114,6 +114,7 @@ async def _execute_agent_turn_locked(
     _run_post_turn_hooks(
         user_id=user_id, thread_id=thread.id,
         user_message=user_message, result=result,
+        db_factory=_build_db_factory(db),
     )
 
     if event_callback is not None:
@@ -268,16 +269,19 @@ def _run_post_turn_hooks(
     thread_id: int,
     user_message: str,
     result: AgentResult,
+    db_factory: Callable[[], Session],
 ) -> None:
     """Stage 4: Schedule background memory and reflection work."""
     schedule_background_memory_consolidation(
         user_id=user_id,
         user_message=user_message,
         assistant_response=result.response,
+        db_factory=db_factory,
     )
     schedule_reflection(
         user_id=user_id,
         thread_id=thread_id,
+        db_factory=db_factory,
     )
 
 
@@ -339,3 +343,14 @@ def list_agent_history(user_id: int, db: Session, *, limit: int = 50) -> list[Ag
 async def reset_agent_thread(user_id: int, db: Session) -> None:
     reset_thread(db, user_id)
     db.commit()
+
+
+def _build_db_factory(db: Session) -> Callable[[], Session]:
+    bind = db.get_bind()
+    resolved_bind = getattr(bind, "engine", bind)
+    return sessionmaker(
+        bind=resolved_bind,
+        autoflush=db.autoflush,
+        expire_on_commit=db.expire_on_commit,
+        class_=type(db),
+    )

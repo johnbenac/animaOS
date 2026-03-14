@@ -10,6 +10,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from anima_server.config import settings
 from anima_server.db.base import Base
 from anima_server.models import MemoryDailyLog, MemoryItem, User
 from anima_server.services.agent import invalidate_agent_runtime_cache, run_agent
@@ -145,9 +146,13 @@ def test_consolidate_turn_memory_deduplicates_bullet_memory() -> None:
 
 @pytest.mark.asyncio
 async def test_run_agent_schedules_background_memory_consolidation() -> None:
+    original_provider = settings.agent_provider
     invalidate_agent_runtime_cache()
 
     try:
+        settings.agent_provider = "scaffold"
+        invalidate_agent_runtime_cache()
+
         with _db_session() as session:
             user = User(
                 username="background-memory",
@@ -163,7 +168,16 @@ async def test_run_agent_schedules_background_memory_consolidation() -> None:
                 session,
             )
             await drain_background_memory_tasks()
+            session.expire_all()
+
+            prefs = get_memory_items(session, user_id=user.id, category="preference")
+            focus = get_memory_items(session, user_id=user.id, category="focus")
+            daily_logs = session.query(MemoryDailyLog).filter_by(user_id=user.id).all()
     finally:
+        settings.agent_provider = original_provider
         invalidate_agent_runtime_cache()
 
     assert "turn 1" in result.response
+    assert any("short walks" in item.content.lower() for item in prefs)
+    assert any("memory pipeline" in item.content.lower() for item in focus)
+    assert daily_logs
