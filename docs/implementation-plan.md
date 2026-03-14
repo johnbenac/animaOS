@@ -1,15 +1,24 @@
 # ANIMA Core — Implementation Plan
 
-> Status: active
+> Status: historical implementation brief with current-state corrections
 > Created: 2026-03-14
+> Completed: 2026-03-14
 > Goal: Transform the current server into a portable, encrypted, memory-intelligent personal AI
+> Note: this document is preserved as the execution brief that drove the migration; use `docs/memory-system.md` for the live architecture.
 > Audience: Implementation agent — this document contains all context needed to execute
+> See also: [docs/memory-system.md](memory-system.md) for how the memory system works
 
 ---
 
 ## Architecture Decision Summary
 
-These are locked. Do not deviate.
+These reflect the current implementation more accurately than the original plan.
+Current state correction:
+
+- SQLite is the default server database, but `ANIMA_DATABASE_URL` still allows overrides.
+- SQLCipher support is optional, not enforced by default.
+- Structured memory now lives in SQLite tables, but `users/<user_id>/soul.md` remains a separate encrypted-on-write file.
+- The portable Core currently includes the database, `manifest.json`, and remaining per-user files.
 
 1. **Single SQLite database** — no PostgreSQL, no Docker. The database file lives inside the Core directory.
 2. **SQLCipher encryption** — the entire SQLite database is encrypted at rest. Passphrase required to open.
@@ -53,7 +62,7 @@ uvicorn[standard]>=0.35.0 — ASGI server
 | `services/agent/memory_blocks.py` | Read from DB tables instead of files | SQLite memory |
 | `services/agent/consolidation.py` | Write to DB tables instead of files, add LLM extraction | SQLite memory + LLM |
 | `services/agent/persistence.py` | No changes needed (already SQLAlchemy) | — |
-| `models/agent_runtime.py` | Add memory tables | New schema |
+| `apps/server/src/anima_server/models/agent_runtime.py` | Add memory tables | New schema |
 | `services/vault.py` | `reset_identity_sequences()` already handles non-pg; update `read_data_snapshot()`/`write_data_snapshot()` to work without user files | No more memory files |
 | `services/storage.py` | Remove `get_user_data_dir()` or repurpose for non-memory use | No more memory files |
 | `alembic/versions/04d82bffa29f_*.py` | Fix `server_default=sa.text('now()')` → `sa.text('CURRENT_TIMESTAMP')` | SQLite compat |
@@ -117,7 +126,7 @@ Add optional dependency group:
 postgres = ["psycopg[binary]>=3.2.9"]
 ```
 
-**File: `alembic/versions/04d82bffa29f_create_users_table.py`**
+**File: `apps/server/alembic/versions/04d82bffa29f_create_users_table.py`**
 
 Line 30 uses `server_default=sa.text('now()')` which is PostgreSQL-only. Change to:
 ```python
@@ -126,7 +135,7 @@ server_default=sa.text('CURRENT_TIMESTAMP')
 
 This appears twice (lines 30 and 31 for `created_at` and `updated_at`). All other migrations already use `CURRENT_TIMESTAMP`.
 
-**File: `models/user.py`** (read this file to verify)
+**File: `apps/server/src/anima_server/models/user.py`** (read this file to verify)
 
 Check if `User` model uses `server_default=func.now()`. SQLAlchemy translates `func.now()` to `CURRENT_TIMESTAMP` for SQLite, so this should work, but verify by running the test suite.
 
@@ -446,7 +455,7 @@ This can be completed after Task 3 (memory tables exist).
 
 ### 3A: New database models
 
-**File: `models/agent_runtime.py`** (append to existing file)
+**File: `apps/server/src/anima_server/models/agent_runtime.py`** (append to existing file)
 
 ```python
 class MemoryItem(Base):
@@ -535,7 +544,7 @@ class MemoryDailyLog(Base):
     )
 ```
 
-**File: `models/__init__.py`**
+**File: `apps/server/src/anima_server/models/__init__.py`**
 
 Add imports:
 ```python
@@ -546,7 +555,7 @@ Add to `__all__`.
 
 ### 3B: Alembic migration
 
-Create a new migration file: `alembic/versions/YYYYMMDD_NNNN_create_memory_tables.py`
+Create a new migration file: `apps/server/alembic/versions/20260314_0001_create_memory_tables.py`
 
 Use `op.create_table()` for all three tables. Use `server_default=sa.text("CURRENT_TIMESTAMP")` for all datetime columns (NOT `now()`).
 

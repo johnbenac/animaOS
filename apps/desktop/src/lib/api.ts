@@ -8,8 +8,10 @@ import {
   type DailyBrief,
   type HomeData,
   type LoginResponse,
-  type MemoryEntry,
-  type MemoryFile,
+  type MemoryEpisodeData,
+  type MemoryItemData,
+  type MemoryOverviewData,
+  type MemorySearchResult,
   type Nudge,
   type PersonaTemplate,
   type ProviderInfo,
@@ -19,17 +21,29 @@ import {
 import { API_BASE } from "./runtime";
 
 const UNLOCK_TOKEN_KEY = "anima_unlock_token";
+let unlockTokenCache: string | null = null;
+
+function purgeLegacyUnlockToken(): void {
+  try {
+    localStorage.removeItem(UNLOCK_TOKEN_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 export function getUnlockToken(): string | null {
-  return localStorage.getItem(UNLOCK_TOKEN_KEY);
+  purgeLegacyUnlockToken();
+  return unlockTokenCache;
 }
 
 export function setUnlockToken(token: string): void {
-  localStorage.setItem(UNLOCK_TOKEN_KEY, token);
+  unlockTokenCache = token;
+  purgeLegacyUnlockToken();
 }
 
 export function clearUnlockToken(): void {
-  localStorage.removeItem(UNLOCK_TOKEN_KEY);
+  unlockTokenCache = null;
+  purgeLegacyUnlockToken();
 }
 
 const baseApi = createApiClient({
@@ -58,8 +72,10 @@ export type {
   DailyBrief,
   HomeData,
   LoginResponse,
-  MemoryEntry,
-  MemoryFile,
+  MemoryEpisodeData,
+  MemoryItemData,
+  MemoryOverviewData,
+  MemorySearchResult,
   Nudge,
   PersonaTemplate,
   ProviderInfo,

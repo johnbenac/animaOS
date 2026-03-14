@@ -90,6 +90,9 @@ def test_export_and_import_vault_restores_auth_and_files(
     user_dir.mkdir(parents=True, exist_ok=True)
     (user_dir / "memory" / "entry.md").parent.mkdir(parents=True, exist_ok=True)
     (user_dir / "memory" / "entry.md").write_text("hello from vault", encoding="utf-8")
+    legacy_vector_dir = tmp_path / "anima-data" / "chroma"
+    legacy_vector_dir.mkdir(parents=True, exist_ok=True)
+    (legacy_vector_dir / "index.txt").write_text("plaintext index", encoding="utf-8")
 
     export_response = client.post(
         "/api/vault/export",
@@ -102,6 +105,7 @@ def test_export_and_import_vault_restores_auth_and_files(
     envelope = json.loads(export_payload["vault"])
     assert envelope["version"] == 2
     assert "Alice" not in export_payload["vault"]
+    assert "plaintext index" not in export_payload["vault"]
 
     with session_factory() as db:
         db.query(UserKey).delete()
@@ -132,6 +136,7 @@ def test_export_and_import_vault_restores_auth_and_files(
         assert len(user_keys) == 1
 
     assert (user_dir / "memory" / "entry.md").read_text(encoding="utf-8") == "hello from vault"
+    assert not legacy_vector_dir.exists()
 
     stale_session_response = client.get(
         "/api/auth/me",

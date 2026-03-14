@@ -117,28 +117,45 @@ export interface DailyBrief {
   };
 }
 
-export interface MemoryEntry {
-  path: string;
-  meta: {
-    category: string;
-    tags: string[];
-    created: string;
-    updated: string;
-    source: string;
-  };
-  snippet: string;
+export interface MemoryItemData {
+  id: number;
+  content: string;
+  category: string;
+  importance: number;
+  source: string;
+  isSuperseded: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
-export interface MemoryFile {
-  path: string;
-  meta: {
-    category: string;
-    tags: string[];
-    created: string;
-    updated: string;
-    source: string;
-  };
+export interface MemoryEpisodeData {
+  id: number;
+  date: string;
+  time: string | null;
+  summary: string;
+  topics: string[];
+  emotionalArc: string | null;
+  significanceScore: number;
+  turnCount: number | null;
+  createdAt: string | null;
+}
+
+export interface MemorySearchResult {
+  type: "item" | "episode";
+  id: number;
   content: string;
+  category: string;
+  importance: number;
+}
+
+export interface MemoryOverviewData {
+  totalItems: number;
+  factCount: number;
+  preferenceCount: number;
+  goalCount: number;
+  relationshipCount: number;
+  currentFocus: string | null;
+  episodeCount: number;
 }
 
 function trimBaseUrl(baseUrl: string): string {
@@ -347,32 +364,40 @@ export function createApiClient(options: ApiClientOptions) {
         }),
     },
     memory: {
-      list: (userId: number, section?: string) =>
-        request<{ count: number; memories: MemoryEntry[] }>(
-          `/memory/${userId}${section && section !== "all" ? `?section=${encodeURIComponent(section)}` : ""}`,
+      overview: (userId: number) =>
+        request<MemoryOverviewData>(`/memory/${userId}`),
+      listItems: (userId: number, category?: string) =>
+        request<MemoryItemData[]>(
+          `/memory/${userId}/items${category ? `?category=${encodeURIComponent(category)}` : ""}`,
+        ),
+      createItem: (
+        userId: number,
+        data: { content: string; category?: string; importance?: number },
+      ) =>
+        request<MemoryItemData>(`/memory/${userId}/items`, {
+          method: "POST",
+          body: data,
+        }),
+      updateItem: (
+        userId: number,
+        itemId: number,
+        data: { content?: string; category?: string; importance?: number },
+      ) =>
+        request<MemoryItemData>(`/memory/${userId}/items/${itemId}`, {
+          method: "PUT",
+          body: data,
+        }),
+      deleteItem: (userId: number, itemId: number) =>
+        request<{ deleted: boolean }>(`/memory/${userId}/items/${itemId}`, {
+          method: "DELETE",
+        }),
+      listEpisodes: (userId: number, limit = 20) =>
+        request<MemoryEpisodeData[]>(
+          `/memory/${userId}/episodes?limit=${limit}`,
         ),
       search: (userId: number, query: string) =>
-        request<{ count: number; results: MemoryEntry[] }>(
+        request<{ count: number; results: MemorySearchResult[] }>(
           `/memory/${userId}/search?q=${encodeURIComponent(query)}`,
-        ),
-      read: (userId: number, section: string, filename: string) =>
-        request<MemoryFile>(
-          `/memory/${userId}/${encodeURIComponent(section)}/${encodeURIComponent(filename)}`,
-        ),
-      write: (
-        userId: number,
-        section: string,
-        filename: string,
-        payload: { content: string; tags?: string[] },
-      ) =>
-        request<MemoryFile>(
-          `/memory/${userId}/${encodeURIComponent(section)}/${encodeURIComponent(filename)}`,
-          { method: "PUT", body: payload },
-        ),
-      remove: (userId: number, section: string, filename: string) =>
-        request<{ deleted: boolean }>(
-          `/memory/${userId}/${encodeURIComponent(section)}/${encodeURIComponent(filename)}`,
-          { method: "DELETE" },
         ),
     },
     tasks: {

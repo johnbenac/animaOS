@@ -102,6 +102,14 @@ def _client() -> Generator[TestClient, None, None]:
             with TestClient(app) as test_client:
                 yield test_client
         finally:
+            import anima_server.services.agent.vector_store as _vs
+            if _vs._client is not None:
+                try:
+                    _vs._client.clear_system_cache()
+                except Exception:
+                    pass
+                _vs._client = None
+
             settings.data_dir = original_data_dir
             invalidate_agent_runtime_cache()
             unlock_session_store.clear()
@@ -473,10 +481,10 @@ def test_chat_ollama_provider_uses_live_adapter_surface(monkeypatch) -> None:
     assert response.json()["response"] == "hello from ollama adapter"
     assert "private reasoning" not in response.json()["response"]
     assert fake_client.tool_choice == "required"
-    assert [getattr(tool, "name", "") for tool in fake_client.bound_tools] == [
-        "current_datetime",
-        "send_message",
-    ]
+    tool_names = [getattr(tool, "name", "") for tool in fake_client.bound_tools]
+    assert "current_datetime" in tool_names
+    assert "send_message" in tool_names
+    assert "note_to_self" in tool_names
 
 
 def test_chat_openrouter_without_api_key_returns_error() -> None:

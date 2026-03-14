@@ -20,10 +20,13 @@ Mixed monorepo for ANIMA:
 ```bash
 bun install
 uv sync --all-packages
-bun run db:server:up
 bun run db:server:upgrade
 bun run dev
 ```
+
+The server defaults to local SQLite at `.anima/dev/anima.db`. If you want to run
+against Postgres instead, start it with `bun run db:server:up`, set
+`ANIMA_DATABASE_URL`, then run `bun run db:server:upgrade`.
 
 Run app-specific dev tasks:
 
@@ -56,7 +59,8 @@ From repo root unless noted:
 
 - `memory/` is intentionally local-only and fully git-ignored.
 - The Python backend migration starts in `apps/server`; `apps/api` remains available until feature parity is reached.
-- The Python backend now targets PostgreSQL by default via `ANIMA_DATABASE_URL`.
+- The Python backend defaults to SQLite at `.anima/dev/anima.db`. Set
+  `ANIMA_DATABASE_URL` to use Postgres instead.
 - Auth is local-owner bootstrap (no mandatory email identity flow).
 - User backup/sync uses encrypted vault export/import with a user passphrase (argon2id + AES-256-GCM).
 - Keep prompts in `apps/api/prompts/*.md` and load via `renderPromptTemplate(...)`.

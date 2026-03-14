@@ -35,7 +35,7 @@ Implemented now:
 - structured stream events in `apps/server/src/anima_server/services/agent/streaming.py`
 - SSE path now emits a unified event model (`tool_call`, `tool_return`, `chunk`, `usage`, `done`, `error`) from the shared loop runtime, with live provider chunk streaming when the adapter supports it
 - in-process post-response memory consolidation in `apps/server/src/anima_server/services/agent/consolidation.py`
-- background memory writes now create daily logs every turn and promote only high-confidence user facts, preferences, and explicit `current_focus` statements into canonical markdown memory files
+- background memory writes now create daily logs every turn and promote durable user facts, preferences, goals, relationships, and explicit `current_focus` statements into database-backed memory tables
 - parity coverage for scaffold chat, streaming, reset, provider errors, persona template failures, and persisted runtime rows
 
 Still pending:
@@ -132,7 +132,8 @@ ANIMA memory remains ANIMA-owned. The runtime can render memory blocks into prom
 - persona templates
 - user profile
 - current focus
-- markdown memory
+- structured memory tables
+- encrypted `soul.md`
 - persisted summaries
 
 ### 3. `/api/chat` remains stable
@@ -218,18 +219,18 @@ The new server runtime should be organized around small, explicit modules.
 - `apps/server/src/anima_server/services/agent/adapters/base.py`
   - common interface
 
-- `apps/server/src/anima_server/services/agent/adapters/blocking.py`
-  - full response adapter
-
-- `apps/server/src/anima_server/services/agent/adapters/streaming.py`
-  - streaming adapter
-
 - `apps/server/src/anima_server/services/agent/adapters/openai_compatible.py`
   - request/response normalization for `ollama`, `openrouter`, `vllm`
 
+- `apps/server/src/anima_server/services/agent/adapters/scaffold.py`
+  - explicit local scaffold adapter used for deterministic fallback and tests
+
+- `apps/server/src/anima_server/services/agent/streaming.py`
+  - shared stream event builders layered on top of the loop runtime
+
 ### Tooling
 
-- `apps/server/src/anima_server/services/agent/tool_registry.py`
+- `apps/server/src/anima_server/services/agent/tools.py`
   - tool definitions
   - tool metadata
   - tool schema export for model calls
@@ -500,7 +501,7 @@ The first runtime implementation should not invent a new memory universe. It sho
 
 - persona templates in `apps/server`
 - user table
-- existing markdown memory concepts from the legacy API
+- legacy memory concepts from the former `apps/api` path
 - future server-native memory services
 
 ### Principle
@@ -751,6 +752,17 @@ Mitigation:
 - keep raw messages durable
 
 ## Immediate Next Steps
+
+The runtime migration is functionally complete. The current follow-up work is:
+
+1. Finish encrypted Core defaults: make encrypted SQLite startup explicit and fail clearly when the expected passphrase or SQLCipher path is wrong.
+2. Migrate the remaining file-backed artifacts: `soul.md` is encrypted on write, but it still lives outside the main database and `manifest.json` remains plaintext metadata.
+3. Broaden reflective memory maintenance: keep improving contradiction scans, synthesis quality, and self-model work built on top of the sleep-task pipeline.
+4. Harden retrieval and search: embeddings already persist in SQLite and the vector index is process-local, so the next step is clarifying persistence and ranking behavior.
+
+See `docs/roadmap.md` for the live roadmap.
+
+## Historical Next Steps
 
 Priority has been clarified. The runtime migration is functionally complete. The next work follows the roadmap in `docs/roadmap.md`:
 

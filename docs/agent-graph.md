@@ -42,7 +42,7 @@ sequenceDiagram
 ```
 
 ## Entry Points
-- HTTP route: `POST /api/chat` in `apps/api/src/routes/chat.ts`
+- HTTP route: `POST /api/chat` in `apps/api/src/routes/chat/index.ts`
 - Non-streaming mode calls `runAgent(message, userId)`.
 - Streaming mode calls `streamAgent(message, userId)` and returns SSE chunks.
 

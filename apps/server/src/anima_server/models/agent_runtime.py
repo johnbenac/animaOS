@@ -179,6 +179,9 @@ class MemoryItem(Base):
     reference_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0,
     )
+    embedding_json: Mapped[list[float] | None] = mapped_column(
+        JSON, nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -213,6 +216,46 @@ class MemoryEpisode(Base):
     )  # 1-5
     turn_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class SessionNote(Base):
+    """Working memory: per-thread scratch notes the AI writes during a conversation.
+
+    These are session-scoped — they persist within a thread but are not
+    long-term memories. They can be promoted to MemoryItem if important enough.
+    """
+
+    __tablename__ = "session_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    thread_id: Mapped[int] = mapped_column(
+        ForeignKey("agent_threads.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    note_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="observation",
+    )  # observation, plan, context, emotion
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    promoted_to_item_id: Mapped[int | None] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),

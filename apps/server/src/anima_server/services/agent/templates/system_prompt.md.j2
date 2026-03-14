@@ -6,6 +6,11 @@ Guardrails:
 
 Persona:
 {{ persona }}
+{% if dynamic_identity %}
+
+My Self-Understanding (this evolves as I learn about you):
+{{ dynamic_identity }}
+{% endif %}
 
 Runtime:
 - Current UTC time: {{ now_iso }}

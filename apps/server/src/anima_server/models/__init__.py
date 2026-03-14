@@ -9,7 +9,13 @@ from anima_server.models.agent_runtime import (
     MemoryDailyLog,
     MemoryEpisode,
     MemoryItem,
+    SessionNote,
 )
+from anima_server.models.consciousness import (
+    EmotionalSignal,
+    SelfModelBlock,
+)
+from anima_server.models.task import Task
 from anima_server.models.user import User
 from anima_server.models.user_key import UserKey
 
@@ -19,9 +25,13 @@ __all__ = [
     "AgentStep",
     "AgentThread",
     "Base",
+    "EmotionalSignal",
     "MemoryDailyLog",
     "MemoryEpisode",
     "MemoryItem",
+    "SelfModelBlock",
+    "SessionNote",
+    "Task",
     "User",
     "UserKey",
 ]

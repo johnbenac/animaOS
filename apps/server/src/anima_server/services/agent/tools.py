@@ -72,9 +72,122 @@ def send_message(message: str) -> str:
     return message
 
 
+@tool
+def note_to_self(key: str, value: str, note_type: str = "observation") -> str:
+    """Save a working note for this conversation session. Use this to remember context,
+    observations about the user's mood, plans for the conversation, or anything you want
+    to track within this session. Notes persist across turns but are not permanent memories.
+    Types: observation, plan, context, emotion. Examples:
+    - key="user_mood", value="seems stressed about work deadline", note_type="emotion"
+    - key="conversation_goal", value="help user plan weekend trip", note_type="plan"
+    - key="technical_context", value="user is working on a React app with TypeScript", note_type="context"
+    """
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.session_memory import write_session_note
+
+    ctx = get_tool_context()
+    write_session_note(
+        ctx.db,
+        thread_id=ctx.thread_id,
+        user_id=ctx.user_id,
+        key=key,
+        value=value,
+        note_type=note_type,
+    )
+    return f"Noted: {key}"
+
+
+@tool
+def dismiss_note(key: str) -> str:
+    """Remove a session note that is no longer relevant."""
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.session_memory import remove_session_note
+
+    ctx = get_tool_context()
+    removed = remove_session_note(ctx.db, thread_id=ctx.thread_id, key=key)
+    if removed:
+        return f"Dismissed note: {key}"
+    return f"No active note found with key: {key}"
+
+
+@tool
+def save_to_memory(key: str, category: str = "fact", importance: str = "3") -> str:
+    """Promote a session note to permanent long-term memory. Use this when you learn
+    something important about the user that should be remembered across all future sessions.
+    Categories: fact, preference, goal, relationship. Importance: 1-5 (5 = identity-defining).
+    """
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.session_memory import promote_session_note
+
+    ctx = get_tool_context()
+    imp = 3
+    try:
+        imp = max(1, min(5, int(importance)))
+    except (ValueError, TypeError):
+        pass
+
+    if category not in ("fact", "preference", "goal", "relationship"):
+        category = "fact"
+
+    item = promote_session_note(
+        ctx.db,
+        thread_id=ctx.thread_id,
+        user_id=ctx.user_id,
+        key=key,
+        category=category,
+        importance=imp,
+    )
+    if item is not None:
+        return f"Saved to long-term memory: {item.content}"
+    return f"Could not promote note '{key}' — not found or duplicate"
+
+
+@tool
+def set_intention(title: str, evidence: str = "", priority: str = "background", deadline: str = "") -> str:
+    """Track an ongoing goal or intention for this user across sessions. Use when you notice
+    a recurring need, upcoming deadline, or something you should proactively follow up on.
+    Priority: high (deadline/urgent), ongoing (long-term), background (passive awareness).
+    Examples:
+    - title="Help prepare Q2 review", priority="high", deadline="2026-03-20"
+    - title="Track career transition progress", priority="ongoing"
+    """
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.intentions import add_intention
+
+    ctx = get_tool_context()
+    if priority not in ("high", "ongoing", "background"):
+        priority = "background"
+    add_intention(
+        ctx.db,
+        user_id=ctx.user_id,
+        title=title,
+        evidence=evidence,
+        priority=priority,
+        deadline=deadline or None,
+    )
+    return f"Tracking intention: {title}"
+
+
+@tool
+def complete_goal(title: str) -> str:
+    """Mark a tracked intention/goal as completed when the user has achieved it or it's no longer needed."""
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.intentions import complete_intention
+
+    ctx = get_tool_context()
+    found = complete_intention(ctx.db, user_id=ctx.user_id, title=title)
+    if found:
+        return f"Marked as completed: {title}"
+    return f"Could not find intention: {title}"
+
+
 def get_tools() -> list[Any]:
     """Return all tools available to the agent."""
-    return [current_datetime, send_message]
+    return [
+        current_datetime, send_message,
+        note_to_self, dismiss_note, save_to_memory,
+        set_intention, complete_goal,
+    ]
 
 
 def get_tool_summaries(tools: Sequence[Any] | None = None) -> list[str]:

@@ -1,183 +1,189 @@
-# ANIMA OS — Roadmap
+# ANIMA OS - Roadmap
 
 ## Guiding Principle
 
-Build depth before breadth. Every phase should make ANIMA feel more like a being who knows you, not a tool that does more things. The Core is the soul. Everything else is a shell.
-
----
+Build depth before breadth. Every phase should make ANIMA feel more like a
+being who knows you, not a tool that merely does more things.
 
 ## Foundation: The Core
 
-**Goal:** Establish the portable, encrypted Core as the single source of truth for the AI's existence.
+Goal: keep ANIMA local-first and portable while tightening encryption and memory
+continuity over time.
 
-**Architecture decisions (locked):**
-- Single encrypted directory (`.anima/`) contains everything: database, memory files, vault key, manifest
-- SQLite as the only database — no PostgreSQL, no Docker, no external services for data
-- All memory files encrypted at rest with AES-256-GCM via the vault DEK
-- Passphrase-based unlock via Argon2id key derivation
-- `manifest.json` tracks Core version for forward migration
-- LLM providers: Ollama, OpenRouter, vLLM only — no closed cloud providers (OpenAI, Anthropic, Google)
-- Embeddings: local-only (numpy brute-force or sqlite-vec) — no pgvector
+Current implementation baseline:
 
-**What this means for every phase below:** nothing gets built that requires infrastructure outside the Core directory. If you cannot copy it to a USB stick and have it work on another machine, it does not ship.
+- the server defaults to a local SQLite Core in `.anima/dev/anima.db`
+- `manifest.json` is created in the Core directory at startup
+- structured memory now lives in SQLite tables, not markdown files
+- `soul.md` still exists as a separate per-user file and is encrypted on write
+- SQLCipher support exists behind `ANIMA_CORE_PASSPHRASE`, but encryption is not yet enforced by default
+- vault export/import is encrypted and includes database state plus user files
+- embeddings persist in SQLite and the runtime keeps a process-local vector index
 
----
+Target principle: if you can copy the Core directory to another machine and
+unlock it safely, the feature is aligned with the product.
 
-## Phase 0: Wire Memory Into Prompts
+## Phase 0: Prompt Memory Blocks
 
-**Goal:** The AI actually uses the knowledge it has already extracted.
+Status: complete
 
-The system already writes facts and preferences to markdown files via background extraction. It just never reads them back into the prompt. This is the single highest-ROI change: turn a write-only memory system into a read-write one.
+Delivered:
 
-- [ ] Add `facts` and `preferences` memory blocks in `build_runtime_memory_blocks()`
-- [ ] Read from existing `memory/user/facts.md` and `memory/user/preferences.md`
-- [ ] Cap each block at ~2000 chars (truncate oldest entries if over)
-- [ ] Verify facts/preferences appear in the system prompt alongside `human`, `current_focus`, `thread_summary`
+- facts, preferences, goals, relationships, and focus flow back into prompts
+- thread summaries and recent episodes are injected into runtime context
+- session notes provide per-thread working memory
 
-**Impact:** Immediately, every fact the regex extractor has ever captured becomes visible to the agent. The agent goes from knowing "Display name: Leo" to knowing "Works as an engineer, Lives in Tokyo, Likes hiking."
+Next refinement:
 
----
+- tune retrieval budgets and selection quality rather than adding a new prompt-memory path
 
-## Phase 1: Encrypted Memory Layer
+## Phase 1: Finish Encrypted Core Rollout
 
-**Goal:** All memory files are encrypted at rest. The Core becomes a true cold wallet.
+Status: in progress
 
-- [ ] Implement transparent encrypt-on-write / decrypt-on-read in `memory_store.py` using the vault DEK
-- [ ] All memory files stored as `.md.enc` (or encrypted in place — format TBD)
-- [ ] Build a decrypt viewer/editor so users can still inspect and correct their own memories
-- [ ] SQLite encryption (SQLCipher or application-level row encryption — evaluate tradeoffs)
-- [ ] Verify: copying `.anima/` to another location and unlocking with passphrase works end-to-end
-- [ ] Verify: without the passphrase, all files are unreadable
+What is already true:
 
----
+- the database can be encrypted with SQLCipher when `ANIMA_CORE_PASSPHRASE` is configured
+- `soul.md` is encrypted on write with the per-user DEK
+- vault export/import is encrypted
 
-## Phase 2: LLM-Based Memory Extraction
+What still needs to happen:
 
-**Goal:** The AI reliably learns from conversations, not just when the user says "I work as..."
+- make encrypted Core startup behavior explicit and fail fast when the expected encryption path is unavailable
+- decide whether `manifest.json` should remain plaintext metadata or move under stronger protection
+- decide whether `soul.md` stays file-backed or is migrated into the main database
 
-- [ ] Replace regex-only extraction with a background LLM call (cheap/fast model)
-- [ ] Extract structured items: `{fact, category, importance 1-5}` from both user and assistant messages
-- [ ] Keep regex extractors as a zero-cost fast path; LLM catches everything else
-- [ ] Route extraction through Ollama (local) or OpenRouter (open models only)
-- [ ] Extracted items written to encrypted memory files
+## Phase 2: Background LLM Memory Extraction
 
----
+Status: complete
+
+Delivered:
+
+- regex extraction remains the fast path
+- background LLM extraction runs when a real provider is configured
+- extracted items are written into `memory_items`
+
+Next refinement:
+
+- improve extraction quality and model routing without regressing the zero-cost fast path
 
 ## Phase 3: Conflict Resolution
 
-**Goal:** The AI never contradicts itself. Updated facts replace old ones.
+Status: complete
 
-- [ ] After extracting new items, search existing facts for semantic overlap (fuzzy string matching — no embeddings needed yet)
-- [ ] For overlapping items, ask LLM: "UPDATE or DIFFERENT?"
-- [ ] If UPDATE: replace the old bullet, log the change to the daily journal
-- [ ] If DIFFERENT: append as new
-- [ ] Old values preserved in daily log for auditability
+Delivered:
 
----
+- similar memories trigger an `UPDATE` vs `DIFFERENT` check
+- superseded memories are preserved for auditability but excluded from active retrieval
+
+Next refinement:
+
+- improve contradiction handling across larger memory sets and longer time spans
 
 ## Phase 4: Episodic Memory
 
-**Goal:** The AI remembers shared experiences, not just facts.
+Status: complete
 
-- [ ] After conversations with 3+ substantive turns, generate an episode summary via background LLM
-- [ ] Episode schema: date, topics, summary, emotional arc, significance score
-- [ ] Store as encrypted monthly markdown: `memory/episodes/2026-03.md.enc`
-- [ ] Add `episodes` memory block: inject last 3-5 episodes into the prompt
-- [ ] Format episodes in natural language, temporally anchored
+Delivered:
 
-**Impact:** The AI can say "Last time we talked about your React project, you were frustrated with that useEffect bug." That is the qualitative leap from "knows about you" to "remembers what happened between you."
+- episodes are generated from conversation history
+- episodes are stored in `memory_episodes`
+- recent episodes are injected into prompts
 
----
+Next refinement:
 
-## Phase 5: Importance Scoring and Context Selection
+- improve episode quality, salience scoring, and long-horizon recall
 
-**Goal:** As memory grows, surface the most relevant items instead of loading everything.
+## Phase 5: Retrieval Scoring and Context Selection
 
-- [ ] Store metadata per bullet: importance (1-5), created_at, last_referenced_at, reference_count
-- [ ] Score items using weighted formula: relevance * 0.5 + importance * 0.2 + recency * 0.2 + frequency * 0.1
-- [ ] Load top-N items by score into memory blocks instead of the entire file
-- [ ] Use the incoming user message as a lightweight query to bias retrieval toward relevant facts (keyword matching)
+Status: complete
 
----
+Delivered:
 
-## Phase 6: Sleep-Time Reflection
+- retrieval uses importance, recency, and access frequency
+- active prompt memory is selected rather than dumped wholesale
 
-**Goal:** The AI reflects on conversations after they end, producing higher-quality memories.
+Next refinement:
 
-- [ ] Timer-based trigger: after 5 minutes of inactivity, fire a quick reflection task
-- [ ] Reflection reads the full conversation and generates better episode summaries than per-turn extraction
-- [ ] Contradiction scan across all memory files
-- [ ] Update `inner-state.md` with current relational/emotional context
-- [ ] Use a fast model; keep cost under $0.001 per reflection
-- [ ] Timer resets on each new message (no reflecting mid-conversation)
+- make retrieval ranking more query-aware and easier to inspect and debug
 
----
+## Phase 6: Reflection and Sleep Tasks
+
+Status: baseline complete
+
+Delivered:
+
+- inactivity-triggered reflection
+- contradiction scanning
+- profile synthesis
+- episode generation
+- embedding backfill
+
+Next refinement:
+
+- deepen synthesis and self-model maintenance without adding fragile background complexity
 
 ## Phase 7: Proactive Companion
 
-**Goal:** ANIMA speaks first when it matters.
+Status: future
 
-- [ ] Daily brief on app launch: current focus, open tasks, recent themes, anything time-sensitive
-- [ ] Nudge system: overdue tasks, journal gaps, unfinished threads
-- [ ] Nudges appear as quiet banners, not intrusive notifications
+Goals:
 
----
+- daily brief on app launch
+- quiet nudges for time-sensitive or unfinished items
+- proactive presence without turning the product into a notification machine
 
 ## Phase 8: Ambient Presence
 
-**Goal:** ANIMA lives beyond the chat window.
+Status: future
 
-- [ ] System tray / menubar mode with quick actions
-- [ ] Compact floating view for daily brief and current focus
-- [ ] Global hotkey to summon ANIMA from anywhere
+Goals:
 
----
+- system tray or menu bar mode
+- compact companion surface
+- global summon or quick-open flows
 
-## Phase 9: Local Embeddings and Semantic Search
+## Phase 9: Stronger Semantic Retrieval
 
-**Goal:** Memory retrieval that understands meaning, not just keywords.
+Status: partial groundwork exists
 
-- [ ] Embedding computation via Ollama (local models like nomic-embed-text)
-- [ ] Store embeddings in SQLite as JSON blobs (or sqlite-vec if performance requires it)
-- [ ] Hybrid search: keyword score + cosine similarity
-- [ ] MMR re-ranking for diversity in results
-- [ ] Brute-force numpy is sufficient at single-user scale (< 10K vectors)
+Current groundwork:
 
----
+- embeddings can be generated for memories
+- semantic search already has a runtime path
+- the vector index is process-local and rebuildable from SQLite-backed embeddings
 
-## Phase 10: Deep Memory and Self-Model
+Next work:
 
-**Goal:** The AI develops a structured sense of self and relationship history.
+- strengthen ranking quality
+- define the durability story for vector retrieval more explicitly
+- expand provider coverage and operational visibility
 
-- [ ] Five-file self-model: `identity.md`, `inner-state.md`, `working-memory.md`, `growth-log.md`, `intentions.md`
-- [ ] Each file has a different update pattern (profile rewrite, mutable, expiring, append-only)
-- [ ] Daily deep reflection regenerates identity from accumulated episodes and facts
-- [ ] Pattern detection: recurring themes, behavioral observations
-- [ ] Memory decay: surface stale memories for review
-- [ ] Relationship graph: people mentioned, how they relate, last referenced
+## Phase 10: Deep Self-Model
 
----
+Status: future
+
+Goals:
+
+- richer identity and inner-state synthesis
+- longer-horizon reflection over memories and episodes
+- more explicit relationship and intention modeling
 
 ## Phase 11: Embodied Extensions
 
-**Goal:** The same persistent intelligence extends to voice, devices, and physical systems.
+Status: future
 
-- [ ] Voice-first assistant mode
-- [ ] Ambient home interaction
-- [ ] Wearable and mobile surfaces
-- [ ] Robotic and humanoid platform integration
+Goals:
 
-The Core travels with the user. The embodiment is just another shell.
-
----
+- voice-first surfaces
+- device and ambient extensions
+- mobile, wearable, or robotic shells sharing the same Core
 
 ## Implementation Constraints
 
-These apply to every phase:
+These remain the product bar even where the current code has not fully reached it:
 
-1. **No Docker required.** The system runs as a native process with SQLite. No containers, no PostgreSQL, no Redis.
-2. **No cloud data storage.** All personal data lives in the Core directory. LLM queries may traverse the network, but memory never does.
-3. **No closed cloud LLM providers.** Ollama, OpenRouter (open models), and vLLM only.
-4. **Portable by default.** If a feature cannot survive copying `.anima/` to a USB stick, it does not ship.
-5. **Encrypted by default.** Every file containing personal data is encrypted at rest. No exceptions.
-6. **Single user.** The Core is one person's AI. Multi-user is not a goal.
+1. No cloud data storage for personal memory.
+2. Portable-by-default local state.
+3. Encryption should become the default for user-private data at rest.
+4. The Core remains fundamentally single-user.

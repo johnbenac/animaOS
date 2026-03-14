@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import MemoryDailyLog, MemoryItem
+
+# Decay half-life in days — after this many days, recency score halves
+_DECAY_HALF_LIFE_DAYS = 14.0
+# Weight factors for the retrieval score formula
+_WEIGHT_IMPORTANCE = 0.4
+_WEIGHT_RECENCY = 0.35
+_WEIGHT_ACCESS = 0.25
 
 
 def add_memory_item(
@@ -51,6 +59,83 @@ def get_memory_items(
     return list(db.scalars(query).all())
 
 
+def get_memory_items_scored(
+    db: Session,
+    *,
+    user_id: int,
+    category: str | None = None,
+    limit: int = 50,
+    now: datetime | None = None,
+) -> list[MemoryItem]:
+    """Retrieve memory items ranked by a multi-factor score: importance, recency, access frequency."""
+    query = select(MemoryItem).where(
+        MemoryItem.user_id == user_id,
+        MemoryItem.superseded_by.is_(None),
+    )
+    if category is not None:
+        query = query.where(MemoryItem.category == category)
+    # Fetch a larger pool, then rank in Python
+    pool_limit = min(limit * 3, 200)
+    query = query.order_by(MemoryItem.created_at.desc()).limit(pool_limit)
+    items = list(db.scalars(query).all())
+
+    if not items:
+        return []
+
+    ref_now = now or datetime.now(UTC)
+    scored = [(_retrieval_score(item, ref_now), item) for item in items]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    return [item for _, item in scored[:limit]]
+
+
+def _retrieval_score(item: MemoryItem, now: datetime) -> float:
+    """Compute a 0-1 retrieval score combining importance, recency, and access frequency."""
+    # Importance: normalize 1-5 to 0-1
+    importance_score = (item.importance - 1) / 4.0
+
+    # Recency: exponential decay from created_at
+    created = item.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    age_days = max(0.0, (now - created).total_seconds() / 86400.0)
+    recency_score = math.exp(-0.693 * age_days / _DECAY_HALF_LIFE_DAYS)
+
+    # Access frequency: logarithmic scaling of reference_count
+    ref_count = item.reference_count or 0
+    access_score = min(1.0, math.log1p(ref_count) / math.log1p(10))
+
+    # Boost if recently referenced (within last 3 days)
+    if item.last_referenced_at is not None:
+        last_ref = item.last_referenced_at
+        if last_ref.tzinfo is None:
+            last_ref = last_ref.replace(tzinfo=UTC)
+        ref_age_days = (now - last_ref).total_seconds() / 86400.0
+        if ref_age_days < 3.0:
+            access_score = min(1.0, access_score + 0.3)
+
+    return (
+        _WEIGHT_IMPORTANCE * importance_score
+        + _WEIGHT_RECENCY * recency_score
+        + _WEIGHT_ACCESS * access_score
+    )
+
+
+def touch_memory_items(
+    db: Session,
+    items: list[MemoryItem],
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Update last_referenced_at and increment reference_count for loaded memories."""
+    if not items:
+        return
+    ref_now = now or datetime.now(UTC)
+    for item in items:
+        item.reference_count = (item.reference_count or 0) + 1
+        item.last_referenced_at = ref_now
+    db.flush()
+
+
 def supersede_memory_item(
     db: Session,
     *,
@@ -76,6 +161,16 @@ def supersede_memory_item(
     old_item.updated_at = datetime.now(UTC)
     db.add(old_item)
     db.flush()
+
+    # Remove superseded item from vector store (only if already initialized)
+    try:
+        import anima_server.services.agent.vector_store as vs
+
+        if vs._client is not None:
+            vs.delete_memory(old_item.user_id, item_id=old_item_id)
+    except Exception:  # noqa: BLE001
+        pass
+
     return new_item
 
 

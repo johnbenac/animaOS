@@ -7,8 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from sqlalchemy import func, select
+
 from anima_server.api.deps.unlock import require_unlocked_user
 from anima_server.db import get_db
+from anima_server.models import AgentMessage, AgentThread, MemoryDailyLog, MemoryItem, Task
 from anima_server.schemas.chat import (
     ChatHistoryClearResponse,
     ChatHistoryMessage,
@@ -25,6 +28,7 @@ from anima_server.services.agent import (
     stream_agent,
 )
 from anima_server.services.agent.llm import LLMConfigError, LLMInvocationError
+from anima_server.services.agent.memory_store import get_current_focus
 from anima_server.services.agent.system_prompt import PromptTemplateError
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -119,6 +123,245 @@ async def reset_chat_thread(
     require_unlocked_user(request, payload.userId)
     await reset_agent_thread(payload.userId, db)
     return ChatResetResponse(status="reset")
+
+
+@router.get("/brief")
+async def get_brief(
+    request: Request,
+    userId: int = Query(gt=0),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Quick context brief (static, no LLM). Use /greeting for personalized greetings."""
+    require_unlocked_user(request, userId)
+
+    from anima_server.services.agent.proactive import (
+        build_static_greeting,
+        gather_greeting_context,
+    )
+
+    ctx = gather_greeting_context(db, user_id=userId)
+    return {
+        "message": build_static_greeting(ctx),
+        "context": {
+            "currentFocus": ctx.current_focus,
+            "openTaskCount": ctx.open_task_count,
+            "daysSinceLastChat": ctx.days_since_last_chat,
+        },
+    }
+
+
+@router.get("/greeting")
+async def get_greeting(
+    request: Request,
+    userId: int = Query(gt=0),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Generate a personalized greeting using the agent's self-model and context.
+
+    Uses LLM when available, falls back to static greeting otherwise.
+    """
+    require_unlocked_user(request, userId)
+
+    from anima_server.services.agent.proactive import generate_greeting
+
+    result = await generate_greeting(db, user_id=userId)
+    return {
+        "message": result.message,
+        "llmGenerated": result.llm_generated,
+        "context": {
+            "currentFocus": result.context.current_focus,
+            "openTaskCount": result.context.open_task_count,
+            "overdueTasks": result.context.overdue_task_count,
+            "daysSinceLastChat": result.context.days_since_last_chat,
+            "upcomingDeadlines": list(result.context.upcoming_deadlines),
+        },
+    }
+
+
+@router.get("/nudges")
+async def get_nudges(
+    request: Request,
+    userId: int = Query(gt=0),
+    db: Session = Depends(get_db),
+) -> dict[str, list[dict[str, object]]]:
+    require_unlocked_user(request, userId)
+
+    nudges: list[dict[str, object]] = []
+
+    overdue_count = db.scalar(
+        select(func.count(Task.id)).where(
+            Task.user_id == userId,
+            Task.done.is_(False),
+            Task.due_date.isnot(None),
+            Task.due_date < func.date("now"),
+        )
+    ) or 0
+    if overdue_count:
+        nudges.append({
+            "type": "overdue_tasks",
+            "message": f"You have {overdue_count} overdue task{'s' if overdue_count != 1 else ''}.",
+            "priority": 3,
+        })
+
+    return {"nudges": nudges}
+
+
+@router.get("/home")
+async def get_home(
+    request: Request,
+    userId: int = Query(gt=0),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    require_unlocked_user(request, userId)
+
+    focus = get_current_focus(db, user_id=userId)
+
+    tasks = list(
+        db.scalars(
+            select(Task)
+            .where(Task.user_id == userId, Task.done.is_(False))
+            .order_by(Task.priority.desc(), Task.created_at.desc())
+            .limit(10)
+        ).all()
+    )
+
+    memory_count = db.scalar(
+        select(func.count(MemoryItem.id)).where(
+            MemoryItem.user_id == userId,
+            MemoryItem.superseded_by.is_(None),
+        )
+    ) or 0
+
+    message_count = db.scalar(
+        select(func.count(AgentMessage.id)).join(
+            AgentThread, AgentMessage.thread_id == AgentThread.id
+        ).where(AgentThread.user_id == userId)
+    ) or 0
+
+    journal_total = db.scalar(
+        select(func.count(func.distinct(MemoryDailyLog.date))).where(
+            MemoryDailyLog.user_id == userId,
+        )
+    ) or 0
+
+    journal_streak = 0
+    if journal_total > 0:
+        from datetime import UTC, datetime, timedelta
+
+        today = datetime.now(UTC).date()
+        day = today
+        while True:
+            has_log = db.scalar(
+                select(func.count(MemoryDailyLog.id)).where(
+                    MemoryDailyLog.user_id == userId,
+                    MemoryDailyLog.date == day.isoformat(),
+                )
+            ) or 0
+            if has_log:
+                journal_streak += 1
+                day -= timedelta(days=1)
+            else:
+                break
+
+    return {
+        "currentFocus": focus,
+        "tasks": [
+            {
+                "id": t.id,
+                "text": t.text,
+                "done": t.done,
+                "priority": t.priority,
+                "dueDate": t.due_date,
+            }
+            for t in tasks
+        ],
+        "journalStreak": journal_streak,
+        "journalTotal": journal_total,
+        "memoryCount": memory_count,
+        "messageCount": message_count,
+    }
+
+
+@router.post("/consolidate")
+async def consolidate(
+    payload: ChatResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Trigger memory consolidation for recent conversations."""
+    require_unlocked_user(request, payload.userId)
+
+    from anima_server.services.agent.consolidation import consolidate_turn_memory_with_llm
+
+    logs = list(
+        db.scalars(
+            select(MemoryDailyLog)
+            .where(MemoryDailyLog.user_id == payload.userId)
+            .order_by(MemoryDailyLog.created_at.desc())
+            .limit(10)
+        ).all()
+    )
+
+    items_added = 0
+    errors: list[str] = []
+    for log in logs:
+        try:
+            result = await consolidate_turn_memory_with_llm(
+                user_id=payload.userId,
+                user_message=log.user_message,
+                assistant_response=log.assistant_response,
+            )
+            items_added += len(result.llm_items_added)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(str(exc))
+
+    return {"filesProcessed": len(logs), "filesChanged": items_added, "errors": errors}
+
+
+@router.post("/sleep")
+async def trigger_sleep_tasks(
+    payload: ChatResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Manually trigger sleep-time maintenance tasks (contradiction scan, profile synthesis, etc.)."""
+    require_unlocked_user(request, payload.userId)
+
+    from anima_server.services.agent.sleep_tasks import run_sleep_tasks
+
+    result = await run_sleep_tasks(user_id=payload.userId)
+    return {
+        "contradictionsFound": result.contradictions_found,
+        "contradictionsResolved": result.contradictions_resolved,
+        "itemsMerged": result.items_merged,
+        "episodesGenerated": result.episodes_generated,
+        "embeddingsBackfilled": result.embeddings_backfilled,
+        "errors": result.errors,
+    }
+
+
+@router.post("/reflect")
+async def trigger_deep_monologue(
+    payload: ChatResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Manually trigger a deep inner monologue (full self-model reflection)."""
+    require_unlocked_user(request, payload.userId)
+
+    from anima_server.services.agent.inner_monologue import run_deep_monologue
+
+    result = await run_deep_monologue(user_id=payload.userId)
+    return {
+        "identityUpdated": result.identity_updated,
+        "innerStateUpdated": result.inner_state_updated,
+        "workingMemoryUpdated": result.working_memory_updated,
+        "growthLogEntryAdded": result.growth_log_entry_added,
+        "intentionsUpdated": result.intentions_updated,
+        "proceduralRulesAdded": result.procedural_rules_added,
+        "insightsGenerated": result.insights_generated,
+        "errors": result.errors,
+    }
 
 
 def _format_sse_event(event: str, data: dict[str, object]) -> str:

@@ -29,7 +29,19 @@ def _make_engine() -> Engine:
     passphrase = settings.core_passphrase.strip()
 
     if passphrase:
-        import sqlcipher3
+        try:
+            import sqlcipher3
+        except ImportError:
+            logger.warning(
+                "sqlcipher3 not installed — falling back to unencrypted SQLite. "
+                "Install sqlcipher3 to enable database encryption."
+            )
+            return create_engine(
+                url,
+                echo=settings.database_echo,
+                future=True,
+                connect_args={"check_same_thread": False},
+            )
 
         eng = create_engine(
             url,

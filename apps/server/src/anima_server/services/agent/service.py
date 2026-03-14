@@ -8,6 +8,7 @@ from anima_server.config import settings
 from anima_server.services.agent.compaction import compact_thread_context
 from anima_server.services.agent.consolidation import schedule_background_memory_consolidation
 from anima_server.services.agent.reflection import schedule_reflection
+from anima_server.services.agent.tool_context import ToolContext, clear_tool_context, set_tool_context
 from anima_server.services.agent.memory_blocks import build_runtime_memory_blocks
 from anima_server.services.agent.llm import invalidate_llm_cache
 from anima_server.services.agent.persistence import (
@@ -93,12 +94,50 @@ async def _execute_agent_turn(
         sequence_id=initial_sequence_id,
     )
     conversation_turn_count = count_messages_by_role(db, thread.id, "user")
+
+    # Semantic retrieval: embed the user message and find relevant memories
+    semantic_results: list[tuple[int, str, float]] | None = None
+    try:
+        from anima_server.services.agent.embeddings import semantic_search
+
+        hits = await semantic_search(
+            db,
+            user_id=user_id,
+            query=user_message,
+            limit=8,
+            similarity_threshold=0.35,
+        )
+        if hits:
+            semantic_results = [(item.id, item.content, score) for item, score in hits]
+    except Exception:  # noqa: BLE001
+        pass  # semantic search is best-effort
+
     memory_blocks = build_runtime_memory_blocks(
         db,
         user_id=user_id,
         thread_id=thread.id,
+        semantic_results=semantic_results,
     )
 
+    # Collect feedback signals (re-asks, corrections) before LLM call
+    try:
+        from anima_server.services.agent.feedback_signals import (
+            collect_feedback_signals,
+            record_feedback_signals,
+        )
+
+        signals = collect_feedback_signals(
+            db,
+            user_id=user_id,
+            user_message=user_message,
+            thread_id=thread.id,
+        )
+        if signals:
+            record_feedback_signals(db, user_id=user_id, signals=signals)
+    except Exception:  # noqa: BLE001
+        pass  # feedback collection is best-effort
+
+    set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
     try:
         runner = get_or_build_runner()
         result = await runner.invoke(
@@ -113,6 +152,8 @@ async def _execute_agent_turn(
         mark_run_failed(db, run, str(exc))
         db.commit()
         raise
+    finally:
+        clear_tool_context()
 
     persist_agent_result(
         db,

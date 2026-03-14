@@ -14,7 +14,21 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from anima_server.config import settings
-from anima_server.models import User, UserKey
+from anima_server.models import (
+    AgentMessage,
+    AgentRun,
+    AgentStep,
+    AgentThread,
+    EmotionalSignal,
+    MemoryDailyLog,
+    MemoryEpisode,
+    MemoryItem,
+    SelfModelBlock,
+    SessionNote,
+    Task,
+    User,
+    UserKey,
+)
 from anima_server.services.crypto import (
     ARGON2_MEMORY_COST_KIB,
     ARGON2_PARALLELISM,
@@ -78,6 +92,9 @@ def import_vault(db: Session, vault: str, passphrase: str) -> dict[str, Any]:
 
     restore_database_snapshot(db, database)
     write_data_snapshot(user_files)
+
+    # Rebuild ChromaDB vector index from imported embeddings
+    _rebuild_vector_indices(db, database)
 
     restored_memory_files = sum(
         1
@@ -170,9 +187,64 @@ def export_database_snapshot(db: Session) -> dict[str, list[dict[str, Any]]]:
         serialize_user_key_record(user_key)
         for user_key in db.scalars(select(UserKey)).all()
     ]
+    memory_items = [
+        serialize_memory_item_record(item)
+        for item in db.scalars(select(MemoryItem)).all()
+    ]
+    memory_episodes = [
+        serialize_memory_episode_record(ep)
+        for ep in db.scalars(select(MemoryEpisode)).all()
+    ]
+    memory_daily_logs = [
+        serialize_memory_daily_log_record(log)
+        for log in db.scalars(select(MemoryDailyLog)).all()
+    ]
+    tasks = [
+        serialize_task_record(task)
+        for task in db.scalars(select(Task)).all()
+    ]
+    agent_threads = [
+        serialize_agent_thread_record(t)
+        for t in db.scalars(select(AgentThread)).all()
+    ]
+    agent_runs = [
+        serialize_agent_run_record(r)
+        for r in db.scalars(select(AgentRun)).all()
+    ]
+    agent_steps = [
+        serialize_agent_step_record(s)
+        for s in db.scalars(select(AgentStep)).all()
+    ]
+    agent_messages = [
+        serialize_agent_message_record(m)
+        for m in db.scalars(select(AgentMessage)).all()
+    ]
+    session_notes = [
+        serialize_session_note_record(n)
+        for n in db.scalars(select(SessionNote)).all()
+    ]
+    self_model_blocks = [
+        serialize_self_model_block_record(b)
+        for b in db.scalars(select(SelfModelBlock)).all()
+    ]
+    emotional_signals = [
+        serialize_emotional_signal_record(s)
+        for s in db.scalars(select(EmotionalSignal)).all()
+    ]
     return {
         "users": users,
         "userKeys": user_keys,
+        "memoryItems": memory_items,
+        "memoryEpisodes": memory_episodes,
+        "memoryDailyLogs": memory_daily_logs,
+        "tasks": tasks,
+        "sessionNotes": session_notes,
+        "selfModelBlocks": self_model_blocks,
+        "emotionalSignals": emotional_signals,
+        "agentThreads": agent_threads,
+        "agentRuns": agent_runs,
+        "agentSteps": agent_steps,
+        "agentMessages": agent_messages,
     }
 
 
@@ -182,7 +254,30 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
     if not isinstance(users_payload, list) or not isinstance(user_keys_payload, list):
         raise ValueError("Vault database snapshot is missing users or userKeys.")
 
+    memory_items_payload = snapshot.get("memoryItems", [])
+    memory_episodes_payload = snapshot.get("memoryEpisodes", [])
+    memory_daily_logs_payload = snapshot.get("memoryDailyLogs", [])
+    tasks_payload = snapshot.get("tasks", [])
+    session_notes_payload = snapshot.get("sessionNotes", [])
+    self_model_blocks_payload = snapshot.get("selfModelBlocks", [])
+    emotional_signals_payload = snapshot.get("emotionalSignals", [])
+    agent_threads_payload = snapshot.get("agentThreads", [])
+    agent_runs_payload = snapshot.get("agentRuns", [])
+    agent_steps_payload = snapshot.get("agentSteps", [])
+    agent_messages_payload = snapshot.get("agentMessages", [])
+
     try:
+        db.query(EmotionalSignal).delete()
+        db.query(SelfModelBlock).delete()
+        db.query(SessionNote).delete()
+        db.query(AgentStep).delete()
+        db.query(AgentMessage).delete()
+        db.query(AgentRun).delete()
+        db.query(AgentThread).delete()
+        db.query(Task).delete()
+        db.query(MemoryDailyLog).delete()
+        db.query(MemoryEpisode).delete()
+        db.query(MemoryItem).delete()
         db.query(UserKey).delete()
         db.query(User).delete()
 
@@ -223,6 +318,213 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                 )
             )
 
+        for record in memory_items_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                MemoryItem(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    content=str(record["content"]),
+                    category=str(record["category"]),
+                    importance=int(record.get("importance", 3)),
+                    source=str(record.get("source", "extraction")),
+                    superseded_by=coerce_optional_int(record.get("superseded_by")),
+                    reference_count=int(record.get("reference_count", 0)),
+                    last_referenced_at=parse_optional_datetime(record.get("last_referenced_at")),
+                    embedding_json=record.get("embedding_json"),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                )
+            )
+
+        for record in memory_episodes_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                MemoryEpisode(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    thread_id=coerce_optional_int(record.get("thread_id")),
+                    date=str(record["date"]),
+                    time=coerce_optional_str(record.get("time")),
+                    topics_json=record.get("topics_json"),
+                    summary=str(record["summary"]),
+                    emotional_arc=coerce_optional_str(record.get("emotional_arc")),
+                    significance_score=int(record.get("significance_score", 3)),
+                    turn_count=coerce_optional_int(record.get("turn_count")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                )
+            )
+
+        for record in memory_daily_logs_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                MemoryDailyLog(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    date=str(record["date"]),
+                    user_message=str(record["user_message"]),
+                    assistant_response=str(record["assistant_response"]),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                )
+            )
+
+        for record in tasks_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                Task(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    text=str(record["text"]),
+                    done=bool(record.get("done", False)),
+                    priority=int(record.get("priority", 2)),
+                    due_date=coerce_optional_str(record.get("due_date")),
+                    completed_at=parse_optional_datetime(record.get("completed_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                )
+            )
+
+        for record in agent_threads_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                AgentThread(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    status=str(record.get("status", "active")),
+                    title=coerce_optional_str(record.get("title")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    last_message_at=parse_optional_datetime(record.get("last_message_at")),
+                )
+            )
+
+        db.flush()
+
+        for record in session_notes_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                SessionNote(
+                    id=int(record["id"]),
+                    thread_id=int(record["thread_id"]),
+                    user_id=int(record["user_id"]),
+                    key=str(record["key"]),
+                    value=str(record["value"]),
+                    note_type=str(record.get("note_type", "observation")),
+                    is_active=bool(record.get("is_active", True)),
+                    promoted_to_item_id=coerce_optional_int(record.get("promoted_to_item_id")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                )
+            )
+
+        for record in self_model_blocks_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                SelfModelBlock(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    section=str(record["section"]),
+                    content=str(record.get("content", "")),
+                    version=int(record.get("version", 1)),
+                    updated_by=str(record.get("updated_by", "system")),
+                    metadata_json=record.get("metadata_json"),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                )
+            )
+
+        for record in emotional_signals_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                EmotionalSignal(
+                    id=int(record["id"]),
+                    user_id=int(record["user_id"]),
+                    thread_id=coerce_optional_int(record.get("thread_id")),
+                    emotion=str(record["emotion"]),
+                    confidence=float(record.get("confidence", 0.5)),
+                    evidence_type=str(record.get("evidence_type", "linguistic")),
+                    evidence=str(record.get("evidence", "")),
+                    trajectory=str(record.get("trajectory", "stable")),
+                    previous_emotion=coerce_optional_str(record.get("previous_emotion")),
+                    topic=str(record.get("topic", "")),
+                    acted_on=bool(record.get("acted_on", False)),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                )
+            )
+
+        for record in agent_runs_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                AgentRun(
+                    id=int(record["id"]),
+                    thread_id=int(record["thread_id"]),
+                    user_id=int(record["user_id"]),
+                    provider=str(record["provider"]),
+                    model=str(record["model"]),
+                    mode=str(record.get("mode", "chat")),
+                    status=str(record.get("status", "completed")),
+                    stop_reason=coerce_optional_str(record.get("stop_reason")),
+                    error_text=coerce_optional_str(record.get("error_text")),
+                    started_at=parse_optional_datetime(record.get("started_at")),
+                    completed_at=parse_optional_datetime(record.get("completed_at")),
+                    prompt_tokens=coerce_optional_int(record.get("prompt_tokens")),
+                    completion_tokens=coerce_optional_int(record.get("completion_tokens")),
+                    total_tokens=coerce_optional_int(record.get("total_tokens")),
+                )
+            )
+
+        db.flush()
+
+        for record in agent_steps_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                AgentStep(
+                    id=int(record["id"]),
+                    run_id=int(record["run_id"]),
+                    thread_id=int(record["thread_id"]),
+                    step_index=int(record["step_index"]),
+                    status=str(record["status"]),
+                    request_json=record.get("request_json", {}),
+                    response_json=record.get("response_json", {}),
+                    tool_calls_json=record.get("tool_calls_json"),
+                    usage_json=record.get("usage_json"),
+                    error_text=coerce_optional_str(record.get("error_text")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                )
+            )
+
+        for record in agent_messages_payload:
+            if not isinstance(record, dict):
+                continue
+            db.add(
+                AgentMessage(
+                    id=int(record["id"]),
+                    thread_id=int(record["thread_id"]),
+                    run_id=coerce_optional_int(record.get("run_id")),
+                    step_id=coerce_optional_int(record.get("step_id")),
+                    sequence_id=int(record["sequence_id"]),
+                    role=str(record["role"]),
+                    content_text=coerce_optional_str(record.get("content_text")),
+                    content_json=record.get("content_json"),
+                    tool_name=coerce_optional_str(record.get("tool_name")),
+                    tool_call_id=coerce_optional_str(record.get("tool_call_id")),
+                    tool_args_json=record.get("tool_args_json"),
+                    is_in_context=bool(record.get("is_in_context", True)),
+                    token_estimate=coerce_optional_int(record.get("token_estimate")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                )
+            )
+
         db.flush()
         reset_identity_sequences(db)
         db.commit()
@@ -240,7 +542,10 @@ def read_data_snapshot() -> dict[str, str]:
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        snapshot[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(root)
+        if relative_path.parts and relative_path.parts[0] == "chroma":
+            continue
+        snapshot[relative_path.as_posix()] = path.read_text(encoding="utf-8")
     return snapshot
 
 
@@ -254,6 +559,8 @@ def write_data_snapshot(user_files: dict[str, Any]) -> None:
     try:
         for relative_path, content in user_files.items():
             safe_path = sanitize_relative_path(relative_path)
+            if safe_path.parts and safe_path.parts[0] == "chroma":
+                continue
             target = staging_root / safe_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(content), encoding="utf-8")
@@ -311,6 +618,176 @@ def serialize_user_key_record(user_key: UserKey) -> dict[str, Any]:
     }
 
 
+def serialize_memory_item_record(item: MemoryItem) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "user_id": item.user_id,
+        "content": item.content,
+        "category": item.category,
+        "importance": item.importance,
+        "source": item.source,
+        "superseded_by": item.superseded_by,
+        "reference_count": item.reference_count,
+        "last_referenced_at": serialize_optional_datetime(item.last_referenced_at),
+        "embedding_json": item.embedding_json,
+        "created_at": serialize_optional_datetime(item.created_at),
+        "updated_at": serialize_optional_datetime(item.updated_at),
+    }
+
+
+def serialize_memory_episode_record(ep: MemoryEpisode) -> dict[str, Any]:
+    return {
+        "id": ep.id,
+        "user_id": ep.user_id,
+        "thread_id": ep.thread_id,
+        "date": ep.date,
+        "time": ep.time,
+        "topics_json": ep.topics_json,
+        "summary": ep.summary,
+        "emotional_arc": ep.emotional_arc,
+        "significance_score": ep.significance_score,
+        "turn_count": ep.turn_count,
+        "created_at": serialize_optional_datetime(ep.created_at),
+    }
+
+
+def serialize_memory_daily_log_record(log: MemoryDailyLog) -> dict[str, Any]:
+    return {
+        "id": log.id,
+        "user_id": log.user_id,
+        "date": log.date,
+        "user_message": log.user_message,
+        "assistant_response": log.assistant_response,
+        "created_at": serialize_optional_datetime(log.created_at),
+    }
+
+
+def serialize_session_note_record(note: SessionNote) -> dict[str, Any]:
+    return {
+        "id": note.id,
+        "thread_id": note.thread_id,
+        "user_id": note.user_id,
+        "key": note.key,
+        "value": note.value,
+        "note_type": note.note_type,
+        "is_active": note.is_active,
+        "promoted_to_item_id": note.promoted_to_item_id,
+        "created_at": serialize_optional_datetime(note.created_at),
+        "updated_at": serialize_optional_datetime(note.updated_at),
+    }
+
+
+def serialize_task_record(task: Task) -> dict[str, Any]:
+    return {
+        "id": task.id,
+        "user_id": task.user_id,
+        "text": task.text,
+        "done": task.done,
+        "priority": task.priority,
+        "due_date": task.due_date,
+        "completed_at": serialize_optional_datetime(task.completed_at),
+        "created_at": serialize_optional_datetime(task.created_at),
+        "updated_at": serialize_optional_datetime(task.updated_at),
+    }
+
+
+def serialize_agent_thread_record(t: AgentThread) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "user_id": t.user_id,
+        "status": t.status,
+        "title": t.title,
+        "created_at": serialize_optional_datetime(t.created_at),
+        "updated_at": serialize_optional_datetime(t.updated_at),
+        "last_message_at": serialize_optional_datetime(t.last_message_at),
+    }
+
+
+def serialize_agent_run_record(r: AgentRun) -> dict[str, Any]:
+    return {
+        "id": r.id,
+        "thread_id": r.thread_id,
+        "user_id": r.user_id,
+        "provider": r.provider,
+        "model": r.model,
+        "mode": r.mode,
+        "status": r.status,
+        "stop_reason": r.stop_reason,
+        "error_text": r.error_text,
+        "started_at": serialize_optional_datetime(r.started_at),
+        "completed_at": serialize_optional_datetime(r.completed_at),
+        "prompt_tokens": r.prompt_tokens,
+        "completion_tokens": r.completion_tokens,
+        "total_tokens": r.total_tokens,
+    }
+
+
+def serialize_agent_step_record(s: AgentStep) -> dict[str, Any]:
+    return {
+        "id": s.id,
+        "run_id": s.run_id,
+        "thread_id": s.thread_id,
+        "step_index": s.step_index,
+        "status": s.status,
+        "request_json": s.request_json,
+        "response_json": s.response_json,
+        "tool_calls_json": s.tool_calls_json,
+        "usage_json": s.usage_json,
+        "error_text": s.error_text,
+        "created_at": serialize_optional_datetime(s.created_at),
+    }
+
+
+def serialize_agent_message_record(m: AgentMessage) -> dict[str, Any]:
+    return {
+        "id": m.id,
+        "thread_id": m.thread_id,
+        "run_id": m.run_id,
+        "step_id": m.step_id,
+        "sequence_id": m.sequence_id,
+        "role": m.role,
+        "content_text": m.content_text,
+        "content_json": m.content_json,
+        "tool_name": m.tool_name,
+        "tool_call_id": m.tool_call_id,
+        "tool_args_json": m.tool_args_json,
+        "is_in_context": m.is_in_context,
+        "token_estimate": m.token_estimate,
+        "created_at": serialize_optional_datetime(m.created_at),
+    }
+
+
+def serialize_self_model_block_record(block: SelfModelBlock) -> dict[str, Any]:
+    return {
+        "id": block.id,
+        "user_id": block.user_id,
+        "section": block.section,
+        "content": block.content,
+        "version": block.version,
+        "updated_by": block.updated_by,
+        "metadata_json": block.metadata_json,
+        "created_at": serialize_optional_datetime(block.created_at),
+        "updated_at": serialize_optional_datetime(block.updated_at),
+    }
+
+
+def serialize_emotional_signal_record(signal: EmotionalSignal) -> dict[str, Any]:
+    return {
+        "id": signal.id,
+        "user_id": signal.user_id,
+        "thread_id": signal.thread_id,
+        "emotion": signal.emotion,
+        "confidence": signal.confidence,
+        "evidence_type": signal.evidence_type,
+        "evidence": signal.evidence,
+        "trajectory": signal.trajectory,
+        "previous_emotion": signal.previous_emotion,
+        "topic": signal.topic,
+        "acted_on": signal.acted_on,
+        "created_at": serialize_optional_datetime(signal.created_at),
+    }
+
+
 def serialize_optional_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -342,7 +819,12 @@ def reset_identity_sequences(db: Session) -> None:
     if bind is None or bind.dialect.name != "postgresql":
         return
 
-    for table_name in ("users", "user_keys"):
+    for table_name in (
+        "users", "user_keys", "memory_items", "memory_episodes",
+        "memory_daily_logs", "tasks", "session_notes",
+        "self_model_blocks", "emotional_signals",
+        "agent_threads", "agent_runs", "agent_steps", "agent_messages",
+    ):
         db.execute(
             text(
                 f"""
@@ -354,6 +836,19 @@ def reset_identity_sequences(db: Session) -> None:
                 """,
             )
         )
+
+
+def _rebuild_vector_indices(db: Session, snapshot: dict[str, Any]) -> None:
+    """Rebuild ChromaDB vector indices from imported embedding data."""
+    try:
+        from anima_server.services.agent.embeddings import sync_to_vector_store
+
+        user_ids = {int(u["id"]) for u in snapshot.get("users", []) if isinstance(u, dict)}
+        for uid in user_ids:
+            sync_to_vector_store(db, user_id=uid)
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).debug("Vector index rebuild skipped during import")
 
 
 def random_bytes(length: int) -> bytes:

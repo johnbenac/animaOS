@@ -19,11 +19,19 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const STORAGE_KEY = "anima_user";
 
+function purgeLegacyStoredUser(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [user, setUser] = useState<User | null>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : null;
+    purgeLegacyStoredUser();
+    return null;
   });
 
   useEffect(() => {
@@ -50,21 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (user) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(STORAGE_KEY);
-    }
-  }, [user]);
-
   const logout = async () => {
     try {
       await api.auth.logout();
     } catch {
       // ignore
     }
-    localStorage.removeItem(STORAGE_KEY);
     clearUnlockToken();
     setUser(null);
   };

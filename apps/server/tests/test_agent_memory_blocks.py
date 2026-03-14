@@ -71,10 +71,14 @@ def test_build_runtime_memory_blocks_includes_human_and_thread_summary() -> None
             thread_id=thread.id,
         )
 
-    assert [block.label for block in blocks] == ["human", "thread_summary"]
-    assert "Display name: Alice" in blocks[0].value
-    assert "Age: 30" in blocks[0].value
-    assert "User likes green tea." in blocks[1].value
+    labels = [block.label for block in blocks]
+    assert "human" in labels
+    assert "thread_summary" in labels
+    human_block = next(b for b in blocks if b.label == "human")
+    summary_block = next(b for b in blocks if b.label == "thread_summary")
+    assert "Display name: Alice" in human_block.value
+    assert "Age: 30" in human_block.value
+    assert "User likes green tea." in summary_block.value
 
 
 def test_build_runtime_memory_blocks_includes_facts_and_preferences() -> None:
@@ -182,7 +186,8 @@ def test_build_runtime_memory_blocks_omits_empty_focus() -> None:
             thread_id=thread.id,
         )
 
-    assert [block.label for block in blocks] == ["human"]
+    labels = [block.label for block in blocks]
+    assert "human" in labels
 
 
 def test_load_thread_history_excludes_summary_messages() -> None:

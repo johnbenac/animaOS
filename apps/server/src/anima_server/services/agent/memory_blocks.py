@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, MemoryEpisode, User
-from anima_server.services.agent.memory_store import get_current_focus, get_memory_items
+from anima_server.services.agent.memory_store import (
+    get_current_focus,
+    get_memory_items_scored,
+    touch_memory_items,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +27,28 @@ def build_runtime_memory_blocks(
     *,
     user_id: int,
     thread_id: int,
+    semantic_results: list[tuple[int, str, float]] | None = None,
 ) -> tuple[MemoryBlock, ...]:
     blocks: list[MemoryBlock] = []
+
+    # Self-model blocks (Priority 1 — always present, never truncated)
+    for sm_block in build_self_model_memory_blocks(db, user_id=user_id):
+        blocks.append(sm_block)
+
+    # Emotional context (Priority 2)
+    emotional_block = build_emotional_context_block(db, user_id=user_id)
+    if emotional_block is not None:
+        blocks.append(emotional_block)
 
     human_block = build_human_memory_block(db, user_id=user_id)
     if human_block is not None:
         blocks.append(human_block)
+
+    # Semantic retrieval block (Priority 3 — query-relevant memories)
+    if semantic_results:
+        semantic_block = _build_semantic_block(semantic_results)
+        if semantic_block is not None:
+            blocks.append(semantic_block)
 
     facts_block = build_facts_memory_block(db, user_id=user_id)
     if facts_block is not None:
@@ -37,6 +57,14 @@ def build_runtime_memory_blocks(
     preferences_block = build_preferences_memory_block(db, user_id=user_id)
     if preferences_block is not None:
         blocks.append(preferences_block)
+
+    goals_block = build_goals_memory_block(db, user_id=user_id)
+    if goals_block is not None:
+        blocks.append(goals_block)
+
+    relationships_block = build_relationships_memory_block(db, user_id=user_id)
+    if relationships_block is not None:
+        blocks.append(relationships_block)
 
     current_focus_block = build_current_focus_memory_block(db, user_id=user_id)
     if current_focus_block is not None:
@@ -50,7 +78,35 @@ def build_runtime_memory_blocks(
     if episodes_block is not None:
         blocks.append(episodes_block)
 
+    session_block = build_session_memory_block(db, thread_id=thread_id)
+    if session_block is not None:
+        blocks.append(session_block)
+
     return tuple(blocks)
+
+
+def _build_semantic_block(
+    results: list[tuple[int, str, float]],
+) -> MemoryBlock | None:
+    """Build a memory block from semantic search results.
+
+    Each result is (item_id, content, similarity_score).
+    """
+    if not results:
+        return None
+
+    lines: list[str] = []
+    for _item_id, content, score in results:
+        lines.append(f"- {content} (relevance: {score:.2f})")
+
+    if not lines:
+        return None
+
+    return MemoryBlock(
+        label="relevant_memories",
+        description="Memories semantically relevant to what the user just said. Use these naturally — don't list them back.",
+        value="\n".join(lines),
+    )
 
 
 def build_human_memory_block(
@@ -89,9 +145,10 @@ def build_facts_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items(db, user_id=user_id, category="fact", limit=30)
+    items = get_memory_items_scored(db, user_id=user_id, category="fact", limit=30)
     if not items:
         return None
+    touch_memory_items(db, items)
     value = "\n".join(f"- {item.content}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
@@ -107,15 +164,54 @@ def build_preferences_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items(db, user_id=user_id, category="preference", limit=20)
+    items = get_memory_items_scored(db, user_id=user_id, category="preference", limit=20)
     if not items:
         return None
+    touch_memory_items(db, items)
     value = "\n".join(f"- {item.content}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
         label="preferences",
         description="User preferences.",
+        value=value,
+    )
+
+
+def build_goals_memory_block(
+    db: Session,
+    *,
+    user_id: int,
+) -> MemoryBlock | None:
+    items = get_memory_items_scored(db, user_id=user_id, category="goal", limit=15)
+    if not items:
+        return None
+    touch_memory_items(db, items)
+    value = "\n".join(f"- {item.content}" for item in items)
+    if len(value) > 1500:
+        value = value[:1500]
+    return MemoryBlock(
+        label="goals",
+        description="User's goals and aspirations.",
+        value=value,
+    )
+
+
+def build_relationships_memory_block(
+    db: Session,
+    *,
+    user_id: int,
+) -> MemoryBlock | None:
+    items = get_memory_items_scored(db, user_id=user_id, category="relationship", limit=15)
+    if not items:
+        return None
+    touch_memory_items(db, items)
+    value = "\n".join(f"- {item.content}" for item in items)
+    if len(value) > 1500:
+        value = value[:1500]
+    return MemoryBlock(
+        label="relationships",
+        description="People and relationships the user has mentioned.",
         value=value,
     )
 
@@ -185,6 +281,88 @@ def build_episodes_memory_block(
         label="recent_episodes",
         description="Recent conversation experiences with the user.",
         value="\n".join(lines),
+    )
+
+
+def build_session_memory_block(
+    db: Session,
+    *,
+    thread_id: int,
+) -> MemoryBlock | None:
+    from anima_server.services.agent.session_memory import (
+        get_session_notes,
+        render_session_memory_text,
+    )
+
+    notes = get_session_notes(db, thread_id=thread_id, active_only=True)
+    if not notes:
+        return None
+
+    text = render_session_memory_text(notes)
+    if not text:
+        return None
+
+    return MemoryBlock(
+        label="session_memory",
+        description="Working notes for this conversation session. You can update these with the note_to_self tool.",
+        value=text,
+        read_only=False,
+    )
+
+
+def build_self_model_memory_blocks(
+    db: Session,
+    *,
+    user_id: int,
+) -> list[MemoryBlock]:
+    """Build memory blocks from the agent's self-model sections."""
+    from anima_server.services.agent.self_model import (
+        ensure_self_model_exists,
+        get_all_self_model_blocks,
+        render_self_model_section,
+    )
+
+    ensure_self_model_exists(db, user_id=user_id)
+    blocks_map = get_all_self_model_blocks(db, user_id=user_id)
+    result: list[MemoryBlock] = []
+
+    section_config = [
+        ("identity", "self_identity", "Who I am in this relationship — my self-understanding."),
+        ("inner_state", "self_inner_state", "My current cognitive state — what I'm thinking about, what's unresolved."),
+        ("working_memory", "self_working_memory", "Things I'm holding in mind across sessions."),
+        ("growth_log", "self_growth_log", "How I've evolved — my recent changes and why."),
+        ("intentions", "self_intentions", "My active goals and learned behavioral rules."),
+    ]
+
+    for section, label, description in section_config:
+        block = blocks_map.get(section)
+        text = render_self_model_section(block)
+        if text:
+            result.append(MemoryBlock(
+                label=label,
+                description=description,
+                value=text,
+            ))
+
+    return result
+
+
+def build_emotional_context_block(
+    db: Session,
+    *,
+    user_id: int,
+) -> MemoryBlock | None:
+    """Build a memory block with the agent's emotional read of the user."""
+    from anima_server.services.agent.emotional_intelligence import synthesize_emotional_context
+
+    text = synthesize_emotional_context(db, user_id=user_id)
+    if not text:
+        return None
+
+    return MemoryBlock(
+        label="emotional_context",
+        description="My sense of how the user is doing emotionally. Guide tone, not verbal analysis.",
+        value=text,
     )
 
 

@@ -1,18 +1,22 @@
 # ANIMA Build & Packaging Guide
 
-This project is packaged as a Tauri desktop app with a bundled local API sidecar.
+This guide covers the current Tauri desktop packaging flow.
 
-Customers should only receive install/build artifacts (for example `.app`, `.dmg`, `.msi`) and their runtime data folder.  
-They should not need source code, `node_modules`, Bun, pnpm, or TypeScript files.
+Important: the packaged desktop app still bundles the legacy `apps/api` Bun
+sidecar, not the Python `apps/server` process used in local development.
 
 ## Prerequisites
 
 - Bun 1.3+
 - Rust toolchain (`rustup`, `cargo`)
 - Tauri platform prerequisites
-  - macOS: Xcode Command Line Tools
-  - Windows: MSVC build tools + WebView2 runtime
-  - Linux: WebKitGTK and required system libs
+- platform signing or notarization tooling as needed for release
+
+Platform notes:
+
+- macOS: Xcode Command Line Tools
+- Windows: MSVC build tools and WebView2 runtime
+- Linux: WebKitGTK and required system libraries
 
 ## Install Dependencies
 
@@ -26,47 +30,50 @@ bun install
 
 Run from repo root.
 
-### 1) Recommended release output (`.app` on macOS)
+### App Bundle
 
 ```bash
 bun --filter desktop package:app
 ```
 
-This builds:
+This runs the desktop release prep script, compiles the legacy API sidecar for
+the Tauri bundle, builds the frontend, and produces the platform app bundle.
 
-- Frontend production assets
-- API sidecar binary (`apps/desktop/src-tauri/bin/anima-api`)
-- Tauri release app bundle
+On macOS, the final bundle is emitted under Tauri's
+`target/release/bundle/macos/` output directory.
 
-Output (macOS):
-
-- `apps/desktop/src-tauri/target/release/bundle/macos/ANIMA.app`
-
-### 2) Full installer targets (DMG/MSI/etc)
+### Full Installer Targets
 
 ```bash
 bun --filter desktop package
 ```
 
-This runs full `tauri build` targets configured for the platform.
+This runs the full `tauri build` target set for the current platform.
 
 ## What Is Bundled
 
-Inside the app resources:
+Inside the packaged app resources:
 
-- `bin/anima-api` (or `anima-api.exe`)
-- `prompts/` (API prompt templates)
-- `drizzle/` (DB migrations)
+- `bin/anima-api` or `bin/anima-api.exe`
+- `prompts/`
+- `drizzle/`
 
-No repo path fallback is used at runtime.
+At runtime the desktop shell sets:
 
-## Runtime Data Folder (Customer Data)
+- `ANIMA_DATA_DIR`
+- `ANIMA_PROMPTS_DIR`
+- `ANIMA_MIGRATIONS_DIR`
 
-At first launch, the app creates a per-user data directory and stores:
+## Runtime Data Folder
+
+The packaged desktop app creates a per-user data directory and the legacy API
+sidecar stores its runtime data there.
+
+Typical contents:
 
 - `anima.db`
-- `users/<userId>/memory/`
-- `users/<userId>/soul.md`
+- `users/<user_id>/memory/`
+- `users/<user_id>/soul.md`
 
 Typical locations:
 
@@ -74,20 +81,20 @@ Typical locations:
 - Linux: `~/.local/share/com.leoca.anima`
 - Windows: `%APPDATA%/com.leoca.anima`
 
-## Release Handoff Checklist
+## Release Checklist
 
-1. Build with `bun --filter desktop package:app` (or `package`).
-2. Smoke test auth/chat/memory/soul on a clean machine/user profile.
-3. Confirm data is written to app data folder (not repo paths).
-4. Deliver only the bundled artifact(s), not source/workspace files.
+1. Run `bun --filter desktop package:app` or `bun --filter desktop package`.
+2. Smoke-test auth, chat, memory, and soul flows on a clean profile.
+3. Verify the sidecar writes customer data to the app data directory, not the repo.
+4. Ship only the packaged artifact and normal installer assets.
 
 ## Troubleshooting
 
-- `Missing required environment variable: ANIMA_DATA_DIR`  
-  This is expected if you run the API binary directly without the desktop launcher.
+- `Missing required environment variable: ANIMA_DATA_DIR`
+  This is expected if you run the sidecar directly instead of through Tauri.
 
-- `Failed to start server. Is port 3031 in use?`  
-  Another process is already using local API port `3031`.
+- `Failed to start server. Is port 3031 in use?`
+  Another local process is already bound to port `3031`.
 
-- DMG creation fails in non-GUI/headless environments  
-  Use `bun --filter desktop package:app` to generate `.app`, then create/sign DMG in a GUI-capable release environment.
+- DMG creation fails in headless environments
+  Build the `.app` first, then create or sign the DMG in a GUI-capable release environment.

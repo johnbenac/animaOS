@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     core_passphrase: str = ""
     agent_extraction_model: str = ""
     agent_extraction_provider: str = ""
+    agent_session_memory_max_notes: int = 20
+    agent_session_memory_budget_chars: int = 1500
+    agent_self_model_identity_budget: int = 1000
+    agent_self_model_inner_state_budget: int = 800
+    agent_self_model_working_memory_budget: int = 600
+    agent_self_model_growth_log_budget: int = 600
+    agent_self_model_intentions_budget: int = 1000
+    agent_emotional_context_budget: int = 500
+    agent_emotional_signal_buffer_size: int = 20
+    agent_emotional_confidence_threshold: float = 0.4
 
     model_config = SettingsConfigDict(
         env_prefix="ANIMA_",

@@ -54,11 +54,25 @@ def build_system_prompt(
         },
     )
     persona = build_persona_prompt(resolved.persona_template)
-    memory_blocks = serialize_memory_blocks(resolved.memory_blocks)
+
+    # Extract self-model identity from memory blocks to use as dynamic persona.
+    # When present, identity shapes the agent's voice; remove it from memory
+    # blocks to avoid duplication.
+    all_blocks = list(resolved.memory_blocks)
+    dynamic_identity = ""
+    filtered_blocks: list[Any] = []
+    for block in all_blocks:
+        if block.label == "self_identity":
+            dynamic_identity = block.value.strip()
+        else:
+            filtered_blocks.append(block)
+
+    memory_blocks = serialize_memory_blocks(filtered_blocks)
     template_context = {
         "system_rules": system_rules,
         "guardrails": guardrails,
         "persona": persona,
+        "dynamic_identity": dynamic_identity,
         "persona_template": resolved.persona_template,
         "tool_summaries": [item.strip() for item in resolved.tool_summaries if item.strip()],
         "memory_blocks": memory_blocks,
