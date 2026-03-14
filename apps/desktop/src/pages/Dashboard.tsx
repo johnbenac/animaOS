@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { api, type DailyBrief, type HomeData, type Nudge, type TaskItem } from "../lib/api";
+import { api, type Greeting, type HomeData, type Nudge, type TaskItem } from "../lib/api";
 import { DashboardGreeting } from "./dashboard/DashboardGreeting";
 import { DashboardNudges } from "./dashboard/DashboardNudges";
 import { DashboardPromptForm } from "./dashboard/DashboardPromptForm";
@@ -11,7 +11,7 @@ import { getTimeOfDay } from "./dashboard/helpers";
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [brief, setBrief] = useState<DailyBrief | null>(null);
+  const [brief, setBrief] = useState<Greeting | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [nudges, setNudges] = useState<Nudge[]>([]);
   const [dismissedNudges, setDismissedNudges] = useState<Set<string>>(new Set());
@@ -27,11 +27,16 @@ export default function Dashboard() {
 
     setBriefLoading(true);
     api.chat
-      .brief(user.id)
-      .then((b) => {
-        if (active) setBrief(b);
+      .greeting(user.id)
+      .then((g) => {
+        if (active) setBrief(g);
       })
-      .catch(() => {})
+      .catch(() => {
+        // Fall back to static brief if greeting fails
+        api.chat.brief(user.id).then((b) => {
+          if (active) setBrief({ message: b.message, llmGenerated: false, context: { ...b.context, overdueTasks: 0, upcomingDeadlines: [] } });
+        }).catch(() => {});
+      })
       .finally(() => {
         if (active) setBriefLoading(false);
       });

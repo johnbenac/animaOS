@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from anima_server.api.deps.unlock import require_unlocked_user
 from anima_server.config import settings
 from anima_server.db import get_db
+from anima_server.services.agent.llm import SUPPORTED_PROVIDERS
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
@@ -36,9 +37,11 @@ class AgentConfigUpdateRequest(BaseModel):
 AVAILABLE_PROVIDERS: list[ProviderInfo] = [
     ProviderInfo(name="scaffold", defaultModel="scaffold", requiresApiKey=False),
     ProviderInfo(name="ollama", defaultModel="llama3.2", requiresApiKey=False),
-    ProviderInfo(name="openai", defaultModel="gpt-4o-mini", requiresApiKey=True),
-    ProviderInfo(name="anthropic", defaultModel="claude-sonnet-4-20250514", requiresApiKey=True),
+    ProviderInfo(name="openrouter", defaultModel="google/gemma-3-27b-it", requiresApiKey=True),
+    ProviderInfo(name="vllm", defaultModel="default", requiresApiKey=False),
 ]
+
+VALID_PROVIDERS = {"scaffold"} | set(SUPPORTED_PROVIDERS)
 
 
 @router.get("/providers", response_model=list[ProviderInfo])
@@ -69,6 +72,12 @@ async def update_config(
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     require_unlocked_user(request, user_id)
+
+    if payload.provider not in VALID_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported provider: {payload.provider!r}. Valid: {', '.join(sorted(VALID_PROVIDERS))}",
+        )
 
     settings.agent_provider = payload.provider
     settings.agent_model = payload.model

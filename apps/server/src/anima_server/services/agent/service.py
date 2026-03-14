@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import dataclass
 from threading import Lock
 
 from anima_server.config import settings
@@ -9,7 +10,8 @@ from anima_server.services.agent.compaction import compact_thread_context
 from anima_server.services.agent.consolidation import schedule_background_memory_consolidation
 from anima_server.services.agent.reflection import schedule_reflection
 from anima_server.services.agent.tool_context import ToolContext, clear_tool_context, set_tool_context
-from anima_server.services.agent.memory_blocks import build_runtime_memory_blocks
+from anima_server.services.agent.turn_coordinator import get_user_lock
+from anima_server.services.agent.memory_blocks import MemoryBlock, build_runtime_memory_blocks
 from anima_server.services.agent.llm import invalidate_llm_cache
 from anima_server.services.agent.persistence import (
     append_user_message,
@@ -33,7 +35,7 @@ from anima_server.services.agent.streaming import (
     summarize_usage,
 )
 from anima_server.services.agent.system_prompt import invalidate_system_prompt_template_cache
-from anima_server.models import AgentMessage
+from anima_server.models import AgentMessage, AgentRun, AgentThread
 from sqlalchemy.orm import Session
 
 _runner_lock = Lock()
@@ -75,6 +77,68 @@ async def _execute_agent_turn(
     *,
     event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
 ) -> AgentResult:
+    user_lock = get_user_lock(user_id)
+    async with user_lock:
+        return await _execute_agent_turn_locked(
+            user_message, user_id, db, event_callback=event_callback,
+        )
+
+
+async def _execute_agent_turn_locked(
+    user_message: str,
+    user_id: int,
+    db: Session,
+    *,
+    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+) -> AgentResult:
+    # Stage 1: Prepare turn context
+    thread, run, user_msg, initial_sequence_id, turn_ctx = await _prepare_turn_context(
+        user_message, user_id, db, event_callback=event_callback,
+    )
+
+    # Stage 2: Invoke the runtime
+    result = await _invoke_turn_runtime(
+        user_message, user_id, db,
+        thread=thread, run=run, user_msg=user_msg,
+        turn_ctx=turn_ctx,
+        event_callback=event_callback,
+    )
+
+    # Stage 3: Persist result
+    _persist_turn_result(
+        db, thread=thread, run=run, result=result,
+        initial_sequence_id=initial_sequence_id,
+    )
+
+    # Stage 4: Post-turn hooks
+    _run_post_turn_hooks(
+        user_id=user_id, thread_id=thread.id,
+        user_message=user_message, result=result,
+    )
+
+    if event_callback is not None:
+        usage = summarize_usage(result)
+        if usage is not None:
+            await event_callback(build_usage_event(usage))
+        await event_callback(build_done_event(result))
+    return result
+
+
+@dataclass(slots=True)
+class _TurnContext:
+    history: list[StoredMessage]
+    conversation_turn_count: int
+    memory_blocks: tuple[MemoryBlock, ...]
+
+
+async def _prepare_turn_context(
+    user_message: str,
+    user_id: int,
+    db: Session,
+    *,
+    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+) -> tuple[AgentThread, AgentRun, AgentMessage, int, _TurnContext]:
+    """Stage 1: Load thread, persist user message, build memory context."""
     thread = get_or_create_thread(db, user_id)
     history = load_thread_history(db, thread.id)
     run = create_run(
@@ -86,7 +150,7 @@ async def _execute_agent_turn(
         mode="streaming" if event_callback is not None else "blocking",
     )
     initial_sequence_id = next_sequence_id(db, thread.id)
-    append_user_message(
+    user_msg = append_user_message(
         db,
         thread=thread,
         run_id=run.id,
@@ -95,66 +159,89 @@ async def _execute_agent_turn(
     )
     conversation_turn_count = count_messages_by_role(db, thread.id, "user")
 
-    # Semantic retrieval: embed the user message and find relevant memories
+    # Semantic retrieval (best-effort)
     semantic_results: list[tuple[int, str, float]] | None = None
     try:
         from anima_server.services.agent.embeddings import semantic_search
-
         hits = await semantic_search(
-            db,
-            user_id=user_id,
-            query=user_message,
-            limit=8,
-            similarity_threshold=0.35,
+            db, user_id=user_id, query=user_message,
+            limit=8, similarity_threshold=0.35,
         )
         if hits:
             semantic_results = [(item.id, item.content, score) for item, score in hits]
     except Exception:  # noqa: BLE001
-        pass  # semantic search is best-effort
+        pass
 
     memory_blocks = build_runtime_memory_blocks(
-        db,
-        user_id=user_id,
-        thread_id=thread.id,
+        db, user_id=user_id, thread_id=thread.id,
         semantic_results=semantic_results,
     )
 
-    # Collect feedback signals (re-asks, corrections) before LLM call
+    # Feedback signals (best-effort)
     try:
         from anima_server.services.agent.feedback_signals import (
-            collect_feedback_signals,
-            record_feedback_signals,
+            collect_feedback_signals, record_feedback_signals,
         )
-
         signals = collect_feedback_signals(
-            db,
-            user_id=user_id,
-            user_message=user_message,
-            thread_id=thread.id,
+            db, user_id=user_id, user_message=user_message, thread_id=thread.id,
         )
         if signals:
             record_feedback_signals(db, user_id=user_id, signals=signals)
     except Exception:  # noqa: BLE001
-        pass  # feedback collection is best-effort
+        pass
 
+    turn_ctx = _TurnContext(
+        history=history,
+        conversation_turn_count=conversation_turn_count,
+        memory_blocks=memory_blocks,
+    )
+    return thread, run, user_msg, initial_sequence_id, turn_ctx
+
+
+async def _invoke_turn_runtime(
+    user_message: str,
+    user_id: int,
+    db: Session,
+    *,
+    thread: AgentThread,
+    run: AgentRun,
+    user_msg: AgentMessage,
+    turn_ctx: _TurnContext,
+    event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
+) -> AgentResult:
+    """Stage 2: Set tool context and invoke the agent runtime."""
     set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
     try:
         runner = get_or_build_runner()
-        result = await runner.invoke(
+        return await runner.invoke(
             user_message,
             user_id,
-            history,
-            conversation_turn_count=conversation_turn_count,
-            memory_blocks=memory_blocks,
+            turn_ctx.history,
+            conversation_turn_count=turn_ctx.conversation_turn_count,
+            memory_blocks=turn_ctx.memory_blocks,
             event_callback=event_callback,
         )
     except Exception as exc:
+        # Remove orphaned user message from active context so it doesn't
+        # replay as valid history on the next turn.
+        user_msg.is_in_context = False
+        db.add(user_msg)
         mark_run_failed(db, run, str(exc))
         db.commit()
         raise
     finally:
         clear_tool_context()
 
+
+def _persist_turn_result(
+    db: Session,
+    *,
+    thread: AgentThread,
+    run: AgentRun,
+    result: AgentResult,
+    initial_sequence_id: int,
+) -> None:
+    """Stage 3: Write result to DB and compact if needed."""
     persist_agent_result(
         db,
         thread=thread,
@@ -173,6 +260,16 @@ async def _execute_agent_turn(
         keep_last_messages=max(1, settings.agent_compaction_keep_last_messages),
     )
     db.commit()
+
+
+def _run_post_turn_hooks(
+    *,
+    user_id: int,
+    thread_id: int,
+    user_message: str,
+    result: AgentResult,
+) -> None:
+    """Stage 4: Schedule background memory and reflection work."""
     schedule_background_memory_consolidation(
         user_id=user_id,
         user_message=user_message,
@@ -180,14 +277,8 @@ async def _execute_agent_turn(
     )
     schedule_reflection(
         user_id=user_id,
-        thread_id=thread.id,
+        thread_id=thread_id,
     )
-    if event_callback is not None:
-        usage = summarize_usage(result)
-        if usage is not None:
-            await event_callback(build_usage_event(usage))
-        await event_callback(build_done_event(result))
-    return result
 
 
 async def stream_agent(
@@ -221,8 +312,20 @@ async def stream_agent(
                 break
             await asyncio.sleep(0)
             yield event
+    except (asyncio.CancelledError, GeneratorExit):
+        worker_task.cancel()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+        raise
     finally:
-        await worker_task
+        if not worker_task.done():
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
 
 
 def list_agent_history(user_id: int, db: Session, *, limit: int = 50) -> list[AgentMessage]:

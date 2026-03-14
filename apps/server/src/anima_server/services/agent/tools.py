@@ -181,12 +181,122 @@ def complete_goal(title: str) -> str:
     return f"Could not find intention: {title}"
 
 
+@tool
+def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
+    """Create a task on the user's task list. Use this when the user asks you to add a
+    reminder, todo, or task. The task appears on their dashboard.
+    due_date should be YYYY-MM-DD format if mentioned, or empty string if not.
+    priority: 1 (low) to 5 (critical), default 2.
+    Examples:
+    - "remind me to call mom Friday" -> text="Call mom", due_date="2026-03-20", priority="2"
+    - "add buy groceries to my list" -> text="Buy groceries", due_date="", priority="2"
+    """
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.models.task import Task
+
+    ctx = get_tool_context()
+    pri = 2
+    try:
+        pri = max(1, min(5, int(priority)))
+    except (ValueError, TypeError):
+        pass
+
+    task = Task(
+        user_id=ctx.user_id,
+        text=text.strip(),
+        priority=pri,
+        due_date=due_date.strip() if due_date.strip() else None,
+    )
+    ctx.db.add(task)
+    ctx.db.flush()
+    result = f"Task created: {task.text}"
+    if task.due_date:
+        result += f" (due {task.due_date})"
+    return result
+
+
+@tool
+def list_tasks(include_done: str = "false") -> str:
+    """List the user's current tasks. Returns a summary of open tasks (and optionally
+    completed ones). Use this when the user asks about their tasks, todos, or what they
+    need to do."""
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.models.task import Task
+    from sqlalchemy import select
+
+    ctx = get_tool_context()
+    query = select(Task).where(Task.user_id == ctx.user_id)
+    if include_done.lower() not in ("true", "yes", "1"):
+        query = query.where(Task.done == False)  # noqa: E712
+    query = query.order_by(Task.done, Task.priority.desc(), Task.created_at.desc())
+    tasks = list(ctx.db.scalars(query).all())
+
+    if not tasks:
+        return "No tasks found."
+
+    lines: list[str] = []
+    for t in tasks:
+        status = "[done]" if t.done else "[open]"
+        line = f"- {status} {t.text} (priority {t.priority})"
+        if t.due_date:
+            line += f" due {t.due_date}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+@tool
+def complete_task(text: str) -> str:
+    """Mark a task as done. Provide the task text (or a close match). Use when the user
+    says they finished something or wants to check off a task."""
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.models.task import Task
+    from sqlalchemy import select
+
+    ctx = get_tool_context()
+    tasks = list(
+        ctx.db.scalars(
+            select(Task)
+            .where(Task.user_id == ctx.user_id, Task.done == False)  # noqa: E712
+        ).all()
+    )
+    if not tasks:
+        return "No open tasks found."
+
+    # Find best match
+    text_lower = text.lower().strip()
+    best_task = None
+    best_score = 0.0
+    for t in tasks:
+        task_lower = t.text.lower()
+        if text_lower == task_lower:
+            best_task = t
+            break
+        # Simple word overlap score
+        text_words = set(text_lower.split())
+        task_words = set(task_lower.split())
+        if text_words and task_words:
+            overlap = len(text_words & task_words) / max(len(text_words), len(task_words))
+            if overlap > best_score:
+                best_score = overlap
+                best_task = t
+
+    if best_task is None or (best_score < 0.3 and text_lower != best_task.text.lower()):
+        return f"Could not find a matching task for: {text}"
+
+    best_task.done = True
+    best_task.completed_at = datetime.now(timezone.utc)
+    best_task.updated_at = datetime.now(timezone.utc)
+    ctx.db.flush()
+    return f"Completed: {best_task.text}"
+
+
 def get_tools() -> list[Any]:
     """Return all tools available to the agent."""
     return [
         current_datetime, send_message,
         note_to_self, dismiss_note, save_to_memory,
         set_intention, complete_goal,
+        create_task, list_tasks, complete_task,
     ]
 
 

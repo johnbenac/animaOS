@@ -10,11 +10,6 @@ class TerminalToolRule:
 
 
 @dataclass(frozen=True, slots=True)
-class ContinueToolRule:
-    tool_name: str
-
-
-@dataclass(frozen=True, slots=True)
 class InitToolRule:
     tool_name: str
 
@@ -32,7 +27,6 @@ class RequiresApprovalToolRule:
 
 ToolRule = (
     TerminalToolRule
-    | ContinueToolRule
     | InitToolRule
     | ChildToolRule
     | RequiresApprovalToolRule
@@ -50,11 +44,6 @@ class ToolRulesSolver:
             rule.tool_name
             for rule in tool_rules
             if isinstance(rule, TerminalToolRule)
-        }
-        self._continue_tools = {
-            rule.tool_name
-            for rule in tool_rules
-            if isinstance(rule, ContinueToolRule)
         }
         self._child_rules = {
             rule.tool_name: rule
@@ -110,9 +99,6 @@ class ToolRulesSolver:
 
     def is_terminal(self, tool_name: str) -> bool:
         return tool_name in self._terminal_tools
-
-    def is_continue(self, tool_name: str) -> bool:
-        return tool_name in self._continue_tools
 
     def requires_approval(self, tool_name: str) -> bool:
         return tool_name in self._approval_tools

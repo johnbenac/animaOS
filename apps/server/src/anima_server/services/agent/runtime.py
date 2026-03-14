@@ -31,6 +31,7 @@ from anima_server.services.agent.streaming import (
     build_tool_call_event,
     build_tool_return_event,
 )
+from anima_server.services.agent.prompt_budget import apply_prompt_budget
 from anima_server.services.agent.system_prompt import SystemPromptContext, build_system_prompt
 from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
 
@@ -71,11 +72,12 @@ class AgentRuntime:
         memory_blocks: Sequence[MemoryBlock] = (),
     ) -> str:
         self._adapter.prepare()
+        budgeted_blocks = apply_prompt_budget(memory_blocks)
         return build_system_prompt(
             SystemPromptContext(
                 persona_template=self._persona_template,
                 tool_summaries=self._tool_summaries,
-                memory_blocks=memory_blocks,
+                memory_blocks=budgeted_blocks,
             )
         )
 

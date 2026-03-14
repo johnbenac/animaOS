@@ -1,10 +1,10 @@
-import type { DailyBrief } from "../../lib/api";
+import type { Greeting } from "../../lib/api";
 
 interface DashboardGreetingProps {
   userName?: string;
   tod: string;
   briefLoading: boolean;
-  brief: DailyBrief | null;
+  brief: Greeting | null;
 }
 
 export function DashboardGreeting({

@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: "/chat", label: "Chat" },
   { to: "/memory", label: "Memory" },
   { to: "/soul", label: "Soul" },
+  { to: "/consciousness", label: "Mind" },
   { to: "/settings", label: "Settings" },
 ];
 

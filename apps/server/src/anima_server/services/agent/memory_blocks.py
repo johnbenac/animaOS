@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, MemoryEpisode, User
+from anima_server.models.task import Task
 from anima_server.services.agent.memory_store import (
     get_current_focus,
     get_memory_items_scored,
@@ -66,6 +67,10 @@ def build_runtime_memory_blocks(
     goals_block = build_goals_memory_block(db, user_id=user_id)
     if goals_block is not None:
         blocks.append(goals_block)
+
+    tasks_block = build_tasks_memory_block(db, user_id=user_id)
+    if tasks_block is not None:
+        blocks.append(tasks_block)
 
     relationships_block = build_relationships_memory_block(db, user_id=user_id)
     if relationships_block is not None:
@@ -198,6 +203,54 @@ def build_goals_memory_block(
     return MemoryBlock(
         label="goals",
         description="User's goals and aspirations.",
+        value=value,
+    )
+
+
+def build_tasks_memory_block(
+    db: Session,
+    *,
+    user_id: int,
+) -> MemoryBlock | None:
+    """Build a memory block with the user's open tasks and recently completed ones."""
+    from datetime import UTC, datetime
+
+    open_tasks = list(
+        db.scalars(
+            select(Task)
+            .where(Task.user_id == user_id, Task.done == False)  # noqa: E712
+            .order_by(Task.priority.desc(), Task.created_at.desc())
+            .limit(15)
+        ).all()
+    )
+
+    if not open_tasks:
+        return None
+
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
+    lines: list[str] = []
+    overdue: list[str] = []
+
+    for t in open_tasks:
+        line = f"- {t.text} (priority {t.priority})"
+        if t.due_date:
+            line += f" due {t.due_date}"
+            if t.due_date < today:
+                overdue.append(t.text)
+        lines.append(line)
+
+    header_parts = [f"{len(open_tasks)} open task{'s' if len(open_tasks) != 1 else ''}"]
+    if overdue:
+        header_parts.append(f"{len(overdue)} overdue")
+    header = ", ".join(header_parts) + f" (today: {today})"
+
+    value = header + "\n" + "\n".join(lines)
+    if len(value) > 1500:
+        value = value[:1500]
+
+    return MemoryBlock(
+        label="user_tasks",
+        description="The user's task list. Reference naturally — mention overdue or upcoming deadlines when relevant. You can create, complete, and list tasks with your tools.",
         value=value,
     )
 

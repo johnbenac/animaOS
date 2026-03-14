@@ -80,11 +80,11 @@ def test_set_self_model_block_bumps_version() -> None:
 
         seed_self_model(db, user_id=user.id)
         block = set_self_model_block(
-            db, user_id=user.id, section="identity",
-            content="Updated identity", updated_by="sleep_time",
+            db, user_id=user.id, section="inner_state",
+            content="Updated inner state", updated_by="sleep_time",
         )
         assert block.version == 2
-        assert block.content == "Updated identity"
+        assert block.content == "Updated inner state"
         assert block.updated_by == "sleep_time"
 
 
@@ -622,3 +622,405 @@ def test_system_prompt_without_identity_has_no_dynamic_section() -> None:
 
     assert "My Self-Understanding" not in prompt
     assert "Likes coffee" in prompt
+
+
+# --- Agent Task Tool Tests ---
+
+
+def test_create_task_tool() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            result = create_task("Buy groceries", due_date="2026-04-01", priority="3")
+            assert "Buy groceries" in result
+            assert "2026-04-01" in result
+
+            from anima_server.models.task import Task
+            from sqlalchemy import select
+            tasks = list(db.scalars(select(Task).where(Task.user_id == user.id)).all())
+            assert len(tasks) == 1
+            assert tasks[0].text == "Buy groceries"
+            assert tasks[0].due_date == "2026-04-01"
+            assert tasks[0].priority == 3
+            assert tasks[0].done is False
+        finally:
+            clear_tool_context()
+
+
+def test_create_task_tool_no_due_date() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            result = create_task("Walk the dog")
+            assert "Walk the dog" in result
+
+            from anima_server.models.task import Task
+            from sqlalchemy import select
+            tasks = list(db.scalars(select(Task).where(Task.user_id == user.id)).all())
+            assert len(tasks) == 1
+            assert tasks[0].due_date is None
+        finally:
+            clear_tool_context()
+
+
+def test_list_tasks_tool() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task, list_tasks
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            create_task("Task A", priority="4")
+            create_task("Task B", due_date="2026-05-01")
+
+            result = list_tasks()
+            assert "Task A" in result
+            assert "Task B" in result
+            assert "priority 4" in result
+            assert "2026-05-01" in result
+        finally:
+            clear_tool_context()
+
+
+def test_list_tasks_tool_empty() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import list_tasks
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            result = list_tasks()
+            assert "No tasks" in result
+        finally:
+            clear_tool_context()
+
+
+def test_complete_task_tool() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task, complete_task
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            create_task("Buy groceries")
+            result = complete_task("Buy groceries")
+            assert "Completed" in result
+            assert "Buy groceries" in result
+
+            from anima_server.models.task import Task
+            from sqlalchemy import select
+            task = db.scalars(select(Task).where(Task.user_id == user.id)).first()
+            assert task is not None
+            assert task.done is True
+            assert task.completed_at is not None
+        finally:
+            clear_tool_context()
+
+
+def test_complete_task_tool_fuzzy_match() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task, complete_task
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            create_task("Buy groceries from the store")
+            # Fuzzy match — shares key words
+            result = complete_task("buy groceries")
+            assert "Completed" in result
+        finally:
+            clear_tool_context()
+
+
+def test_tasks_memory_block_shows_open_tasks() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.models.task import Task
+        from anima_server.services.agent.memory_blocks import build_tasks_memory_block
+
+        db.add(Task(user_id=user.id, text="Buy groceries", priority=3, due_date="2026-04-01"))
+        db.add(Task(user_id=user.id, text="Call dentist", priority=2))
+        db.add(Task(user_id=user.id, text="Done task", priority=1, done=True))
+        db.flush()
+
+        block = build_tasks_memory_block(db, user_id=user.id)
+        assert block is not None
+        assert block.label == "user_tasks"
+        assert "Buy groceries" in block.value
+        assert "Call dentist" in block.value
+        assert "Done task" not in block.value
+        assert "2 open tasks" in block.value
+        assert "2026-04-01" in block.value
+
+
+def test_tasks_memory_block_flags_overdue() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.models.task import Task
+        from anima_server.services.agent.memory_blocks import build_tasks_memory_block
+
+        db.add(Task(user_id=user.id, text="Overdue item", priority=3, due_date="2020-01-01"))
+        db.flush()
+
+        block = build_tasks_memory_block(db, user_id=user.id)
+        assert block is not None
+        assert "1 overdue" in block.value
+
+
+def test_tasks_memory_block_empty_when_no_open_tasks() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.memory_blocks import build_tasks_memory_block
+
+        block = build_tasks_memory_block(db, user_id=user.id)
+        assert block is None
+
+
+def test_tasks_memory_block_in_runtime_blocks() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.models.task import Task
+        from anima_server.services.agent.memory_blocks import build_runtime_memory_blocks
+
+        db.add(Task(user_id=user.id, text="Test task", priority=2))
+        db.flush()
+
+        blocks = build_runtime_memory_blocks(db, user_id=user.id, thread_id=thread.id)
+        labels = [b.label for b in blocks]
+        assert "user_tasks" in labels
+
+
+def test_complete_task_tool_no_match() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        db.flush()
+
+        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tools import create_task, complete_task
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            create_task("Buy groceries")
+            result = complete_task("write a novel")
+            assert "Could not find" in result
+        finally:
+            clear_tool_context()
+
+
+# --- Invariant Tests: Prompt Budget ---
+
+
+def test_prompt_budget_preserves_tier_0() -> None:
+    from anima_server.services.agent.memory_blocks import MemoryBlock
+    from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
+
+    blocks = [
+        MemoryBlock(label="soul", value="A" * 3000, description="soul directive"),
+        MemoryBlock(label="facts", value="B" * 5000, description="facts"),
+        MemoryBlock(label="recent_episodes", value="C" * 5000, description="episodes"),
+    ]
+    result = apply_prompt_budget(blocks, BudgetConfig(
+        total_budget=4000, tier_0_budget=4000, tier_1_budget=0,
+        tier_2_budget=0, tier_3_budget=0,
+    ))
+    labels = [b.label for b in result]
+    assert "soul" in labels
+    assert "facts" not in labels
+    assert "recent_episodes" not in labels
+
+
+def test_prompt_budget_truncates_oversized_block() -> None:
+    from anima_server.services.agent.memory_blocks import MemoryBlock
+    from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
+
+    blocks = [
+        MemoryBlock(label="soul", value="X" * 10000, description="big soul"),
+    ]
+    result = apply_prompt_budget(blocks, BudgetConfig(
+        total_budget=5000, tier_0_budget=5000, tier_1_budget=0,
+        tier_2_budget=0, tier_3_budget=0,
+    ))
+    assert len(result) == 1
+    assert len(result[0].value) == 5000
+
+
+def test_prompt_budget_drops_lowest_tier_first() -> None:
+    from anima_server.services.agent.memory_blocks import MemoryBlock
+    from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
+
+    blocks = [
+        MemoryBlock(label="soul", value="soul content", description=""),
+        MemoryBlock(label="self_identity", value="identity content", description=""),
+        MemoryBlock(label="relevant_memories", value="semantic hits", description=""),
+        MemoryBlock(label="recent_episodes", value="episode data", description=""),
+    ]
+    result = apply_prompt_budget(blocks, BudgetConfig(
+        total_budget=100, tier_0_budget=50, tier_1_budget=50,
+        tier_2_budget=50, tier_3_budget=0,
+    ))
+    labels = [b.label for b in result]
+    assert "soul" in labels
+    assert "self_identity" in labels
+    assert "recent_episodes" not in labels
+
+
+# --- Invariant Tests: Provider Config ---
+
+
+def test_config_rejects_invalid_provider() -> None:
+    from anima_server.api.routes.config import VALID_PROVIDERS
+
+    assert "ollama" in VALID_PROVIDERS
+    assert "openrouter" in VALID_PROVIDERS
+    assert "vllm" in VALID_PROVIDERS
+    assert "scaffold" in VALID_PROVIDERS
+    assert "openai" not in VALID_PROVIDERS
+    assert "anthropic" not in VALID_PROVIDERS
+
+
+# --- Invariant Tests: Self-Model Write Governance ---
+
+
+def test_identity_rewrite_blocked_when_young() -> None:
+    with _db_session() as db:
+        user, _ = _setup(db)
+        from anima_server.services.agent.self_model import (
+            seed_self_model, set_self_model_block, get_self_model_block,
+        )
+
+        seed_self_model(db, user_id=user.id)
+        block = set_self_model_block(
+            db, user_id=user.id, section="identity",
+            content="Completely new radical personality rewrite here",
+            updated_by="deep_monologue",
+        )
+        assert block.version == 1
+        assert "Who I Am" in block.content
+
+        growth = get_self_model_block(db, user_id=user.id, section="growth_log")
+        assert growth is not None
+        assert "identity update" in growth.content.lower()
+
+
+def test_identity_rewrite_allowed_by_trusted_writer() -> None:
+    with _db_session() as db:
+        user, _ = _setup(db)
+        from anima_server.services.agent.self_model import seed_self_model, set_self_model_block
+
+        seed_self_model(db, user_id=user.id)
+        block = set_self_model_block(
+            db, user_id=user.id, section="identity",
+            content="User-authored identity",
+            updated_by="user",
+        )
+        assert block.version == 2
+        assert block.content == "User-authored identity"
+
+
+def test_growth_log_deduplicates_entries() -> None:
+    with _db_session() as db:
+        user, _ = _setup(db)
+        from anima_server.services.agent.self_model import (
+            seed_self_model, append_growth_log_entry, get_self_model_block,
+        )
+
+        seed_self_model(db, user_id=user.id)
+        result1 = append_growth_log_entry(
+            db, user_id=user.id,
+            entry="Learned that user prefers concise responses",
+        )
+        assert result1 is not None
+
+        result2 = append_growth_log_entry(
+            db, user_id=user.id,
+            entry="Learned that user prefers concise responses",
+        )
+        assert result2 is None
+
+        block = get_self_model_block(db, user_id=user.id, section="growth_log")
+        assert block is not None
+        count = block.content.count("concise responses")
+        assert count == 1
+
+
+# --- Invariant Tests: Turn Coordinator ---
+
+
+def test_per_user_lock_is_stable() -> None:
+    from anima_server.services.agent.turn_coordinator import get_user_lock
+
+    lock1 = get_user_lock(1)
+    lock2 = get_user_lock(1)
+    lock3 = get_user_lock(2)
+    assert lock1 is lock2
+    assert lock1 is not lock3
+
+
+# --- Invariant Tests: Malformed Tool Args ---
+
+
+def test_malformed_stream_args_produce_error() -> None:
+    from anima_server.services.agent.adapters.openai_compatible import (
+        MalformedToolArgumentsError, _parse_stream_arguments,
+    )
+    import pytest
+
+    result = _parse_stream_arguments('{"key": "value"}')
+    assert result == {"key": "value"}
+
+    result = _parse_stream_arguments("")
+    assert result == {}
+
+    with pytest.raises(MalformedToolArgumentsError):
+        _parse_stream_arguments("{broken json")
+
+    with pytest.raises(MalformedToolArgumentsError):
+        _parse_stream_arguments('"just a string"')
+
+
+def test_executor_rejects_parse_error_args() -> None:
+    import asyncio
+    from anima_server.services.agent.executor import ToolExecutor
+    from anima_server.services.agent.runtime_types import ToolCall
+    from anima_server.services.agent.tools import current_datetime
+
+    executor = ToolExecutor([current_datetime])
+    result = asyncio.get_event_loop().run_until_complete(
+        executor.execute(
+            ToolCall(id="tc-1", name="current_datetime", arguments={"__parse_error__": True, "__raw__": "bad"}),
+        )
+    )
+    assert result.is_error is True
+    assert "malformed" in result.output.lower()

@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 REFLECTION_DELAY_SECONDS = 300  # 5 minutes of inactivity
 
 _reflection_lock = Lock()
-_pending_reflection: asyncio.Task[None] | None = None
-_last_activity: datetime | None = None
+_pending_reflections: dict[int, asyncio.Task[None]] = {}
+_last_activities: dict[int, datetime] = {}
 
 
 def schedule_reflection(
@@ -25,7 +25,7 @@ def schedule_reflection(
 ) -> None:
     """Schedule a reflection task after a period of inactivity.
 
-    Each new call resets the timer. Only one pending reflection exists at a time.
+    Each new call resets the timer for this user. Other users' timers are unaffected.
     """
     if not settings.agent_background_memory_enabled:
         return
@@ -35,19 +35,19 @@ def schedule_reflection(
     except RuntimeError:
         return
 
-    global _pending_reflection, _last_activity
-
     with _reflection_lock:
-        _last_activity = datetime.now(UTC)
+        now = datetime.now(UTC)
+        _last_activities[user_id] = now
 
-        if _pending_reflection is not None and not _pending_reflection.done():
-            _pending_reflection.cancel()
+        existing = _pending_reflections.get(user_id)
+        if existing is not None and not existing.done():
+            existing.cancel()
 
-        _pending_reflection = loop.create_task(
+        _pending_reflections[user_id] = loop.create_task(
             _delayed_reflection(
                 user_id=user_id,
                 thread_id=thread_id,
-                scheduled_at=_last_activity,
+                scheduled_at=now,
             )
         )
 
@@ -65,7 +65,8 @@ async def _delayed_reflection(
         return
 
     with _reflection_lock:
-        if _last_activity is not None and _last_activity > scheduled_at:
+        last = _last_activities.get(user_id)
+        if last is not None and last > scheduled_at:
             return
 
     await run_reflection(user_id=user_id, thread_id=thread_id)
@@ -131,14 +132,24 @@ async def run_reflection(
         logger.exception("Reflection failed for user %s", user_id)
 
 
-async def cancel_pending_reflection() -> None:
-    """Cancel any pending reflection task. Useful for shutdown."""
-    global _pending_reflection
+async def cancel_pending_reflection(*, user_id: int | None = None) -> None:
+    """Cancel pending reflection tasks. If user_id given, cancel only that user's."""
     with _reflection_lock:
-        if _pending_reflection is not None and not _pending_reflection.done():
-            _pending_reflection.cancel()
-            try:
-                await _pending_reflection
-            except asyncio.CancelledError:
-                pass
-            _pending_reflection = None
+        if user_id is not None:
+            task = _pending_reflections.pop(user_id, None)
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        else:
+            for uid, task in list(_pending_reflections.items()):
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            _pending_reflections.clear()
+            _last_activities.clear()

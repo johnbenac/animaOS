@@ -117,6 +117,46 @@ export interface DailyBrief {
   };
 }
 
+export interface Greeting {
+  message: string;
+  llmGenerated: boolean;
+  context: {
+    currentFocus: string | null;
+    openTaskCount: number;
+    overdueTasks: number;
+    daysSinceLastChat: number | null;
+    upcomingDeadlines: string[];
+  };
+}
+
+export interface SelfModelSection {
+  content: string;
+  version: number;
+  updatedBy: string;
+  updatedAt: string | null;
+}
+
+export interface SelfModelData {
+  userId: number;
+  sections: Record<string, SelfModelSection>;
+}
+
+export interface EmotionalSignalData {
+  emotion: string;
+  confidence: number;
+  trajectory: string;
+  evidenceType: string;
+  evidence: string;
+  topic: string;
+  createdAt: string | null;
+}
+
+export interface EmotionalContextData {
+  dominantEmotion: string | null;
+  recentSignals: EmotionalSignalData[];
+  synthesizedContext: string;
+}
+
 export interface MemoryItemData {
   id: number;
   content: string;
@@ -335,6 +375,7 @@ export function createApiClient(options: ApiClientOptions) {
           body: { userId },
         }),
       brief: (userId: number) => request<DailyBrief>(`/chat/brief?userId=${userId}`),
+      greeting: (userId: number) => request<Greeting>(`/chat/greeting?userId=${userId}`),
       nudges: (userId: number) =>
         request<{ nudges: Nudge[] }>(`/chat/nudges?userId=${userId}`),
       home: (userId: number) => request<HomeData>(`/chat/home?userId=${userId}`),
@@ -344,6 +385,16 @@ export function createApiClient(options: ApiClientOptions) {
           filesChanged: number;
           errors: string[];
         }>("/chat/consolidate", { method: "POST", body: { userId } }),
+      sleep: (userId: number) =>
+        request<Record<string, unknown>>("/chat/sleep", {
+          method: "POST",
+          body: { userId },
+        }),
+      reflect: (userId: number) =>
+        request<Record<string, unknown>>("/chat/reflect", {
+          method: "POST",
+          body: { userId },
+        }),
     },
     config: {
       providers: () => request<ProviderInfo[]>("/config/providers"),
@@ -427,12 +478,37 @@ export function createApiClient(options: ApiClientOptions) {
     },
     soul: {
       get: (userId: number) =>
-        request<{ content: string; path: string }>(`/soul/${userId}`),
+        request<{ content: string; source: string }>(`/soul/${userId}`),
       update: (userId: number, content: string) =>
-        request<{ status: string; path: string }>(`/soul/${userId}`, {
+        request<{ status: string }>(`/soul/${userId}`, {
           method: "PUT",
           body: { content },
         }),
+    },
+    consciousness: {
+      getSelfModel: (userId: number) =>
+        request<SelfModelData>(`/consciousness/${userId}/self-model`),
+      getSelfModelSection: (userId: number, section: string) =>
+        request<SelfModelSection>(
+          `/consciousness/${userId}/self-model/${section}`,
+        ),
+      updateSelfModelSection: (
+        userId: number,
+        section: string,
+        content: string,
+      ) =>
+        request<SelfModelSection>(
+          `/consciousness/${userId}/self-model/${section}`,
+          { method: "PUT", body: { content } },
+        ),
+      getEmotions: (userId: number, limit = 10) =>
+        request<EmotionalContextData>(
+          `/consciousness/${userId}/emotions?limit=${limit}`,
+        ),
+      getIntentions: (userId: number) =>
+        request<{ content: string }>(
+          `/consciousness/${userId}/intentions`,
+        ),
     },
     vault: {
       export: (passphrase: string) =>

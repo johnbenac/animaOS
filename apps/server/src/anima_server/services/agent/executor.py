@@ -28,6 +28,15 @@ class ToolExecutor:
                 is_error=True,
             )
 
+        if tool_call.arguments.get("__parse_error__"):
+            raw = tool_call.arguments.get("__raw__", "")
+            return ToolExecutionResult(
+                call_id=tool_call.id,
+                name=tool_call.name,
+                output=f"Tool {tool_call.name} received malformed arguments (invalid JSON): {raw[:200]}",
+                is_error=True,
+            )
+
         try:
             output = await _invoke_tool(tool, tool_call.arguments)
         except Exception as exc:

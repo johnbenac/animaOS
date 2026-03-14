@@ -15,9 +15,9 @@ Current implementation baseline:
 - the server defaults to a local SQLite Core in `.anima/dev/anima.db`
 - `manifest.json` is created in the Core directory at startup
 - structured memory now lives in SQLite tables, not markdown files
-- `soul.md` still exists as a separate per-user file and is encrypted on write
+- `soul.md` has been migrated into the database (`self_model_blocks` table with section="soul"); legacy files are auto-migrated on first read
 - SQLCipher support exists behind `ANIMA_CORE_PASSPHRASE`, but encryption is not yet enforced by default
-- vault export/import is encrypted and includes database state plus user files
+- vault export/import is encrypted and includes full database state
 - embeddings persist in SQLite and the runtime keeps a process-local vector index
 
 Target principle: if you can copy the Core directory to another machine and
@@ -32,26 +32,22 @@ Delivered:
 - facts, preferences, goals, relationships, and focus flow back into prompts
 - thread summaries and recent episodes are injected into runtime context
 - session notes provide per-thread working memory
-
-Next refinement:
-
-- tune retrieval budgets and selection quality rather than adding a new prompt-memory path
+- soul directive injected as highest-priority memory block
 
 ## Phase 1: Finish Encrypted Core Rollout
 
-Status: in progress
+Status: mostly complete
 
 What is already true:
 
 - the database can be encrypted with SQLCipher when `ANIMA_CORE_PASSPHRASE` is configured
-- `soul.md` is encrypted on write with the per-user DEK
 - vault export/import is encrypted
+- `soul.md` migrated into the encrypted database (no longer file-backed)
 
 What still needs to happen:
 
 - make encrypted Core startup behavior explicit and fail fast when the expected encryption path is unavailable
 - decide whether `manifest.json` should remain plaintext metadata or move under stronger protection
-- decide whether `soul.md` stays file-backed or is migrated into the main database
 
 ## Phase 2: Background LLM Memory Extraction
 
@@ -62,10 +58,7 @@ Delivered:
 - regex extraction remains the fast path
 - background LLM extraction runs when a real provider is configured
 - extracted items are written into `memory_items`
-
-Next refinement:
-
-- improve extraction quality and model routing without regressing the zero-cost fast path
+- emotion detection runs alongside memory extraction in the same LLM call
 
 ## Phase 3: Conflict Resolution
 
@@ -75,10 +68,6 @@ Delivered:
 
 - similar memories trigger an `UPDATE` vs `DIFFERENT` check
 - superseded memories are preserved for auditability but excluded from active retrieval
-
-Next refinement:
-
-- improve contradiction handling across larger memory sets and longer time spans
 
 ## Phase 4: Episodic Memory
 
@@ -90,10 +79,6 @@ Delivered:
 - episodes are stored in `memory_episodes`
 - recent episodes are injected into prompts
 
-Next refinement:
-
-- improve episode quality, salience scoring, and long-horizon recall
-
 ## Phase 5: Retrieval Scoring and Context Selection
 
 Status: complete
@@ -103,35 +88,32 @@ Delivered:
 - retrieval uses importance, recency, and access frequency
 - active prompt memory is selected rather than dumped wholesale
 
-Next refinement:
-
-- make retrieval ranking more query-aware and easier to inspect and debug
-
 ## Phase 6: Reflection and Sleep Tasks
 
-Status: baseline complete
+Status: complete
 
 Delivered:
 
-- inactivity-triggered reflection
-- contradiction scanning
+- inactivity-triggered reflection with quick inner monologue
+- contradiction scanning and resolution
 - profile synthesis
 - episode generation
 - embedding backfill
-
-Next refinement:
-
-- deepen synthesis and self-model maintenance without adding fragile background complexity
+- deep monologue (full self-model reflection) runs during sleep tasks
+- working memory expiry sweep removes date-tagged items automatically
+- feedback signal collection (re-asks, corrections) feeds into growth log
 
 ## Phase 7: Proactive Companion
 
-Status: future
+Status: complete
 
-Goals:
+Delivered:
 
-- daily brief on app launch
-- quiet nudges for time-sensitive or unfinished items
-- proactive presence without turning the product into a notification machine
+- daily brief on app launch (`GET /api/chat/brief`)
+- LLM-generated personalized greetings using self-model and emotional context (`GET /api/chat/greeting`)
+- quiet nudges for overdue tasks (`GET /api/chat/nudges`)
+- home dashboard with task count, journal streak, memory count (`GET /api/chat/home`)
+- manual triggers for sleep tasks, consolidation, and deep reflection
 
 ## Phase 8: Ambient Presence
 
@@ -145,29 +127,31 @@ Goals:
 
 ## Phase 9: Stronger Semantic Retrieval
 
-Status: partial groundwork exists
+Status: complete
 
-Current groundwork:
+Delivered:
 
-- embeddings can be generated for memories
-- semantic search already has a runtime path
-- the vector index is process-local and rebuildable from SQLite-backed embeddings
+- embeddings generated for memories via OpenAI or Ollama providers
+- query-aware semantic retrieval: user messages are embedded and matched against stored memory embeddings at conversation time
+- semantically relevant memories injected as a dedicated memory block in the system prompt
+- process-local vector index rebuildable from SQLite-backed embeddings
+- brute-force fallback when vector index is empty
 
-Next work:
+## Phase 10: Deep Self-Model and Consciousness
 
-- strengthen ranking quality
-- define the durability story for vector retrieval more explicitly
-- expand provider coverage and operational visibility
+Status: complete
 
-## Phase 10: Deep Self-Model
+Delivered:
 
-Status: future
-
-Goals:
-
-- richer identity and inner-state synthesis
-- longer-horizon reflection over memories and episodes
-- more explicit relationship and intention modeling
+- five-section self-model per user: identity, inner_state, working_memory, growth_log, intentions
+- self-model seeds automatically on first interaction with sparse, first-meeting content
+- identity section evolves through deep monologue and flows into the system prompt as dynamic persona
+- emotional intelligence: 12-emotion taxonomy, confidence thresholds, trajectory tracking, rolling signal buffer
+- intentional agency: structured goals with lifecycle (detected, active, completed), procedural rules derived from experience
+- inner monologue: quick reflection (post-conversation) and deep monologue (sleep-time) update all self-model sections
+- consciousness REST API: view and edit self-model sections, emotional state, intentions
+- user edits treated as highest-confidence evidence, logged in growth log
+- full vault export/import support for consciousness tables
 
 ## Phase 11: Embodied Extensions
 

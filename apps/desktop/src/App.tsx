@@ -12,6 +12,7 @@ import AiSettings from "./pages/settings/AiSettings";
 import SecuritySettings from "./pages/settings/SecuritySettings";
 import VaultSettings from "./pages/settings/VaultSettings";
 import Soul from "./pages/Soul";
+import Consciousness from "./pages/Consciousness";
 import Tasks from "./pages/Tasks";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -69,6 +70,7 @@ function AppRoutes() {
       </Route>
       <Route path="/tasks" element={withLayout(<Tasks />)} />
       <Route path="/soul" element={withLayout(<Soul />)} />
+      <Route path="/consciousness" element={withLayout(<Consciousness />)} />
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="*" element={<Navigate to="/" replace />} />

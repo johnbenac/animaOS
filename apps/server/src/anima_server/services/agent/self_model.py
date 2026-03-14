@@ -115,6 +115,14 @@ def get_all_self_model_blocks(
     return {b.section: b for b in blocks}
 
 
+# Writers that are always trusted (user edits, system seeds)
+_TRUSTED_WRITERS = frozenset({"user", "system", "api"})
+
+# Identity requires high version threshold before automated rewrites are allowed.
+# Below this version, only trusted writers can fully rewrite identity.
+_IDENTITY_STABILITY_THRESHOLD = 5
+
+
 def set_self_model_block(
     db: Session,
     *,
@@ -124,11 +132,44 @@ def set_self_model_block(
     updated_by: str = "system",
     metadata: dict | None = None,
 ) -> SelfModelBlock:
-    """Create or update a self-model section. Bumps version on update."""
+    """Create or update a self-model section. Bumps version on update.
+
+    Write governance:
+    - identity: automated writers cannot fully rewrite until version >= threshold.
+      Before that, automated rewrites are logged to growth_log instead.
+    - growth_log: append-only (use append_growth_log_entry instead).
+    """
     if section not in SECTIONS:
         raise ValueError(f"Invalid section: {section}")
 
     existing = get_self_model_block(db, user_id=user_id, section=section)
+
+    # Identity governance: block automated full rewrites of young identity
+    if (
+        section == "identity"
+        and existing is not None
+        and existing.version < _IDENTITY_STABILITY_THRESHOLD
+        and updated_by not in _TRUSTED_WRITERS
+        and existing.content.strip()
+    ):
+        # Check if the proposed content is substantially different
+        existing_words = set(existing.content.lower().split())
+        new_words = set(content.lower().split())
+        if existing_words and new_words:
+            overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
+            if overlap < 0.5:
+                # Too different — log to growth log instead of overwriting
+                logger.info(
+                    "Blocked identity rewrite by %s (version %d < %d, overlap %.2f). "
+                    "Logging to growth log instead.",
+                    updated_by, existing.version, _IDENTITY_STABILITY_THRESHOLD, overlap,
+                )
+                append_growth_log_entry(
+                    db, user_id=user_id,
+                    entry=f"Identity update proposed by {updated_by} (blocked — too early): {content[:200]}",
+                )
+                return existing
+
     if existing is not None:
         existing.content = content
         existing.version += 1
@@ -158,12 +199,22 @@ def append_growth_log_entry(
     user_id: int,
     entry: str,
     max_entries: int = 20,
-) -> SelfModelBlock:
-    """Append an entry to the growth log. Trims to max_entries."""
+) -> SelfModelBlock | None:
+    """Append an entry to the growth log. Deduplicates and trims to max_entries.
+
+    Returns None if the entry is a duplicate of something already in the log.
+    """
+    if not entry or not entry.strip():
+        return None
+
     block = get_self_model_block(db, user_id=user_id, section="growth_log")
     now = datetime.now(UTC)
     date_str = now.strftime("%Y-%m-%d")
-    formatted = f"\n\n### {date_str} — {entry}" if entry else ""
+    formatted = f"\n\n### {date_str} — {entry}"
+
+    # Dedup: skip if a substantially similar entry already exists
+    if block is not None and _is_duplicate_growth_entry(block.content, entry):
+        return None
 
     if block is None:
         block = SelfModelBlock(
@@ -188,6 +239,28 @@ def append_growth_log_entry(
     block.updated_at = now
     db.flush()
     return block
+
+
+def _is_duplicate_growth_entry(existing_content: str, new_entry: str) -> bool:
+    """Check if a growth log entry is substantially similar to an existing one."""
+    new_words = set(new_entry.lower().split())
+    if len(new_words) < 3:
+        return new_entry.lower().strip() in existing_content.lower()
+    # Check each existing entry for word overlap
+    for entry_text in existing_content.split("### "):
+        entry_text = entry_text.strip()
+        if not entry_text:
+            continue
+        # Strip date prefix (YYYY-MM-DD — )
+        if " — " in entry_text:
+            entry_text = entry_text.split(" — ", 1)[1]
+        existing_words = set(entry_text.lower().split())
+        if not existing_words:
+            continue
+        overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
+        if overlap > 0.7:
+            return True
+    return False
 
 
 def seed_self_model(

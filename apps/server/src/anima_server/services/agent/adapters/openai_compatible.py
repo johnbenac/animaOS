@@ -209,14 +209,24 @@ def _finalize_stream_tool_calls(
             for part in state.get("arguments_parts", ())
             if isinstance(part, str)
         )
+        try:
+            arguments = _parse_stream_arguments(arguments_text)
+        except MalformedToolArgumentsError:
+            # Surface the malformed arguments as an unparseable marker
+            # so the executor treats this as a step error rather than silently defaulting.
+            arguments = {"__parse_error__": True, "__raw__": arguments_text[:500]}
         normalized.append(
             ToolCall(
                 id=call_id if isinstance(call_id, str) and call_id else f"tool-call-{index}",
                 name=name.strip(),
-                arguments=_parse_stream_arguments(arguments_text),
+                arguments=arguments,
             )
         )
     return tuple(normalized)
+
+
+class MalformedToolArgumentsError(RuntimeError):
+    """Raised when streamed tool-call arguments cannot be parsed as valid JSON."""
 
 
 def _parse_stream_arguments(arguments_text: str) -> dict[str, object]:
@@ -224,6 +234,12 @@ def _parse_stream_arguments(arguments_text: str) -> dict[str, object]:
         return {}
     try:
         parsed = json.loads(arguments_text)
-    except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+    except json.JSONDecodeError as exc:
+        raise MalformedToolArgumentsError(
+            f"Malformed tool-call arguments (invalid JSON): {arguments_text[:200]}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise MalformedToolArgumentsError(
+            f"Tool-call arguments must be a JSON object, got {type(parsed).__name__}"
+        )
+    return parsed
