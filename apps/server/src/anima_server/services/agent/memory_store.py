@@ -28,12 +28,14 @@ _FACT_SLOT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^works as\s+(?P<value>.+)$", re.IGNORECASE), "occupation"),
     (re.compile(r"^works at\s+(?P<value>.+)$", re.IGNORECASE), "employer"),
     (re.compile(r"^lives in\s+(?P<value>.+)$", re.IGNORECASE), "location"),
+    (re.compile(r"^(?:name is|name:\s*)(?P<value>.+)$", re.IGNORECASE), "name"),
     (re.compile(r"^display name:\s*(?P<value>.+)$", re.IGNORECASE), "display_name"),
     (re.compile(r"^username:\s*(?P<value>.+)$", re.IGNORECASE), "username"),
     (re.compile(r"^gender:\s*(?P<value>.+)$", re.IGNORECASE), "gender"),
 )
 _PREFERENCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"^(?:likes|love(?:s)?|enjoy(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
+    (re.compile(r"^(?:likes|love(?:s)?|enjoy(?:s)?)\s+(?P<value>.+)$",
+     re.IGNORECASE), "positive"),
     (re.compile(r"^prefers?\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
     (re.compile(r"^(?:dislikes?|hate(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "negative"),
 )
@@ -92,7 +94,7 @@ def analyze_memory_item(
     user_id: int,
     content: str,
     category: str,
-    similarity_threshold: float = 0.5,
+    similarity_threshold: float = 0.4,
 ) -> MemoryWriteAnalysis:
     content = _clean_memory_text(content)
     if not content:
@@ -115,7 +117,7 @@ def analyze_memory_item(
                 matched_item=item,
                 reason="same_slot_new_value",
             )
-        if _similarity(item.content, content) > similarity_threshold:
+        if _similarity(item.content, content) >= similarity_threshold:
             similar_items.append(item)
 
     if similar_items:
