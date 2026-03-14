@@ -434,6 +434,7 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     created_at=parse_optional_datetime(record.get("created_at")),
                     updated_at=parse_optional_datetime(record.get("updated_at")),
                     last_message_at=parse_optional_datetime(record.get("last_message_at")),
+                    next_message_sequence=int(record.get("next_message_sequence", 1)),
                 )
             )
 
@@ -560,6 +561,7 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
             )
 
         db.flush()
+        sync_agent_thread_sequence_counters(db)
         reset_identity_sequences(db)
         db.commit()
     except Exception:
@@ -741,6 +743,7 @@ def serialize_agent_thread_record(t: AgentThread) -> dict[str, Any]:
         "created_at": serialize_optional_datetime(t.created_at),
         "updated_at": serialize_optional_datetime(t.updated_at),
         "last_message_at": serialize_optional_datetime(t.last_message_at),
+        "next_message_sequence": t.next_message_sequence,
     }
 
 
@@ -877,6 +880,24 @@ def reset_identity_sequences(db: Session) -> None:
                 """,
             )
         )
+
+
+def sync_agent_thread_sequence_counters(db: Session) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE agent_threads
+            SET next_message_sequence = COALESCE(
+                (
+                    SELECT MAX(agent_messages.sequence_id) + 1
+                    FROM agent_messages
+                    WHERE agent_messages.thread_id = agent_threads.id
+                ),
+                1
+            )
+            """
+        )
+    )
 
 
 def _rebuild_vector_indices(db: Session, snapshot: dict[str, Any]) -> None:

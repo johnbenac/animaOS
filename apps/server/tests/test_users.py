@@ -129,12 +129,12 @@ def test_update_user_updates_profile_fields(
 def test_delete_user_removes_database_row_and_files(
     client: TestClient,
     session_factory: sessionmaker,
-    tmp_path: Path,
+    managed_tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = seed_user(session_factory)
     token = unlock_session_store.create(user.id, TEST_DEK)
-    data_dir = tmp_path / "anima-user-data"
+    data_dir = managed_tmp_path / "anima-user-data"
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr("anima_server.config.settings.data_dir", data_dir)
     user_dir = get_user_data_dir(user.id)

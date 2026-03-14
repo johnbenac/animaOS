@@ -4,10 +4,11 @@ from dataclasses import dataclass
 from math import ceil
 import json
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentThread
+from anima_server.services.agent.sequencing import reserve_message_sequences
 
 SUMMARY_LINE_LIMIT = 12
 SUMMARY_TEXT_LIMIT = 180
@@ -99,7 +100,11 @@ def compact_thread_context(
         row.is_in_context = False
         db.add(row)
 
-    summary_sequence_id = _next_sequence_id(db, thread.id)
+    summary_sequence_id = reserve_message_sequences(
+        db,
+        thread_id=thread.id,
+        count=1,
+    )
     summary_message = AgentMessage(
         thread_id=thread.id,
         run_id=run_id,
@@ -185,10 +190,3 @@ def _trim_summary_text(text: str) -> str:
     if len(normalized) <= SUMMARY_TEXT_LIMIT:
         return normalized
     return f"{normalized[: SUMMARY_TEXT_LIMIT - 3].rstrip()}..."
-
-
-def _next_sequence_id(db: Session, thread_id: int) -> int:
-    max_sequence = db.scalar(
-        select(func.max(AgentMessage.sequence_id)).where(AgentMessage.thread_id == thread_id)
-    )
-    return (int(max_sequence) if max_sequence is not None else 0) + 1

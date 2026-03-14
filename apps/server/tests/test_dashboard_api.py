@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -16,8 +16,10 @@ from anima_server.db.base import Base
 from anima_server.db.session import get_db
 from anima_server.main import create_app
 from anima_server.services.agent import invalidate_agent_runtime_cache
+from anima_server.services.agent.vector_store import reset_vector_store
 from anima_server.services.sessions import unlock_session_store
 from anima_server.services.storage import get_user_data_dir
+from conftest import create_managed_temp_dir
 
 
 def _build_session_factory() -> tuple[Engine, sessionmaker]:
@@ -43,6 +45,7 @@ def _client() -> Generator[TestClient, None, None]:
 
     app = create_app()
     original_data_dir = settings.data_dir
+    temp_root = create_managed_temp_dir("anima-dashboard-test-")
 
     def override_get_db() -> Generator[Session, None, None]:
         db = factory()
@@ -54,28 +57,20 @@ def _client() -> Generator[TestClient, None, None]:
     app.dependency_overrides[get_db] = override_get_db
     unlock_session_store.clear()
     invalidate_agent_runtime_cache()
+    settings.data_dir = temp_root / "anima-data"
 
-    with TemporaryDirectory() as temp_dir:
-        settings.data_dir = Path(temp_dir) / "anima-data"
-
-        try:
-            with TestClient(app) as test_client:
-                yield test_client
-        finally:
-            import anima_server.services.agent.vector_store as _vs
-            if _vs._client is not None:
-                try:
-                    _vs._client.clear_system_cache()
-                except Exception:
-                    pass
-                _vs._client = None
-
-            settings.data_dir = original_data_dir
-            invalidate_agent_runtime_cache()
-            unlock_session_store.clear()
-            app.dependency_overrides.clear()
-            Base.metadata.drop_all(bind=engine)
-            engine.dispose()
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        reset_vector_store()
+        settings.data_dir = original_data_dir
+        invalidate_agent_runtime_cache()
+        unlock_session_store.clear()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def _register_user(client: TestClient) -> dict[str, object]:

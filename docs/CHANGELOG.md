@@ -9,3 +9,4 @@
 - fixed stale repo-path references in the agent migration, implementation-plan, build, and legacy graph docs
 - synced runtime and packaging docs with the current monorepo shape: `apps/server` is the active local backend, the packaged desktop app still bundles the legacy `apps/api` sidecar, and Telegram/Discord webhook docs now call out that legacy boundary explicitly
 - corrected stale architecture wording in the whitepaper, implementation plan, and migration docs so they match the current SQLite Core, database-backed soul migration, and live prompt/runtime feature set
+- added `docs/python-backend-fix-plan.md`, a backend-only hardening plan covering provider/config correctness, orchestrator reliability, memory quality, and encrypted-Core follow-up work

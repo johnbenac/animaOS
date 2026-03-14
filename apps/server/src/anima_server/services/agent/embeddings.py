@@ -22,9 +22,10 @@ from sqlalchemy.orm import Session
 from anima_server.config import settings
 from anima_server.models import MemoryItem
 from anima_server.services.agent.llm import (
-    SUPPORTED_PROVIDERS,
-    resolve_base_url,
+    LLMConfigError,
     build_provider_headers,
+    resolve_base_url,
+    validate_provider_configuration,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,10 @@ async def generate_embedding(text: str) -> list[float] | None:
     if provider == "scaffold":
         return None
 
-    if provider not in SUPPORTED_PROVIDERS:
+    try:
+        validate_provider_configuration(provider)
+    except LLMConfigError as exc:
+        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
         return None
 
     try:
@@ -72,6 +76,9 @@ async def generate_embedding(text: str) -> list[float] | None:
             return await _embed_ollama(text)
         # openrouter, vllm — all OpenAI-compatible
         return await _embed_openai_compatible(text)
+    except LLMConfigError as exc:
+        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
+        return None
     except Exception:  # noqa: BLE001
         logger.exception("Embedding generation failed for provider %s", provider)
         return None

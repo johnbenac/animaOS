@@ -19,6 +19,10 @@ await ensureRuntimeLayout();
 
 const app = new Hono();
 
+// --- Bot Proxy Configuration ---
+const PYTHON_API_BASE = process.env.PYTHON_API_BASE || "http://127.0.0.1:3031/api";
+app.set("pythonApiBase", PYTHON_API_BASE);
+
 // Middleware
 app.use(
   "*",
@@ -34,30 +38,35 @@ app.use(
   }),
 );
 
-// Routes
-app.route("/api/auth", auth);
-app.route("/api/users", users);
-app.route("/api/chat", chat);
-app.route("/api/config", config);
-app.route("/api/memory", memory);
-app.route("/api/soul", soul);
+// --- Bot Proxy Routes (Active) ---
 app.route("/api/telegram", telegram);
 app.route("/api/discord", discord);
-app.route("/api/tasks", tasks);
-app.route("/api/channel", channel);
-app.route("/api/vault", vault);
+
+// --- Legacy/Local Routes (Deprecated in favor of FastAPI) ---
+// Note: We keep these for now to avoid breaking existing clients until fully migrated.
+// app.route("/api/auth", auth);
+// app.route("/api/users", users);
+// app.route("/api/chat", chat);
+// app.route("/api/config", config);
+// app.route("/api/memory", memory);
+// app.route("/api/soul", soul);
+// app.route("/api/tasks", tasks);
+// app.route("/api/channel", channel);
+// app.route("/api/vault", vault);
 
 
 // Health check
-app.get("/", (c) => c.json({ message: "ANIMA API", version: "0.1.0" }));
-app.get("/health", (c) => c.json({ status: "healthy" }));
+app.get("/", (c) => c.json({ message: "ANIMA Bot Proxy (Legacy API)", version: "0.1.0" }));
+app.get("/health", (c) => c.json({ status: "healthy", service: "bot-proxy" }));
 
-// Start background crons
-startTaskReminderCron();
+// Start background crons (DISABLED in Proxy mode - moving to FastAPI)
+// startTaskReminderCron();
+
+// Start Discord Gateway Relay (Keep enabled if Discord is used via Gateway)
 startDiscordGatewayRelay();
 
 export default {
-  port: 3031,
+  port: 3033,
   hostname: "127.0.0.1",
   fetch: app.fetch,
 };

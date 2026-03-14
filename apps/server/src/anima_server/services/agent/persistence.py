@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentRun, AgentStep, AgentThread
@@ -63,11 +63,13 @@ def list_transcript_messages(
 
     rows = db.scalars(
         select(AgentMessage)
+        .outerjoin(AgentRun, AgentMessage.run_id == AgentRun.id)
         .where(
             AgentMessage.thread_id == thread.id,
             AgentMessage.role.in_(("user", "assistant", "system")),
             AgentMessage.content_text.is_not(None),
             AgentMessage.content_text != "",
+            or_(AgentMessage.run_id.is_(None), AgentRun.status != "failed"),
         )
         .order_by(desc(AgentMessage.sequence_id))
         .limit(limit)
@@ -123,7 +125,7 @@ def persist_agent_result(
     thread: AgentThread,
     run: AgentRun,
     result: AgentResult,
-    initial_sequence_id: int,
+    initial_sequence_id: int | None,
 ) -> None:
     sequence_id = initial_sequence_id
 
@@ -136,6 +138,8 @@ def persist_agent_result(
         )
 
         if trace.assistant_text or trace.tool_calls:
+            if sequence_id is None:
+                raise RuntimeError("Missing reserved message sequence for assistant output.")
             append_message(
                 db,
                 thread=thread,
@@ -150,9 +154,11 @@ def persist_agent_result(
                 if trace.tool_calls
                 else None,
             )
-            sequence_id += 1
+            sequence_id = sequence_id + 1
 
         for tool_result in trace.tool_results:
+            if sequence_id is None:
+                raise RuntimeError("Missing reserved message sequence for tool output.")
             append_message(
                 db,
                 thread=thread,
@@ -164,7 +170,7 @@ def persist_agent_result(
                 tool_name=tool_result.name,
                 tool_call_id=tool_result.call_id,
             )
-            sequence_id += 1
+            sequence_id = sequence_id + 1
 
     finalize_run(db, run=run, result=result)
 
@@ -196,13 +202,6 @@ def count_messages_by_role(db: Session, thread_id: int, role: str) -> int:
         )
     )
     return int(count or 0)
-
-
-def next_sequence_id(db: Session, thread_id: int) -> int:
-    max_sequence = db.scalar(
-        select(func.max(AgentMessage.sequence_id)).where(AgentMessage.thread_id == thread_id)
-    )
-    return (int(max_sequence) if max_sequence is not None else 0) + 1
 
 
 def append_message(

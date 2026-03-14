@@ -15,6 +15,7 @@ from anima_server.models.consciousness import (
     EmotionalSignal,
     SelfModelBlock,
 )
+from anima_server.models.links import DiscordLink, TelegramLink
 from anima_server.models.task import Task
 from anima_server.models.user import User
 from anima_server.models.user_key import UserKey
@@ -25,12 +26,14 @@ __all__ = [
     "AgentStep",
     "AgentThread",
     "Base",
+    "DiscordLink",
     "EmotionalSignal",
     "MemoryDailyLog",
     "MemoryEpisode",
     "MemoryItem",
     "SelfModelBlock",
     "SessionNote",
+    "TelegramLink",
     "Task",
     "User",
     "UserKey",

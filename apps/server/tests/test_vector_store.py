@@ -17,14 +17,14 @@ from anima_server.services.agent.vector_store import (
 
 
 @pytest.fixture(autouse=True)
-def _isolate_chroma(tmp_path: Path):
+def _isolate_chroma(managed_tmp_path: Path):
     """Give each test a fresh vector store and isolated data dir."""
     vs._client = None
     vs._legacy_cleanup_done = False
     with patch.object(vs, "settings") as mock_settings:
-        mock_settings.data_dir = tmp_path
+        mock_settings.data_dir = managed_tmp_path
         yield
-    # Fully release the client before pytest cleans up tmp_path
+    # Fully release the client before temp-dir cleanup.
     if vs._client is not None:
         try:
             vs._client.clear_system_cache()
@@ -120,8 +120,8 @@ def test_empty_collection_search() -> None:
     assert results == []
 
 
-def test_legacy_persist_dir_is_removed_on_init(tmp_path: Path) -> None:
-    legacy_dir = tmp_path / "chroma"
+def test_legacy_persist_dir_is_removed_on_init(managed_tmp_path: Path) -> None:
+    legacy_dir = managed_tmp_path / "chroma"
     legacy_dir.mkdir(parents=True, exist_ok=True)
     (legacy_dir / "old-index.txt").write_text("legacy plaintext", encoding="utf-8")
 

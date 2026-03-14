@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import shutil
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -21,6 +22,7 @@ from anima_server.services.agent.openai_compatible_client import (
     OpenAICompatibleResponse,
     OpenAICompatibleStreamChunk,
 )
+from anima_server.services.agent.vector_store import reset_vector_store
 from anima_server.services.sessions import unlock_session_store
 
 
@@ -82,6 +84,7 @@ def _client() -> Generator[TestClient, None, None]:
 
     app = create_app()
     original_data_dir = settings.data_dir
+    temp_root = Path(mkdtemp(prefix="anima-chat-test-"))
 
     def override_get_db() -> Generator[Session, None, None]:
         db = factory()
@@ -94,28 +97,20 @@ def _client() -> Generator[TestClient, None, None]:
     app.state.test_session_factory = factory
     unlock_session_store.clear()
     invalidate_agent_runtime_cache()
+    settings.data_dir = temp_root / "anima-data"
 
-    with TemporaryDirectory() as temp_dir:
-        settings.data_dir = Path(temp_dir) / "anima-data"
-
-        try:
-            with TestClient(app) as test_client:
-                yield test_client
-        finally:
-            import anima_server.services.agent.vector_store as _vs
-            if _vs._client is not None:
-                try:
-                    _vs._client.clear_system_cache()
-                except Exception:
-                    pass
-                _vs._client = None
-
-            settings.data_dir = original_data_dir
-            invalidate_agent_runtime_cache()
-            unlock_session_store.clear()
-            app.dependency_overrides.clear()
-            Base.metadata.drop_all(bind=engine)
-            engine.dispose()
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        reset_vector_store()
+        settings.data_dir = original_data_dir
+        invalidate_agent_runtime_cache()
+        unlock_session_store.clear()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+        shutil.rmtree(temp_root, ignore_errors=True)
 
 
 def test_chat_requires_unlocked_session() -> None:
@@ -298,6 +293,7 @@ def test_chat_persists_runtime_rows() -> None:
     assert run.stop_reason == "terminal_tool"
     assert step.run_id == run.id
     assert step.step_index == 0
+    assert thread.next_message_sequence == 4
     assert [message.role for message in messages] == ["user", "assistant", "tool"]
     assert messages[0].content_text == "hello"
     assert "turn 1" in (messages[1].content_text or "")
@@ -593,6 +589,12 @@ def test_chat_compacts_thread_context_into_summary() -> None:
 
             session = client.app.state.test_session_factory()
             try:
+                all_messages = (
+                    session.query(AgentMessage)
+                    .order_by(AgentMessage.sequence_id)
+                    .all()
+                )
+                thread = session.query(AgentThread).one()
                 in_context_messages = (
                     session.query(AgentMessage)
                     .filter(AgentMessage.is_in_context.is_(True))
@@ -622,5 +624,6 @@ def test_chat_compacts_thread_context_into_summary() -> None:
     summary_messages = [message for message in in_context_messages if message.role == "summary"]
     assert len(summary_messages) == 1
     assert "Conversation summary:" in (summary_messages[0].content_text or "")
+    assert thread.next_message_sequence == all_messages[-1].sequence_id + 1
     assert any(message.role == "user" for message in compacted_messages)
     assert any(message.role == "assistant" for message in compacted_messages)

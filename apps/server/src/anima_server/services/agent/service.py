@@ -21,12 +21,15 @@ from anima_server.services.agent.persistence import (
     list_transcript_messages,
     load_thread_history,
     mark_run_failed,
-    next_sequence_id,
     persist_agent_result,
     reset_thread,
 )
 from anima_server.services.agent.runtime import AgentRuntime, build_loop_runtime
-from anima_server.services.agent.state import AgentResult
+from anima_server.services.agent.sequencing import (
+    count_persisted_result_messages,
+    reserve_message_sequences,
+)
+from anima_server.services.agent.state import AgentResult, StoredMessage
 from anima_server.services.agent.streaming import (
     AgentStreamEvent,
     build_done_event,
@@ -150,7 +153,11 @@ async def _prepare_turn_context(
         model=settings.agent_model,
         mode="streaming" if event_callback is not None else "blocking",
     )
-    initial_sequence_id = next_sequence_id(db, thread.id)
+    initial_sequence_id = reserve_message_sequences(
+        db,
+        thread_id=thread.id,
+        count=1,
+    )
     user_msg = append_user_message(
         db,
         thread=thread,
@@ -243,12 +250,21 @@ def _persist_turn_result(
     initial_sequence_id: int,
 ) -> None:
     """Stage 3: Write result to DB and compact if needed."""
+    result_message_count = count_persisted_result_messages(result)
     persist_agent_result(
         db,
         thread=thread,
         run=run,
         result=result,
-        initial_sequence_id=initial_sequence_id + 1,
+        initial_sequence_id=(
+            reserve_message_sequences(
+                db,
+                thread_id=thread.id,
+                count=result_message_count,
+            )
+            if result_message_count > 0
+            else None
+        ),
     )
     compact_thread_context(
         db,

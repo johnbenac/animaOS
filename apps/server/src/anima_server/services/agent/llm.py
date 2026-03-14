@@ -49,16 +49,7 @@ def create_llm() -> ChatClient:
     """Create a concrete chat client for the configured provider."""
     provider = settings.agent_provider
 
-    if provider not in SUPPORTED_PROVIDERS:
-        raise LLMConfigError(
-            f"Unsupported agent_provider: {provider!r}. "
-            f"Expected one of: {', '.join(SUPPORTED_PROVIDERS)}"
-        )
-
-    if provider == "openrouter" and not settings.agent_api_key:
-        raise LLMConfigError(
-            "ANIMA_AGENT_API_KEY is required when agent_provider='openrouter'"
-        )
+    validate_provider_configuration(provider)
 
     return OpenAICompatibleChatClient(
         provider=provider,
@@ -73,6 +64,7 @@ def invalidate_llm_cache() -> None:
 
 
 def resolve_base_url(provider: str) -> str:
+    validate_provider(provider)
     configured_base_url = settings.agent_base_url.strip()
     if configured_base_url:
         return configured_base_url
@@ -80,10 +72,12 @@ def resolve_base_url(provider: str) -> str:
 
 
 def build_provider_headers(provider: str) -> dict[str, str]:
+    validate_provider(provider)
     headers: dict[str, str] = {}
 
     api_key = settings.agent_api_key.strip()
     if provider == "openrouter":
+        api_key = require_provider_api_key(provider)
         headers["Authorization"] = f"Bearer {api_key}"
         headers["HTTP-Referer"] = "https://anima.local"
         headers["X-Title"] = "ANIMA"
@@ -93,6 +87,28 @@ def build_provider_headers(provider: str) -> dict[str, str]:
         headers["Authorization"] = f"Bearer {api_key}"
 
     return headers
+
+
+def validate_provider(provider: str) -> None:
+    if provider not in SUPPORTED_PROVIDERS:
+        raise LLMConfigError(
+            f"Unsupported agent_provider: {provider!r}. "
+            f"Expected one of: {', '.join(SUPPORTED_PROVIDERS)}"
+        )
+
+
+def validate_provider_configuration(provider: str) -> None:
+    validate_provider(provider)
+    require_provider_api_key(provider)
+
+
+def require_provider_api_key(provider: str) -> str:
+    api_key = settings.agent_api_key.strip()
+    if provider == "openrouter" and not api_key:
+        raise LLMConfigError(
+            "ANIMA_AGENT_API_KEY is required when agent_provider='openrouter'"
+        )
+    return api_key
 
 
 def wrap_llm_error(exc: Exception, *, provider: str, base_url: str) -> LLMInvocationError:

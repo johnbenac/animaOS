@@ -80,17 +80,17 @@ def test_export_vault_requires_unlock_session(client: TestClient) -> None:
 def test_export_and_import_vault_restores_auth_and_files(
     client: TestClient,
     session_factory: sessionmaker,
-    tmp_path: Path,
+    managed_tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("anima_server.config.settings.data_dir", tmp_path / "anima-data")
+    monkeypatch.setattr("anima_server.config.settings.data_dir", managed_tmp_path / "anima-data")
     user = seed_user(session_factory)
     token = unlock_session_store.create(user.id, TEST_DEK)
     user_dir = get_user_data_dir(user.id)
     user_dir.mkdir(parents=True, exist_ok=True)
     (user_dir / "memory" / "entry.md").parent.mkdir(parents=True, exist_ok=True)
     (user_dir / "memory" / "entry.md").write_text("hello from vault", encoding="utf-8")
-    legacy_vector_dir = tmp_path / "anima-data" / "chroma"
+    legacy_vector_dir = managed_tmp_path / "anima-data" / "chroma"
     legacy_vector_dir.mkdir(parents=True, exist_ok=True)
     (legacy_vector_dir / "index.txt").write_text("plaintext index", encoding="utf-8")
 
@@ -155,9 +155,9 @@ def test_import_vault_rejects_wrong_passphrase(
     client: TestClient,
     session_factory: sessionmaker,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    managed_tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr("anima_server.config.settings.data_dir", tmp_path / "anima-data")
+    monkeypatch.setattr("anima_server.config.settings.data_dir", managed_tmp_path / "anima-data")
     user = seed_user(session_factory)
     token = unlock_session_store.create(user.id, TEST_DEK)
 
