@@ -93,7 +93,39 @@ async def test_runtime_uses_terminal_send_message_tool_output() -> None:
     assert len(result.step_traces) == 1
     assert result.step_traces[0].tool_results[0].is_terminal is True
     assert [tool.name for tool in adapter.requests[0].available_tools] == ["send_message"]
-    assert adapter.requests[0].force_tool_call is False
+    assert adapter.requests[0].force_tool_call is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_coerces_plain_assistant_text_into_terminal_send_message() -> None:
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(assistant_text="Hello from coerced terminal output."),
+        ]
+    )
+    runtime = AgentRuntime(
+        adapter=adapter,
+        tools=[send_message],
+        tool_rules=[TerminalToolRule(tool_name="send_message")],
+        max_steps=2,
+    )
+
+    result = await runtime.invoke("hello", user_id=1, history=[])
+
+    assert result.response == "Hello from coerced terminal output."
+    assert result.stop_reason == StopReason.TERMINAL_TOOL.value
+    assert result.tools_used == ["send_message"]
+    assert len(result.step_traces) == 1
+    assert result.step_traces[0].tool_calls == (
+        ToolCall(
+            id="synthetic-send-message-0",
+            name="send_message",
+            arguments={"message": "Hello from coerced terminal output."},
+        ),
+    )
+    assert result.step_traces[0].tool_results[0].output == "Hello from coerced terminal output."
+    assert result.step_traces[0].tool_results[0].is_terminal is True
+    assert adapter.requests[0].force_tool_call is True
 
 
 @pytest.mark.asyncio

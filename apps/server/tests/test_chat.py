@@ -145,10 +145,11 @@ def test_chat_returns_scaffold_response_and_tracks_turns() -> None:
     assert first.json()["model"] == "python-agent-scaffold"
     assert "turn 1" in first.json()["response"]
     assert "Last message: hello" in first.json()["response"]
+    assert first.json()["toolsUsed"] == ["send_message"]
 
     assert second.status_code == 200
     assert "turn 2" in second.json()["response"]
-    assert second.json()["toolsUsed"] == []
+    assert second.json()["toolsUsed"] == ["send_message"]
 
 
 def test_chat_reset_clears_scaffold_thread_state() -> None:
@@ -176,7 +177,7 @@ def test_chat_reset_clears_scaffold_thread_state() -> None:
             session = client.app.state.test_session_factory()
             try:
                 assert session.query(AgentThread).count() == 1
-                assert session.query(AgentMessage).count() == 2
+                assert session.query(AgentMessage).count() == 3
                 assert session.query(AgentRun).count() == 1
                 assert session.query(AgentStep).count() == 1
             finally:
@@ -286,12 +287,13 @@ def test_chat_persists_runtime_rows() -> None:
     assert run.thread_id == thread.id
     assert run.status == "completed"
     assert run.mode == "blocking"
-    assert run.stop_reason == "end_turn"
+    assert run.stop_reason == "terminal_tool"
     assert step.run_id == run.id
     assert step.step_index == 0
-    assert [message.role for message in messages] == ["user", "assistant"]
+    assert [message.role for message in messages] == ["user", "assistant", "tool"]
     assert messages[0].content_text == "hello"
     assert "turn 1" in (messages[1].content_text or "")
+    assert "turn 1" in (messages[2].content_text or "")
 
 
 def test_chat_stream_returns_sse_events() -> None:
@@ -310,7 +312,7 @@ def test_chat_stream_returns_sse_events() -> None:
                 body = "".join(response.iter_text())
 
     assert response.status_code == 200
-    assert "event: chunk" in body
+    assert "event: tool_return" in body
     assert "event: done" in body
     assert "stream this" in body
 
@@ -470,7 +472,7 @@ def test_chat_ollama_provider_uses_live_adapter_surface(monkeypatch) -> None:
     assert response.json()["model"] == "llama3.2"
     assert response.json()["response"] == "hello from ollama adapter"
     assert "private reasoning" not in response.json()["response"]
-    assert fake_client.tool_choice == "auto"
+    assert fake_client.tool_choice == "required"
     assert [getattr(tool, "name", "") for tool in fake_client.bound_tools] == [
         "current_datetime",
         "send_message",

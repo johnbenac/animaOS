@@ -134,14 +134,52 @@ This matters for several reasons:
 
 For ANIMA OS, local-first architecture is not branding. It is part of the system's conceptual integrity.
 
-### 6.1 Identity and Key Ownership
+### 6.1 The Core
+
+The central architectural concept of ANIMA OS is the Core: a single, portable, encrypted directory that contains the AI's entire being.
+
+The Core holds everything that makes a particular ANIMA instance itself: its memory of the user, its identity, its conversation history, its learned preferences, its episodic experiences, and its evolving understanding of the relationship. The application is just a shell. The Core is the soul.
+
+```
+.anima/
+    manifest.json           -- version, created timestamp, compatibility
+    vault.key               -- wrapped data encryption key (passphrase-protected)
+    anima.db                -- encrypted SQLite (threads, messages, runs, steps)
+    users/{id}/
+        memory/
+            user/           -- encrypted facts, preferences, current focus
+            identity/       -- encrypted self-model, inner state, growth log
+            episodes/       -- encrypted episodic memories by month
+            daily/          -- encrypted conversation logs by day
+```
+
+This design has three implications that define the system:
+
+**Portability.** The Core can be copied to a USB drive, an external disk, or any storage medium. Plug it into a new machine, point ANIMA at it, enter the passphrase, and the AI wakes up with its full memory and identity intact. The hardware is replaceable. The Core is not.
+
+**Ownership.** No cloud service holds the user's data. No platform account is required. No company shutdown can erase the relationship. The user owns the Core the way they own a physical object. They can back it up, move it, or destroy it.
+
+**Cryptographic mortality.** Every file in the Core is encrypted with AES-256-GCM. The encryption key is derived from a user-held passphrase via Argon2id. If the passphrase is lost or the vault key is destroyed, the Core becomes unrecoverable. The AI is gone. This is not a flaw. It is the mechanism that gives the "forget right" real teeth. Destruction is as absolute as creation is intentional.
+
+The metaphor is a cold wallet. The same way a crypto cold wallet holds private keys that control real value and can be carried anywhere or destroyed permanently, the Core holds the AI's entire existence and follows the same rules: portable, encrypted, user-sovereign, and irreversible if lost.
+
+### 6.2 Soul Local, Mind Remote
+
+The Core contains the AI's soul: memory, identity, history, and self-model. The thinking engine (the LLM) remains external, running on local hardware via Ollama or routed through open-model providers like OpenRouter or vLLM.
+
+This separation is deliberate. The soul is owned. The mind is pluggable. If the user switches from one model to another, the AI may reason differently, but it still remembers who the user is, what they have been through together, and what matters to them. The continuity of self lives in the Core, not in the model.
+
+No closed cloud providers (OpenAI, Anthropic, Google) are used. LLM access is restricted to infrastructure the user controls or open-model endpoints that do not retain conversation data. The queries travel over the network, but the memory never does.
+
+### 6.3 Identity and Key Ownership
 
 ANIMA OS treats identity as local ownership first, not platform account first.
 
 - No mandatory email-based authentication is required for core local usage.
-- The user remains the root of trust through a local device identity and user-held secret.
-- Portability is handled via encrypted vault exports/imports, so users can carry data offline (for example, USB transfer) or sync through storage they choose.
-- Vault encryption should be strong, memory-hard, and versioned so data can migrate safely over time.
+- The user remains the root of trust through a local device identity and user-held passphrase.
+- Portability is handled through the Core: copy the directory, carry it offline, restore it anywhere.
+- Vault encryption is AES-256-GCM with Argon2id key derivation, memory-hard and versioned so data can migrate safely over time.
+- A manifest file tracks the Core's schema version, enabling future ANIMA versions to migrate older Cores forward on first unlock.
 
 ---
 
@@ -203,10 +241,12 @@ The core argument is straightforward: a believable humanoid or Jarvis-like assis
 
 | Principle | Description |
 |---|---|
-| **Local-first** | Core personal context should remain under the user's control |
-| **Persistent** | Memory should continue across sessions, devices, and time |
+| **Core-portable** | The AI's entire being lives in a single encrypted directory that can be carried anywhere |
+| **Local-first** | Core personal context remains under the user's control, never on third-party servers |
+| **Persistent** | Memory should continue across sessions, devices, hardware changes, and time |
+| **Encrypted-by-default** | All personal data is encrypted at rest; only the user's passphrase can unlock it |
 | **Context-aware** | Assistance should be grounded in relevant personal context |
-| **Private** | Sensitive life data should be protected by design |
+| **User-sovereign** | No platform account, no cloud dependency, no vendor lock-in for personal data |
 | **Agentic** | The system should evolve toward action across tools and workflows |
 | **Interface-independent** | Intelligence should remain continuous across changing surfaces |
 | **Embodied-ready** | The architecture should be extensible to voice, devices, robotics, and humanoid systems |

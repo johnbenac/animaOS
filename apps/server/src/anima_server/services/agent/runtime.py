@@ -106,7 +106,10 @@ class AgentRuntime:
             allowed_tool_names = tuple(
                 sorted(rules_solver.get_allowed_tools(self._tool_names))
             )
-            force_tool_call = bool(allowed_tool_names) and rules_solver.should_force_tool_call()
+            force_tool_call = bool(allowed_tool_names) and (
+                rules_solver.should_force_tool_call()
+                or "send_message" in allowed_tool_names
+            )
             step_result, streamed_assistant_text = await self._run_step(
                 messages=messages,
                 user_id=user_id,
@@ -123,6 +126,32 @@ class AgentRuntime:
             rule_violation_hit = False
 
             if not step_result.tool_calls:
+                synthetic_terminal_tool = await self._coerce_terminal_send_message(
+                    step_result=step_result,
+                    allowed_tool_names=allowed_tool_names,
+                    step_index=step_index,
+                    event_callback=event_callback,
+                )
+                if synthetic_terminal_tool is not None:
+                    synthetic_tool_call, synthetic_tool_result = synthetic_terminal_tool
+                    if synthetic_tool_call.name not in tools_used:
+                        tools_used.append(synthetic_tool_call.name)
+                    response = synthetic_tool_result.output or response
+                    step_traces.append(
+                        StepTrace(
+                            step_index=step_index,
+                            request_messages=request_messages,
+                            allowed_tools=allowed_tool_names,
+                            force_tool_call=force_tool_call,
+                            assistant_text=step_result.assistant_text,
+                            tool_calls=(synthetic_tool_call,),
+                            tool_results=(synthetic_tool_result,),
+                            usage=step_result.usage,
+                        )
+                    )
+                    stop_reason = StopReason.TERMINAL_TOOL
+                    break
+
                 response = step_result.assistant_text or response
                 if (
                     event_callback is not None
@@ -307,6 +336,35 @@ class AgentRuntime:
             )
 
         return step_result, streamed_assistant_text
+
+    async def _coerce_terminal_send_message(
+        self,
+        *,
+        step_result: StepExecutionResult,
+        allowed_tool_names: Sequence[str],
+        step_index: int,
+        event_callback: StreamEventCallback | None,
+    ) -> tuple[ToolCall, ToolExecutionResult] | None:
+        if not step_result.assistant_text.strip():
+            return None
+        if "send_message" not in allowed_tool_names:
+            return None
+        if "send_message" not in self._tool_registry:
+            return None
+
+        tool_call = ToolCall(
+            id=f"synthetic-send-message-{step_index}",
+            name="send_message",
+            arguments={"message": step_result.assistant_text},
+        )
+        tool_result = await self._tool_executor.execute(
+            tool_call,
+            is_terminal=True,
+        )
+        if event_callback is not None:
+            await event_callback(build_tool_call_event(step_index, tool_call))
+            await event_callback(build_tool_return_event(step_index, tool_result))
+        return tool_call, tool_result
 
 
 def build_loop_runtime() -> AgentRuntime:

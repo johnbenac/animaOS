@@ -1,5 +1,7 @@
 # AI Graph Architecture
 
+Note: this document describes the legacy `apps/api` LangGraph path. `apps/server` now uses a loop-based runtime, and the remaining migration work is documented in [agent-runtime-migration.md](./agent-runtime-migration.md).
+
 This document explains how ANIMA processes a chat request in `apps/api/src/agent/graph.ts`.
 
 ## Flow Diagram
