@@ -43,7 +43,14 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         return None
 
     async def invoke(self, request: LLMRequest) -> StepExecutionResult:
-        response = await self._llm.ainvoke(list(request.messages))
+        llm: Any = self._llm
+        if request.available_tools:
+            llm = self._llm.bind_tools(
+                list(request.available_tools),
+                tool_choice="required" if request.force_tool_call else "auto",
+            )
+
+        response = await llm.ainvoke(list(request.messages))
         if not isinstance(response, AIMessage):
             return StepExecutionResult(
                 assistant_text=message_content(response),

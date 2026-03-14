@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from anima_server.services.agent.runtime_types import StepTrace
+from anima_server.services.agent.runtime_types import StepTrace, ToolCall
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +11,7 @@ class StoredMessage:
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: tuple[ToolCall, ...] = field(default_factory=tuple)
 
 
 @dataclass(slots=True)

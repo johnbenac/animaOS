@@ -10,6 +10,7 @@ class StopReason(StrEnum):
     END_TURN = "end_turn"
     TERMINAL_TOOL = "terminal_tool"
     MAX_STEPS = "max_steps"
+    AWAITING_APPROVAL = "awaiting_approval"
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +43,8 @@ class LLMRequest:
     step_index: int
     max_steps: int
     system_prompt: str
+    available_tools: Sequence[Any] = ()
+    force_tool_call: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,7 @@ class MessageSnapshot:
     content: str
     tool_name: str | None = None
     tool_call_id: str | None = None
+    tool_calls: tuple[ToolCall, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +68,8 @@ class StepExecutionResult:
 class StepTrace:
     step_index: int
     request_messages: tuple[MessageSnapshot, ...] = ()
+    allowed_tools: tuple[str, ...] = ()
+    force_tool_call: bool = False
     assistant_text: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     tool_results: tuple[ToolExecutionResult, ...] = ()

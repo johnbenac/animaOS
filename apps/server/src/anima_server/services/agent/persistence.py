@@ -7,7 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentRun, AgentStep, AgentThread
-from anima_server.services.agent.runtime_types import StepTrace, UsageStats
+from anima_server.services.agent.runtime_types import StepTrace, ToolCall, UsageStats
 from anima_server.services.agent.state import AgentResult, StoredMessage
 
 
@@ -44,6 +44,7 @@ def load_thread_history(db: Session, thread_id: int) -> list[StoredMessage]:
                 content=row.content_text or "",
                 tool_name=row.tool_name,
                 tool_call_id=row.tool_call_id,
+                tool_calls=_deserialize_tool_calls(row.content_json),
             )
         )
     return history
@@ -219,6 +220,8 @@ def create_step(
         status="completed",
         request_json={
             "messages": [asdict(message) for message in trace.request_messages],
+            "allowed_tools": list(trace.allowed_tools),
+            "force_tool_call": trace.force_tool_call,
         },
         response_json={
             "assistant_text": trace.assistant_text,
@@ -264,3 +267,34 @@ def _serialize_usage(usage: UsageStats | None) -> dict[str, object] | None:
     if usage is None:
         return None
     return asdict(usage)
+
+
+def _deserialize_tool_calls(
+    content_json: dict[str, object] | None,
+) -> tuple[ToolCall, ...]:
+    if not isinstance(content_json, dict):
+        return ()
+
+    raw_tool_calls = content_json.get("tool_calls")
+    if not isinstance(raw_tool_calls, list):
+        return ()
+
+    tool_calls: list[ToolCall] = []
+    for index, raw_tool_call in enumerate(raw_tool_calls):
+        if not isinstance(raw_tool_call, dict):
+            continue
+
+        name = str(raw_tool_call.get("name", "")).strip()
+        if not name:
+            continue
+
+        arguments = raw_tool_call.get("arguments", {})
+        tool_calls.append(
+            ToolCall(
+                id=str(raw_tool_call.get("id") or f"tool-call-{index}"),
+                name=name,
+                arguments=arguments if isinstance(arguments, dict) else {},
+            )
+        )
+
+    return tuple(tool_calls)

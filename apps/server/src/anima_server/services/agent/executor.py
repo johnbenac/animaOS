@@ -5,8 +5,6 @@ from typing import Any
 
 from anima_server.services.agent.runtime_types import ToolCall, ToolExecutionResult
 
-TERMINAL_TOOL_NAMES = frozenset({"send_message"})
-
 
 class ToolExecutor:
     def __init__(self, tools: list[Any]) -> None:
@@ -15,7 +13,12 @@ class ToolExecutor:
             for tool in tools
         }
 
-    async def execute(self, tool_call: ToolCall) -> ToolExecutionResult:
+    async def execute(
+        self,
+        tool_call: ToolCall,
+        *,
+        is_terminal: bool = False,
+    ) -> ToolExecutionResult:
         tool = self._tools.get(tool_call.name)
         if tool is None:
             return ToolExecutionResult(
@@ -39,7 +42,7 @@ class ToolExecutor:
             call_id=tool_call.id,
             name=tool_call.name,
             output=_stringify_output(output),
-            is_terminal=tool_call.name in TERMINAL_TOOL_NAMES,
+            is_terminal=is_terminal,
         )
 
 

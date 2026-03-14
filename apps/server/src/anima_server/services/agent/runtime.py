@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-
-from langchain_core.messages import AIMessage, ToolMessage
+from typing import Any
 
 from anima_server.config import settings
 from anima_server.services.agent.adapters import build_adapter
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.executor import ToolExecutor
-from anima_server.services.agent.messages import build_conversation_messages, message_content
+from anima_server.services.agent.messages import (
+    build_conversation_messages,
+    make_assistant_message,
+    make_tool_message,
+    message_content,
+)
+from anima_server.services.agent.rules import ToolRule, ToolRulesSolver
 from anima_server.services.agent.runtime_types import (
     LLMRequest,
     MessageSnapshot,
@@ -20,7 +25,7 @@ from anima_server.services.agent.runtime_types import (
 )
 from anima_server.services.agent.state import AgentResult, StoredMessage
 from anima_server.services.agent.system_prompt import SystemPromptContext, build_system_prompt
-from anima_server.services.agent.tools import get_tool_summaries, get_tools
+from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
 
 
 class AgentRuntime:
@@ -30,15 +35,22 @@ class AgentRuntime:
         self,
         *,
         adapter: BaseLLMAdapter,
+        tools: Sequence[Any] = (),
+        tool_rules: Sequence[ToolRule] = (),
         persona_template: str = "default",
         tool_summaries: Sequence[str] = (),
         tool_executor: ToolExecutor | None = None,
         max_steps: int = 4,
     ) -> None:
         self._adapter = adapter
+        self._tool_registry = {
+            tool_name: tool for tool in tools if (tool_name := _tool_name(tool))
+        }
+        self._tool_names = tuple(self._tool_registry)
+        self._tool_rules = tuple(tool_rules)
         self._persona_template = persona_template
         self._tool_summaries = tuple(tool_summaries)
-        self._tool_executor = tool_executor or ToolExecutor([])
+        self._tool_executor = tool_executor or ToolExecutor(list(self._tool_registry.values()))
         self._max_steps = max_steps
 
     def prepare_system_prompt(self) -> str:
@@ -66,24 +78,35 @@ class AgentRuntime:
         response = ""
         tools_used: list[str] = []
         step_traces: list[StepTrace] = []
+        rules_solver = ToolRulesSolver(self._tool_rules)
 
         for step_index in range(self._max_steps):
             request_messages = _snapshot_messages(messages)
+            allowed_tool_names = tuple(
+                sorted(rules_solver.get_allowed_tools(self._tool_names))
+            )
+            force_tool_call = bool(allowed_tool_names) and rules_solver.should_force_tool_call()
             step_result = await self._run_step(
                 messages=messages,
                 user_id=user_id,
                 step_index=step_index,
                 system_prompt=system_prompt,
+                allowed_tool_names=allowed_tool_names,
+                force_tool_call=force_tool_call,
             )
-            response = step_result.assistant_text or response
             tool_results: list[ToolExecutionResult] = []
             terminal_tool_hit = False
+            awaiting_approval = False
+            rule_violation_hit = False
 
             if not step_result.tool_calls:
+                response = step_result.assistant_text or response
                 step_traces.append(
                     StepTrace(
                         step_index=step_index,
                         request_messages=request_messages,
+                        allowed_tools=allowed_tool_names,
+                        force_tool_call=force_tool_call,
                         assistant_text=step_result.assistant_text,
                         tool_calls=step_result.tool_calls,
                         usage=step_result.usage,
@@ -93,19 +116,64 @@ class AgentRuntime:
                 break
 
             for tool_call in step_result.tool_calls:
-                if tool_call.name not in tools_used:
-                    tools_used.append(tool_call.name)
+                violation = rules_solver.validate_tool_call(
+                    tool_call.name,
+                    self._tool_names,
+                )
+                if violation is not None:
+                    tool_result = ToolExecutionResult(
+                        call_id=tool_call.id,
+                        name=tool_call.name,
+                        output=f"Tool rule violation: {violation}",
+                        is_error=True,
+                    )
+                    tool_results.append(tool_result)
+                    messages.append(
+                        make_tool_message(
+                            tool_result.output,
+                            tool_call_id=tool_result.call_id,
+                            name=tool_result.name,
+                        )
+                    )
+                    rule_violation_hit = True
+                    break
 
-                tool_result = await self._tool_executor.execute(tool_call)
+                if rules_solver.requires_approval(tool_call.name):
+                    tool_result = ToolExecutionResult(
+                        call_id=tool_call.id,
+                        name=tool_call.name,
+                        output=f"Approval required before running tool: {tool_call.name}",
+                        is_error=True,
+                    )
+                    tool_results.append(tool_result)
+                    messages.append(
+                        make_tool_message(
+                            tool_result.output,
+                            tool_call_id=tool_result.call_id,
+                            name=tool_result.name,
+                        )
+                    )
+                    stop_reason = StopReason.AWAITING_APPROVAL
+                    awaiting_approval = True
+                    break
+
+                tool_result = await self._tool_executor.execute(
+                    tool_call,
+                    is_terminal=rules_solver.is_terminal(tool_call.name),
+                )
                 tool_results.append(tool_result)
                 messages.append(
-                    ToolMessage(
-                        content=tool_result.output,
+                    make_tool_message(
+                        tool_result.output,
                         tool_call_id=tool_result.call_id,
                         name=tool_result.name,
                     )
                 )
+                rules_solver.update_state(tool_call.name, tool_result.output)
+                if tool_call.name not in tools_used:
+                    tools_used.append(tool_call.name)
                 if tool_result.is_terminal:
+                    response = tool_result.output or response
                     stop_reason = StopReason.TERMINAL_TOOL
                     terminal_tool_hit = True
                     break
@@ -114,6 +182,8 @@ class AgentRuntime:
                 StepTrace(
                     step_index=step_index,
                     request_messages=request_messages,
+                    allowed_tools=allowed_tool_names,
+                    force_tool_call=force_tool_call,
                     assistant_text=step_result.assistant_text,
                     tool_calls=step_result.tool_calls,
                     tool_results=tuple(tool_results),
@@ -121,7 +191,10 @@ class AgentRuntime:
                 )
             )
 
-            if not terminal_tool_hit:
+            if rule_violation_hit:
+                continue
+
+            if not terminal_tool_hit and not awaiting_approval:
                 continue
 
             break
@@ -147,6 +220,8 @@ class AgentRuntime:
         user_id: int,
         step_index: int,
         system_prompt: str,
+        allowed_tool_names: Sequence[str],
+        force_tool_call: bool,
     ) -> StepExecutionResult:
         step_result = await self._adapter.invoke(
             LLMRequest(
@@ -155,17 +230,20 @@ class AgentRuntime:
                 step_index=step_index,
                 max_steps=self._max_steps,
                 system_prompt=system_prompt,
+                available_tools=tuple(
+                    self._tool_registry[name]
+                    for name in allowed_tool_names
+                    if name in self._tool_registry
+                ),
+                force_tool_call=force_tool_call,
             )
         )
 
         if step_result.assistant_text or step_result.tool_calls:
             messages.append(
-                AIMessage(
-                    content=step_result.assistant_text,
-                    tool_calls=[
-                        _to_langchain_tool_call(tool_call)
-                        for tool_call in step_result.tool_calls
-                    ],
+                make_assistant_message(
+                    step_result.assistant_text,
+                    tool_calls=step_result.tool_calls,
                 )
             )
 
@@ -176,6 +254,8 @@ def build_loop_runtime() -> AgentRuntime:
     tools = get_tools()
     return AgentRuntime(
         adapter=build_adapter(),
+        tools=tools,
+        tool_rules=get_tool_rules(tools),
         persona_template=settings.agent_persona_template,
         tool_summaries=get_tool_summaries(tools),
         tool_executor=ToolExecutor(tools),
@@ -186,16 +266,9 @@ def build_loop_runtime() -> AgentRuntime:
 def _default_response(stop_reason: StopReason) -> str:
     if stop_reason == StopReason.MAX_STEPS:
         return "Agent runtime reached the maximum step limit without a final response."
+    if stop_reason == StopReason.AWAITING_APPROVAL:
+        return "Agent runtime is waiting for approval before running a tool."
     return ""
-
-
-def _to_langchain_tool_call(tool_call: ToolCall) -> dict[str, object]:
-    return {
-        "id": tool_call.id,
-        "name": tool_call.name,
-        "args": dict(tool_call.arguments),
-        "type": "tool_call",
-    }
 
 
 def _snapshot_messages(messages: list[object]) -> tuple[MessageSnapshot, ...]:
@@ -218,7 +291,41 @@ def _snapshot_messages(messages: list[object]) -> tuple[MessageSnapshot, ...]:
                 content=message_content(message),
                 tool_name=getattr(message, "name", None),
                 tool_call_id=getattr(message, "tool_call_id", None),
+                tool_calls=_snapshot_tool_calls(getattr(message, "tool_calls", ())),
             )
         )
 
     return tuple(snapshots)
+
+
+def _snapshot_tool_calls(raw_tool_calls: object) -> tuple[ToolCall, ...]:
+    if not isinstance(raw_tool_calls, list):
+        return ()
+
+    tool_calls: list[ToolCall] = []
+    for index, raw_tool_call in enumerate(raw_tool_calls):
+        if isinstance(raw_tool_call, dict):
+            name = str(raw_tool_call.get("name", "")).strip()
+            call_id = str(raw_tool_call.get("id") or f"tool-call-{index}")
+            arguments = raw_tool_call.get("args", {})
+        else:
+            name = str(getattr(raw_tool_call, "name", "")).strip()
+            call_id = str(getattr(raw_tool_call, "id", None) or f"tool-call-{index}")
+            arguments = getattr(raw_tool_call, "args", {})
+
+        if not name:
+            continue
+
+        tool_calls.append(
+            ToolCall(
+                id=call_id,
+                name=name,
+                arguments=arguments if isinstance(arguments, dict) else {},
+            )
+        )
+
+    return tuple(tool_calls)
+
+
+def _tool_name(tool: Any) -> str:
+    return getattr(tool, "name", "") or getattr(tool, "__name__", "")

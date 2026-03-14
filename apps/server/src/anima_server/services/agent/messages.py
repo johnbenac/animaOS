@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from anima_server.services.agent.runtime_types import ToolCall
 from anima_server.services.agent.state import StoredMessage
 
 
@@ -13,27 +15,70 @@ def build_conversation_messages(
     *,
     system_prompt: str,
 ) -> list[Any]:
-    messages: list[Any] = [SystemMessage(content=system_prompt)]
-    messages.extend(to_langchain_message(message) for message in history)
-    messages.append(HumanMessage(content=user_message))
+    messages: list[Any] = [make_system_message(system_prompt)]
+    messages.extend(to_runtime_message(message) for message in history)
+    messages.append(make_user_message(user_message))
     return messages
 
 
-def to_langchain_message(message: StoredMessage) -> Any:
+def to_runtime_message(message: StoredMessage) -> Any:
     if message.role == "assistant":
-        return AIMessage(content=message.content)
+        return make_assistant_message(
+            message.content,
+            tool_calls=message.tool_calls,
+        )
     if message.role == "tool":
-        return ToolMessage(
-            content=message.content,
+        return make_tool_message(
+            message.content,
             tool_call_id=message.tool_call_id or message.tool_name or "tool",
             name=message.tool_name,
         )
-    return HumanMessage(content=message.content)
+    return make_user_message(message.content)
 
 
-def extract_last_ai_content(messages: list[Any]) -> str:
+def make_system_message(content: str) -> Any:
+    return SystemMessage(content=content)
+
+
+def make_user_message(content: str) -> Any:
+    return HumanMessage(content=content)
+
+
+def make_assistant_message(
+    content: str,
+    *,
+    tool_calls: Sequence[ToolCall] = (),
+) -> Any:
+    return AIMessage(
+        content=content,
+        tool_calls=[to_tool_call_payload(tool_call) for tool_call in tool_calls],
+    )
+
+
+def make_tool_message(
+    content: str,
+    *,
+    tool_call_id: str,
+    name: str | None = None,
+) -> Any:
+    return ToolMessage(
+        content=content,
+        tool_call_id=tool_call_id,
+        name=name,
+    )
+
+
+def is_assistant_message(message: Any) -> bool:
+    return isinstance(message, AIMessage)
+
+
+def is_user_message(message: Any) -> bool:
+    return isinstance(message, HumanMessage)
+
+
+def extract_last_assistant_content(messages: list[Any]) -> str:
     for message in reversed(messages):
-        if isinstance(message, AIMessage) and message_content(message):
+        if is_assistant_message(message) and message_content(message):
             return message_content(message)
     return ""
 
@@ -70,3 +115,12 @@ def render_scaffold_response(
         f"This is turn {turn_number}. Replace the scaffold runtime with a real model call. "
         f"Last message: {normalized_message}"
     )
+
+
+def to_tool_call_payload(tool_call: ToolCall) -> dict[str, object]:
+    return {
+        "id": tool_call.id,
+        "name": tool_call.name,
+        "args": dict(tool_call.arguments),
+        "type": "tool_call",
+    }

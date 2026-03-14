@@ -1,7 +1,7 @@
 """Agent tools registry.
 
 Add tools here as plain functions decorated with @tool.
-The `get_tools()` list is bound to the LLM in the agent graph.
+The `get_tools()` list is bound to the loop runtime and exposed to the LLM.
 """
 
 from __future__ import annotations
@@ -12,6 +12,8 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from anima_server.services.agent.rules import ToolRule, build_default_tool_rules
+
 
 @tool
 def current_datetime() -> str:
@@ -19,9 +21,15 @@ def current_datetime() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+@tool
+def send_message(message: str) -> str:
+    """Send a final response to the user and end the current turn."""
+    return message
+
+
 def get_tools() -> list[Any]:
     """Return all tools available to the agent."""
-    return [current_datetime]
+    return [current_datetime, send_message]
 
 
 def get_tool_summaries(tools: Sequence[Any] | None = None) -> list[str]:
@@ -39,3 +47,13 @@ def get_tool_summaries(tools: Sequence[Any] | None = None) -> list[str]:
             summaries.append(name)
 
     return summaries
+
+
+def get_tool_rules(tools: Sequence[Any] | None = None) -> tuple[ToolRule, ...]:
+    """Return the default orchestration rules for the registered tools."""
+    resolved_tools = tools or get_tools()
+    tool_names = {
+        getattr(agent_tool, "name", "") or getattr(agent_tool, "__name__", "")
+        for agent_tool in resolved_tools
+    }
+    return build_default_tool_rules(tool_names)

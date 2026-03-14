@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from langchain_core.messages import HumanMessage
-
-from anima_server.services.agent.messages import message_content, render_scaffold_response
+from anima_server.services.agent.messages import (
+    is_user_message,
+    message_content,
+    render_scaffold_response,
+)
 from anima_server.services.agent.runtime_types import LLMRequest, StepExecutionResult
 
 from .base import BaseLLMAdapter
@@ -19,7 +21,7 @@ class ScaffoldAdapter(BaseLLMAdapter):
         human_turns = [
             message
             for message in request.messages
-            if isinstance(message, HumanMessage)
+            if is_user_message(message)
         ]
         user_message = message_content(human_turns[-1]) if human_turns else ""
         response = render_scaffold_response(
