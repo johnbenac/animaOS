@@ -97,14 +97,13 @@ export default function Database() {
   function buildConditions(row: Record<string, unknown>): Record<string, unknown> {
     if (!tableData) return {};
     const pks = tableData.primaryKeys ?? [];
-    if (pks.length > 0) {
-      const cond: Record<string, unknown> = {};
-      for (const pk of pks) cond[pk] = row[pk];
-      return cond;
-    }
-    // Fallback: use all columns
-    return { ...row };
+    if (pks.length === 0) return {};
+    const cond: Record<string, unknown> = {};
+    for (const pk of pks) cond[pk] = row[pk];
+    return cond;
   }
+
+  const canMutate = editMode && (tableData?.primaryKeys?.length ?? 0) > 0;
 
   function startEdit(rowIndex: number, row: Record<string, unknown>) {
     setEditingRow(rowIndex);
@@ -131,7 +130,7 @@ export default function Database() {
           ? ""
           : String(originalRow[col]);
       if (newVal !== oldVal) {
-        updates[col] = newVal === "" ? null : newVal;
+        updates[col] = newVal;
       }
     }
     if (Object.keys(updates).length === 0) {
@@ -182,7 +181,7 @@ export default function Database() {
     rows: Record<string, unknown>[],
     options?: { editable?: boolean },
   ) {
-    const editable = options?.editable && editMode;
+    const editable = options?.editable && canMutate;
     if (columns.length === 0) {
       return <p className="text-text-muted text-sm">No columns</p>;
     }
@@ -359,17 +358,24 @@ export default function Database() {
         </div>
 
         {/* Edit mode toggle */}
-        <label className="inline-flex items-center gap-2 select-none cursor-pointer">
-          <input
-            type="checkbox"
-            checked={editMode}
-            onChange={(e) => setEditMode(e.target.checked)}
-            className="w-3.5 h-3.5 accent-danger cursor-pointer"
-          />
-          <span className="text-xs text-text-muted">
-            Enable editing
-          </span>
-        </label>
+        <div className="flex items-center gap-3">
+          <label className="inline-flex items-center gap-2 select-none cursor-pointer">
+            <input
+              type="checkbox"
+              checked={editMode}
+              onChange={(e) => setEditMode(e.target.checked)}
+              className="w-3.5 h-3.5 accent-danger cursor-pointer"
+            />
+            <span className="text-xs text-text-muted">
+              Enable editing
+            </span>
+          </label>
+          {editMode && (tableData?.primaryKeys?.length ?? 0) === 0 && (
+            <span className="text-[11px] text-text-muted/60 italic">
+              No primary key — editing disabled for this table
+            </span>
+          )}
+        </div>
 
         {renderDataTable(tableData.columns, tableData.rows, { editable: true })}
         {totalPages > 1 && (

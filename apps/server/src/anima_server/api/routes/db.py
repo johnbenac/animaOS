@@ -18,9 +18,6 @@ MAX_ROWS = 500
 # Helpers
 # --------------------------------------------------------------------------- #
 
-_VALID_TABLE_NAME = __import__("re").compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
 def _validate_table(insp: Any, table_name: str) -> None:
     """Raise 404 when *table_name* does not exist."""
     if table_name not in insp.get_table_names():
