@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     agent_stream_chunk_size: int = 48
     agent_background_memory_enabled: bool = True
     core_passphrase: str = ""
+    agent_extraction_model: str = ""
+    agent_extraction_provider: str = ""
 
     model_config = SettingsConfigDict(
         env_prefix="ANIMA_",

@@ -1,24 +1,55 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from threading import Lock
+from typing import Any
 
 from anima_server.config import settings
 from anima_server.services.agent.memory_store import (
     add_daily_log,
     add_memory_item,
+    find_similar_items,
     set_current_focus,
+    supersede_memory_item,
 )
 
 logger = logging.getLogger(__name__)
 
 _background_tasks_lock = Lock()
 _background_tasks: set[asyncio.Task[None]] = set()
+
+EXTRACTION_PROMPT = """You are a memory extraction system for a personal AI companion.
+Given a conversation turn between a user and an assistant, extract personal facts and preferences about the user.
+
+Return a JSON array. Each item:
+- "content": concise statement (e.g. "Works as a software engineer")
+- "category": one of "fact", "preference", "goal", "relationship"
+- "importance": 1-5 (5 = identity-defining like name/age/occupation, 1 = casual mention)
+
+Rules:
+- Only extract what the user explicitly stated or clearly implied
+- Do not infer or speculate
+- Do not extract information about the assistant
+- Return [] if nothing worth remembering was said
+
+User message:
+{user_message}
+
+Assistant response:
+{assistant_response}"""
+
+CONFLICT_CHECK_PROMPT = """Given an EXISTING memory and a NEW memory about the same user, determine if the new one updates/replaces the existing one, or if they are about different topics.
+
+Respond with exactly one word: UPDATE or DIFFERENT
+
+EXISTING: {existing}
+NEW: {new_content}"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +71,8 @@ class MemoryConsolidationResult:
     facts_added: list[str] = field(default_factory=list)
     preferences_added: list[str] = field(default_factory=list)
     current_focus_updated: str | None = None
+    llm_items_added: list[str] = field(default_factory=list)
+    conflicts_resolved: list[str] = field(default_factory=list)
 
 
 _FACT_EXTRACTORS: tuple[PatternExtractor, ...] = (
@@ -148,6 +181,177 @@ def consolidate_turn_memory(
     return result
 
 
+async def consolidate_turn_memory_with_llm(
+    *,
+    user_id: int,
+    user_message: str,
+    assistant_response: str,
+    db_factory: Callable[..., object] | None = None,
+) -> MemoryConsolidationResult:
+    """Full consolidation: regex extraction + LLM extraction + conflict resolution."""
+    result = consolidate_turn_memory(
+        user_id=user_id,
+        user_message=user_message,
+        assistant_response=assistant_response,
+        db_factory=db_factory,
+    )
+
+    llm_items = await extract_memories_via_llm(
+        user_message=user_message,
+        assistant_response=assistant_response,
+    )
+    if not llm_items:
+        return result
+
+    from anima_server.db.session import SessionLocal
+
+    factory = db_factory or SessionLocal
+    regex_contents = {c.lower() for c in result.facts_added + result.preferences_added}
+
+    with factory() as db:
+        for llm_item in llm_items:
+            content = llm_item.get("content", "").strip()
+            category = llm_item.get("category", "fact")
+            importance = llm_item.get("importance", 3)
+
+            if not content or len(content) < 3:
+                continue
+            if content.lower() in regex_contents:
+                continue
+            if category not in ("fact", "preference", "goal", "relationship"):
+                category = "fact"
+            if not isinstance(importance, int) or not 1 <= importance <= 5:
+                importance = 3
+
+            similar = find_similar_items(
+                db,
+                user_id=user_id,
+                content=content,
+                category=category,
+            )
+
+            if similar:
+                resolution = await resolve_conflict(
+                    existing_content=similar[0].content,
+                    new_content=content,
+                )
+                if resolution == "UPDATE":
+                    supersede_memory_item(
+                        db,
+                        old_item_id=similar[0].id,
+                        new_content=content,
+                        importance=importance,
+                    )
+                    result.conflicts_resolved.append(
+                        f"{similar[0].content} -> {content}"
+                    )
+                    result.llm_items_added.append(content)
+                else:
+                    item = add_memory_item(
+                        db,
+                        user_id=user_id,
+                        content=content,
+                        category=category,
+                        importance=importance,
+                        source="extraction",
+                    )
+                    if item is not None:
+                        result.llm_items_added.append(content)
+            else:
+                item = add_memory_item(
+                    db,
+                    user_id=user_id,
+                    content=content,
+                    category=category,
+                    importance=importance,
+                    source="extraction",
+                )
+                if item is not None:
+                    result.llm_items_added.append(content)
+
+        db.commit()
+
+    return result
+
+
+async def extract_memories_via_llm(
+    *,
+    user_message: str,
+    assistant_response: str,
+) -> list[dict[str, Any]]:
+    """Call the LLM to extract structured memories from a conversation turn."""
+    if settings.agent_provider == "scaffold":
+        return []
+
+    try:
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
+        from anima_server.services.agent.llm import create_llm
+
+        llm = create_llm()
+        prompt = EXTRACTION_PROMPT.format(
+            user_message=user_message,
+            assistant_response=assistant_response,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content="You extract memories. Respond only with JSON."),
+            HumanMessage(content=prompt),
+        ])
+        content = getattr(response, "content", "")
+        if not isinstance(content, str):
+            content = str(content)
+        return _parse_json_array(content)
+    except Exception:  # noqa: BLE001
+        logger.exception("LLM memory extraction failed")
+        return []
+
+
+async def resolve_conflict(
+    *,
+    existing_content: str,
+    new_content: str,
+) -> str:
+    """Ask LLM whether new content updates or is different from existing. Returns 'UPDATE' or 'DIFFERENT'."""
+    if settings.agent_provider == "scaffold":
+        return "DIFFERENT"
+
+    try:
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
+        from anima_server.services.agent.llm import create_llm
+
+        llm = create_llm()
+        prompt = CONFLICT_CHECK_PROMPT.format(
+            existing=existing_content,
+            new_content=new_content,
+        )
+        response = await llm.ainvoke([
+            SystemMessage(content="Respond with exactly one word: UPDATE or DIFFERENT"),
+            HumanMessage(content=prompt),
+        ])
+        content = getattr(response, "content", "").strip().upper()
+        if content in ("UPDATE", "DIFFERENT"):
+            return content
+        return "DIFFERENT"
+    except Exception:  # noqa: BLE001
+        logger.exception("LLM conflict resolution failed")
+        return "DIFFERENT"
+
+
+def _parse_json_array(text: str) -> list[dict[str, Any]]:
+    """Extract a JSON array from LLM response text."""
+    text = text.strip()
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        parsed = json.loads(text[start:end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
 def extract_turn_memory(user_message: str) -> ExtractedTurnMemory:
     facts = tuple(extract_pattern_items(user_message, _FACT_EXTRACTORS))
     preferences = tuple(extract_pattern_items(user_message, _PREFERENCE_EXTRACTORS))
@@ -214,11 +418,18 @@ async def run_background_memory_consolidation(
     assistant_response: str,
 ) -> None:
     try:
-        consolidate_turn_memory(
-            user_id=user_id,
-            user_message=user_message,
-            assistant_response=assistant_response,
-        )
+        if settings.agent_provider != "scaffold":
+            await consolidate_turn_memory_with_llm(
+                user_id=user_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+            )
+        else:
+            consolidate_turn_memory(
+                user_id=user_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+            )
     except Exception:  # noqa: BLE001
         logger.exception("Background memory consolidation failed for user %s", user_id)
 

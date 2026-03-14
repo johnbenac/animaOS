@@ -148,5 +148,32 @@ def set_current_focus(
     return item
 
 
+def find_similar_items(
+    db: Session,
+    *,
+    user_id: int,
+    content: str,
+    category: str,
+    threshold: float = 0.5,
+) -> list[MemoryItem]:
+    existing = get_memory_items(db, user_id=user_id, category=category)
+    return [
+        item for item in existing
+        if _similarity(item.content, content) > threshold
+        and not _is_duplicate(item.content, content)
+    ]
+
+
 def _is_duplicate(existing_content: str, new_content: str) -> bool:
     return existing_content.strip().lower() == new_content.strip().lower()
+
+
+def _similarity(a: str, b: str) -> float:
+    """Simple word-overlap (Jaccard) similarity. Returns 0.0-1.0."""
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union)

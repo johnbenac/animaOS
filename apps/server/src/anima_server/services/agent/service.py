@@ -7,6 +7,7 @@ from threading import Lock
 from anima_server.config import settings
 from anima_server.services.agent.compaction import compact_thread_context
 from anima_server.services.agent.consolidation import schedule_background_memory_consolidation
+from anima_server.services.agent.reflection import schedule_reflection
 from anima_server.services.agent.memory_blocks import build_runtime_memory_blocks
 from anima_server.services.agent.llm import invalidate_llm_cache
 from anima_server.services.agent.persistence import (
@@ -135,6 +136,10 @@ async def _execute_agent_turn(
         user_id=user_id,
         user_message=user_message,
         assistant_response=result.response,
+    )
+    schedule_reflection(
+        user_id=user_id,
+        thread_id=thread.id,
     )
     if event_callback is not None:
         usage = summarize_usage(result)
