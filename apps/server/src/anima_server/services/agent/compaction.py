@@ -87,8 +87,10 @@ def compact_thread_context(
     if estimated_tokens_before <= effective_trigger_token_limit:
         return None
 
-    existing_summary_rows = [row for row in in_context_rows if row.role == "summary"]
-    conversation_rows = [row for row in in_context_rows if row.role != "summary"]
+    existing_summary_rows = [
+        row for row in in_context_rows if row.role == "summary"]
+    conversation_rows = [
+        row for row in in_context_rows if row.role != "summary"]
     if len(conversation_rows) <= keep_last_messages:
         return None
 
@@ -97,7 +99,8 @@ def compact_thread_context(
     if not compacted_rows:
         return None
 
-    summary_text = render_summary_text(existing_summary_rows, compacted_rows)
+    summary_text = render_summary_text(
+        existing_summary_rows, compacted_rows, user_id=thread.user_id)
 
     for row in existing_summary_rows:
         row.is_in_context = False
@@ -159,6 +162,8 @@ def compact_thread_context(
 def render_summary_text(
     summary_rows: list[AgentMessage],
     compacted_rows: list[AgentMessage],
+    *,
+    user_id: int = 0,
 ) -> str:
     lines: list[str] = ["Conversation summary:"]
 
@@ -172,23 +177,26 @@ def render_summary_text(
             break
 
     for row in compacted_rows[:SUMMARY_LINE_LIMIT]:
-        line = _summarize_row(row)
+        line = _summarize_row(row, user_id=user_id)
         if line:
             lines.append(f"- {line}")
 
-    hidden_count = len(compacted_rows) - min(len(compacted_rows), SUMMARY_LINE_LIMIT)
+    hidden_count = len(compacted_rows) - \
+        min(len(compacted_rows), SUMMARY_LINE_LIMIT)
     if hidden_count > 0:
-        lines.append(f"- {hidden_count} additional earlier messages were compacted.")
+        lines.append(
+            f"- {hidden_count} additional earlier messages were compacted.")
 
     return "\n".join(lines)
 
 
-def _summarize_row(row: AgentMessage) -> str:
+def _summarize_row(row: AgentMessage, *, user_id: int = 0) -> str:
     role_label = "Tool" if row.role == "tool" else row.role.capitalize()
     if row.role == "tool" and row.tool_name:
         role_label = f"Tool {row.tool_name}"
 
-    content = _trim_summary_text(row.content_text or "")
+    content = _trim_summary_text(
+        row.content_text or "")
     if not content:
         return f"{role_label}: [empty]"
     return f"{role_label}: {content}"

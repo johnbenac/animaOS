@@ -89,11 +89,13 @@ class MemoryConsolidationResult:
 
 _FACT_EXTRACTORS: tuple[PatternExtractor, ...] = (
     PatternExtractor(
-        pattern=re.compile(r"\bI am (?P<value>\d{1,3}) years old\b", re.IGNORECASE),
+        pattern=re.compile(
+            r"\bI am (?P<value>\d{1,3}) years old\b", re.IGNORECASE),
         formatter=lambda value: f"Age: {value}",
     ),
     PatternExtractor(
-        pattern=re.compile(r"\bmy birthday is (?P<value>[^.?!\n]+)", re.IGNORECASE),
+        pattern=re.compile(
+            r"\bmy birthday is (?P<value>[^.?!\n]+)", re.IGNORECASE),
         formatter=lambda value: f"Birthday: {value}",
     ),
     PatternExtractor(
@@ -133,7 +135,8 @@ _CURRENT_FOCUS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bmy current focus is (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bmy main focus is (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bmy main priority is (?P<value>[^.?!\n]+)", re.IGNORECASE),
-    re.compile(r"\bI(?:'m| am) focused on (?P<value>[^.?!\n]+)", re.IGNORECASE),
+    re.compile(
+        r"\bI(?:'m| am) focused on (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bI need to focus on (?P<value>[^.?!\n]+)", re.IGNORECASE),
 )
 
@@ -195,7 +198,8 @@ def consolidate_turn_memory(
                 )
 
         if extracted.current_focus:
-            set_current_focus(db, user_id=user_id, focus=extracted.current_focus)
+            set_current_focus(db, user_id=user_id,
+                              focus=extracted.current_focus)
             result.current_focus_updated = extracted.current_focus
 
         db.commit()
@@ -238,7 +242,8 @@ async def consolidate_turn_memory_with_llm(
                     user_id=user_id,
                     emotion=str(emotion_data["emotion"]),
                     confidence=float(emotion_data.get("confidence", 0.5)),
-                    evidence_type=str(emotion_data.get("evidence_type", "linguistic")),
+                    evidence_type=str(emotion_data.get(
+                        "evidence_type", "linguistic")),
                     evidence=str(emotion_data.get("evidence", "")),
                     trajectory=str(emotion_data.get("trajectory", "stable")),
                 )
@@ -252,7 +257,8 @@ async def consolidate_turn_memory_with_llm(
     from anima_server.db.session import SessionLocal
 
     factory = db_factory or SessionLocal
-    regex_contents = {c.lower() for c in result.facts_added + result.preferences_added}
+    regex_contents = {c.lower()
+                      for c in result.facts_added + result.preferences_added}
 
     with factory() as db:
         for llm_item in llm_items:
@@ -353,7 +359,8 @@ async def extract_memories_via_llm(
             assistant_response=assistant_response,
         )
         response = await llm.ainvoke([
-            SystemMessage(content="You extract memories and emotions. Respond only with JSON."),
+            SystemMessage(
+                content="You extract memories and emotions. Respond only with JSON."),
             HumanMessage(content=prompt),
         ])
         content = getattr(response, "content", "")
@@ -400,7 +407,8 @@ async def resolve_conflict(
             new_content=new_content,
         )
         response = await llm.ainvoke([
-            SystemMessage(content="Respond with exactly one word: UPDATE or DIFFERENT"),
+            SystemMessage(
+                content="Respond with exactly one word: UPDATE or DIFFERENT"),
             HumanMessage(content=prompt),
         ])
         content = getattr(response, "content", "").strip().upper()
@@ -446,7 +454,8 @@ def _parse_json_array(text: str) -> list[dict[str, Any]]:
 
 def extract_turn_memory(user_message: str) -> ExtractedTurnMemory:
     facts = tuple(extract_pattern_items(user_message, _FACT_EXTRACTORS))
-    preferences = tuple(extract_pattern_items(user_message, _PREFERENCE_EXTRACTORS))
+    preferences = tuple(extract_pattern_items(
+        user_message, _PREFERENCE_EXTRACTORS))
     current_focus = extract_current_focus(user_message)
     return ExtractedTurnMemory(
         facts=facts,
@@ -526,7 +535,8 @@ async def run_background_memory_consolidation(
                 db_factory=db_factory,
             )
     except Exception:  # noqa: BLE001
-        logger.exception("Background memory consolidation failed for user %s", user_id)
+        logger.exception(
+            "Background memory consolidation failed for user %s", user_id)
 
     # Opportunistic embedding backfill for items without embeddings
     try:

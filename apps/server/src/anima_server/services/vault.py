@@ -125,7 +125,8 @@ def encrypt_string(plaintext: str, passphrase: str) -> dict[str, Any]:
     iv = random_bytes(IV_LENGTH)
     key = derive_argon2id_key(passphrase, salt)
     encrypted = AESGCM(key).encrypt(iv, plaintext.encode("utf-8"), None)
-    ciphertext, tag = encrypted[:-AUTH_TAG_LENGTH], encrypted[-AUTH_TAG_LENGTH:]
+    ciphertext, tag = encrypted[:-
+                                AUTH_TAG_LENGTH], encrypted[-AUTH_TAG_LENGTH:]
     return {
         "version": VAULT_VERSION,
         "createdAt": datetime.now(UTC).isoformat(),
@@ -186,7 +187,8 @@ def decrypt_string(envelope: dict[str, Any], passphrase: str) -> str:
         )
         plaintext = AESGCM(key).decrypt(iv, ciphertext + tag, None)
     except Exception as exc:  # noqa: BLE001
-        raise ValueError("Failed to decrypt vault. Check the passphrase and payload.") from exc
+        raise ValueError(
+            "Failed to decrypt vault. Check the passphrase and payload.") from exc
 
     return plaintext.decode("utf-8")
 
@@ -198,9 +200,11 @@ def export_database_snapshot(db: Session, *, user_id: int | None = None) -> dict
         return query
 
     if user_id is not None:
-        users = [serialize_user_record(u) for u in db.scalars(select(User).where(User.id == user_id)).all()]
+        users = [serialize_user_record(u) for u in db.scalars(
+            select(User).where(User.id == user_id)).all()]
     else:
-        users = [serialize_user_record(u) for u in db.scalars(select(User)).all()]
+        users = [serialize_user_record(u)
+                 for u in db.scalars(select(User)).all()]
     user_keys = [
         serialize_user_key_record(user_key)
         for user_key in db.scalars(_scoped(select(UserKey), UserKey)).all()
@@ -230,18 +234,24 @@ def export_database_snapshot(db: Session, *, user_id: int | None = None) -> dict
         serialize_agent_run_record(r)
         for r in db.scalars(_scoped(select(AgentRun), AgentRun)).all()
     ]
+    # Build thread_id -> user_id map for message decryption
+    _thread_user_map: dict[int, int] = {
+        t["id"]: t["user_id"] for t in agent_threads}
+
     if user_id is not None:
         scoped_thread_ids = [t["id"] for t in agent_threads]
         agent_steps = [
             serialize_agent_step_record(s)
             for s in db.scalars(
-                select(AgentStep).where(AgentStep.thread_id.in_(scoped_thread_ids))
+                select(AgentStep).where(
+                    AgentStep.thread_id.in_(scoped_thread_ids))
             ).all()
         ] if scoped_thread_ids else []
         agent_messages = [
-            serialize_agent_message_record(m)
+            serialize_agent_message_record(m, thread_user_map=_thread_user_map)
             for m in db.scalars(
-                select(AgentMessage).where(AgentMessage.thread_id.in_(scoped_thread_ids))
+                select(AgentMessage).where(
+                    AgentMessage.thread_id.in_(scoped_thread_ids))
             ).all()
         ] if scoped_thread_ids else []
     else:
@@ -250,7 +260,7 @@ def export_database_snapshot(db: Session, *, user_id: int | None = None) -> dict
             for s in db.scalars(select(AgentStep)).all()
         ]
         agent_messages = [
-            serialize_agent_message_record(m)
+            serialize_agent_message_record(m, thread_user_map=_thread_user_map)
             for m in db.scalars(select(AgentMessage)).all()
         ]
     session_notes = [
@@ -286,7 +296,8 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
     users_payload = snapshot.get("users")
     user_keys_payload = snapshot.get("userKeys")
     if not isinstance(users_payload, list) or not isinstance(user_keys_payload, list):
-        raise ValueError("Vault database snapshot is missing users or userKeys.")
+        raise ValueError(
+            "Vault database snapshot is missing users or userKeys.")
 
     memory_items_payload = snapshot.get("memoryItems", [])
     memory_episodes_payload = snapshot.get("memoryEpisodes", [])
@@ -327,8 +338,10 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     gender=coerce_optional_str(record.get("gender")),
                     age=coerce_optional_int(record.get("age")),
                     birthday=coerce_optional_str(record.get("birthday")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -347,8 +360,10 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     wrap_iv=str(record["wrap_iv"]),
                     wrap_tag=str(record["wrap_tag"]),
                     wrapped_dek=str(record["wrapped_dek"]),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -363,12 +378,16 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     category=str(record["category"]),
                     importance=int(record.get("importance", 3)),
                     source=str(record.get("source", "extraction")),
-                    superseded_by=coerce_optional_int(record.get("superseded_by")),
+                    superseded_by=coerce_optional_int(
+                        record.get("superseded_by")),
                     reference_count=int(record.get("reference_count", 0)),
-                    last_referenced_at=parse_optional_datetime(record.get("last_referenced_at")),
+                    last_referenced_at=parse_optional_datetime(
+                        record.get("last_referenced_at")),
                     embedding_json=record.get("embedding_json"),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -384,10 +403,13 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     time=coerce_optional_str(record.get("time")),
                     topics_json=record.get("topics_json"),
                     summary=str(record["summary"]),
-                    emotional_arc=coerce_optional_str(record.get("emotional_arc")),
-                    significance_score=int(record.get("significance_score", 3)),
+                    emotional_arc=coerce_optional_str(
+                        record.get("emotional_arc")),
+                    significance_score=int(
+                        record.get("significance_score", 3)),
                     turn_count=coerce_optional_int(record.get("turn_count")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
                 )
             )
 
@@ -401,7 +423,8 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     date=str(record["date"]),
                     user_message=str(record["user_message"]),
                     assistant_response=str(record["assistant_response"]),
-                    created_at=parse_optional_datetime(record.get("created_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
                 )
             )
 
@@ -416,9 +439,12 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     done=bool(record.get("done", False)),
                     priority=int(record.get("priority", 2)),
                     due_date=coerce_optional_str(record.get("due_date")),
-                    completed_at=parse_optional_datetime(record.get("completed_at")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    completed_at=parse_optional_datetime(
+                        record.get("completed_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -431,10 +457,14 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     user_id=int(record["user_id"]),
                     status=str(record.get("status", "active")),
                     title=coerce_optional_str(record.get("title")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
-                    last_message_at=parse_optional_datetime(record.get("last_message_at")),
-                    next_message_sequence=int(record.get("next_message_sequence", 1)),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
+                    last_message_at=parse_optional_datetime(
+                        record.get("last_message_at")),
+                    next_message_sequence=int(
+                        record.get("next_message_sequence", 1)),
                 )
             )
 
@@ -452,9 +482,12 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     value=str(record["value"]),
                     note_type=str(record.get("note_type", "observation")),
                     is_active=bool(record.get("is_active", True)),
-                    promoted_to_item_id=coerce_optional_int(record.get("promoted_to_item_id")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    promoted_to_item_id=coerce_optional_int(
+                        record.get("promoted_to_item_id")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -470,8 +503,10 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     version=int(record.get("version", 1)),
                     updated_by=str(record.get("updated_by", "system")),
                     metadata_json=record.get("metadata_json"),
-                    created_at=parse_optional_datetime(record.get("created_at")),
-                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
+                    updated_at=parse_optional_datetime(
+                        record.get("updated_at")),
                 )
             )
 
@@ -485,13 +520,16 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     thread_id=coerce_optional_int(record.get("thread_id")),
                     emotion=str(record["emotion"]),
                     confidence=float(record.get("confidence", 0.5)),
-                    evidence_type=str(record.get("evidence_type", "linguistic")),
+                    evidence_type=str(record.get(
+                        "evidence_type", "linguistic")),
                     evidence=str(record.get("evidence", "")),
                     trajectory=str(record.get("trajectory", "stable")),
-                    previous_emotion=coerce_optional_str(record.get("previous_emotion")),
+                    previous_emotion=coerce_optional_str(
+                        record.get("previous_emotion")),
                     topic=str(record.get("topic", "")),
                     acted_on=bool(record.get("acted_on", False)),
-                    created_at=parse_optional_datetime(record.get("created_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
                 )
             )
 
@@ -509,11 +547,16 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     status=str(record.get("status", "completed")),
                     stop_reason=coerce_optional_str(record.get("stop_reason")),
                     error_text=coerce_optional_str(record.get("error_text")),
-                    started_at=parse_optional_datetime(record.get("started_at")),
-                    completed_at=parse_optional_datetime(record.get("completed_at")),
-                    prompt_tokens=coerce_optional_int(record.get("prompt_tokens")),
-                    completion_tokens=coerce_optional_int(record.get("completion_tokens")),
-                    total_tokens=coerce_optional_int(record.get("total_tokens")),
+                    started_at=parse_optional_datetime(
+                        record.get("started_at")),
+                    completed_at=parse_optional_datetime(
+                        record.get("completed_at")),
+                    prompt_tokens=coerce_optional_int(
+                        record.get("prompt_tokens")),
+                    completion_tokens=coerce_optional_int(
+                        record.get("completion_tokens")),
+                    total_tokens=coerce_optional_int(
+                        record.get("total_tokens")),
                 )
             )
 
@@ -534,7 +577,8 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     tool_calls_json=record.get("tool_calls_json"),
                     usage_json=record.get("usage_json"),
                     error_text=coerce_optional_str(record.get("error_text")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
                 )
             )
 
@@ -549,14 +593,18 @@ def restore_database_snapshot(db: Session, snapshot: dict[str, Any]) -> None:
                     step_id=coerce_optional_int(record.get("step_id")),
                     sequence_id=int(record["sequence_id"]),
                     role=str(record["role"]),
-                    content_text=coerce_optional_str(record.get("content_text")),
+                    content_text=coerce_optional_str(
+                        record.get("content_text")),
                     content_json=record.get("content_json"),
                     tool_name=coerce_optional_str(record.get("tool_name")),
-                    tool_call_id=coerce_optional_str(record.get("tool_call_id")),
+                    tool_call_id=coerce_optional_str(
+                        record.get("tool_call_id")),
                     tool_args_json=record.get("tool_args_json"),
                     is_in_context=bool(record.get("is_in_context", True)),
-                    token_estimate=coerce_optional_int(record.get("token_estimate")),
-                    created_at=parse_optional_datetime(record.get("created_at")),
+                    token_estimate=coerce_optional_int(
+                        record.get("token_estimate")),
+                    created_at=parse_optional_datetime(
+                        record.get("created_at")),
                 )
             )
 
@@ -782,7 +830,11 @@ def serialize_agent_step_record(s: AgentStep) -> dict[str, Any]:
     }
 
 
-def serialize_agent_message_record(m: AgentMessage) -> dict[str, Any]:
+def serialize_agent_message_record(
+    m: AgentMessage,
+    *,
+    thread_user_map: dict[int, int] | None = None,
+) -> dict[str, Any]:
     return {
         "id": m.id,
         "thread_id": m.thread_id,
@@ -905,12 +957,14 @@ def _rebuild_vector_indices(db: Session, snapshot: dict[str, Any]) -> None:
     try:
         from anima_server.services.agent.embeddings import sync_to_vector_store
 
-        user_ids = {int(u["id"]) for u in snapshot.get("users", []) if isinstance(u, dict)}
+        user_ids = {int(u["id"]) for u in snapshot.get(
+            "users", []) if isinstance(u, dict)}
         for uid in user_ids:
             sync_to_vector_store(db, user_id=uid)
     except Exception:  # noqa: BLE001
         import logging
-        logging.getLogger(__name__).debug("Vector index rebuild skipped during import")
+        logging.getLogger(__name__).debug(
+            "Vector index rebuild skipped during import")
 
 
 def random_bytes(length: int) -> bytes:

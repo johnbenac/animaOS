@@ -13,7 +13,8 @@ from anima_server.services.agent.state import AgentResult, StoredMessage
 
 
 def get_or_create_thread(db: Session, user_id: int) -> AgentThread:
-    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(
+        AgentThread.user_id == user_id))
     if thread is not None:
         return thread
 
@@ -26,7 +27,7 @@ def get_or_create_thread(db: Session, user_id: int) -> AgentThread:
     return thread
 
 
-def load_thread_history(db: Session, thread_id: int) -> list[StoredMessage]:
+def load_thread_history(db: Session, thread_id: int, *, user_id: int | None = None) -> list[StoredMessage]:
     rows = db.scalars(
         select(AgentMessage)
         .where(
@@ -39,10 +40,11 @@ def load_thread_history(db: Session, thread_id: int) -> list[StoredMessage]:
 
     history: list[StoredMessage] = []
     for row in rows:
+        content = row.content_text or ""
         history.append(
             StoredMessage(
                 role=row.role,
-                content=row.content_text or "",
+                content=content,
                 tool_name=row.tool_name,
                 tool_call_id=row.tool_call_id,
                 tool_calls=_deserialize_tool_calls(row.content_json),
@@ -57,7 +59,8 @@ def list_transcript_messages(
     user_id: int,
     limit: int,
 ) -> list[AgentMessage]:
-    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(
+        AgentThread.user_id == user_id))
     if thread is None:
         return []
 
@@ -140,7 +143,8 @@ def persist_agent_result(
 
         if trace.assistant_text or trace.tool_calls:
             if sequence_id is None:
-                raise RuntimeError("Missing reserved message sequence for assistant output.")
+                raise RuntimeError(
+                    "Missing reserved message sequence for assistant output.")
             append_message(
                 db,
                 thread=thread,
@@ -159,7 +163,8 @@ def persist_agent_result(
 
         for tool_result in trace.tool_results:
             if sequence_id is None:
-                raise RuntimeError("Missing reserved message sequence for tool output.")
+                raise RuntimeError(
+                    "Missing reserved message sequence for tool output.")
             append_message(
                 db,
                 thread=thread,
@@ -184,7 +189,8 @@ def mark_run_failed(db: Session, run: AgentRun, error_text: str) -> None:
 
 
 def reset_thread(db: Session, user_id: int) -> None:
-    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(
+        AgentThread.user_id == user_id))
     if thread is None:
         return
 
@@ -273,7 +279,8 @@ def create_step(
             "assistant_text": trace.assistant_text,
             "tool_results": [asdict(result) for result in trace.tool_results],
         },
-        tool_calls_json=[asdict(tool_call) for tool_call in trace.tool_calls] or None,
+        tool_calls_json=[asdict(tool_call)
+                         for tool_call in trace.tool_calls] or None,
         usage_json=_serialize_usage(trace.usage),
     )
     db.add(step)

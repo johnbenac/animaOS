@@ -96,7 +96,7 @@ async def get_chat_history(
             id=row.id,
             userId=userId,
             role=row.role,
-            content=row.content_text or "",
+            content=row.content_text,
             createdAt=row.created_at,
         )
         for row in rows

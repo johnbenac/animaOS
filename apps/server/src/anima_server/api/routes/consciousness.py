@@ -90,7 +90,8 @@ async def get_self_model_section(
     ensure_self_model_exists(db, user_id=user_id)
     block = get_self_model_block(db, user_id=user_id, section=section)
     if block is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
 
     return SelfModelSectionResponse(
         section=block.section,
@@ -179,7 +180,8 @@ async def get_emotional_state(
     if signals:
         emotion_scores: dict[str, float] = {}
         for s in signals[:5]:
-            emotion_scores[s.emotion] = emotion_scores.get(s.emotion, 0) + s.confidence
+            emotion_scores[s.emotion] = emotion_scores.get(
+                s.emotion, 0) + s.confidence
         if emotion_scores:
             dominant = max(emotion_scores, key=emotion_scores.get)
 

@@ -147,7 +147,7 @@ async def _prepare_turn_context(
 ) -> tuple[AgentThread, AgentRun, AgentMessage, int, _TurnContext]:
     """Stage 1: Load thread, persist user message, build memory context."""
     thread = get_or_create_thread(db, user_id)
-    history = load_thread_history(db, thread.id)
+    history = load_thread_history(db, thread.id, user_id=user_id)
     run = create_run(
         db,
         thread_id=thread.id,

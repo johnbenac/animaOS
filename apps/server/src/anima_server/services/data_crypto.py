@@ -18,6 +18,20 @@ def maybe_decrypt_for_user(user_id: int, value: str) -> str:
     return decrypt_text_with_dek(value, dek)
 
 
+def encrypt_field(user_id: int, value: str | None) -> str | None:
+    """Encrypt a text field if a DEK is active, otherwise return as-is."""
+    if not value:
+        return value
+    return maybe_encrypt_for_user(user_id, value)
+
+
+def decrypt_field(user_id: int, value: str | None) -> str:
+    """Decrypt a text field if encrypted, return plaintext as-is. Returns '' for None."""
+    if not value:
+        return value or ""
+    return maybe_decrypt_for_user(user_id, value)
+
+
 def require_dek_for_user(user_id: int) -> bytes:
     dek = get_active_dek(user_id)
     if dek is None:

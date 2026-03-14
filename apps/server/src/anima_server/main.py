@@ -9,6 +9,7 @@ from .api.routes.auth import router as auth_router
 from .api.routes.chat import router as chat_router
 from .api.routes.config import router as config_router
 from .api.routes.consciousness import router as consciousness_router
+from .api.routes.core import router as core_router
 from .api.routes.memory import router as memory_router
 from .api.routes.soul import router as soul_router
 from .api.routes.tasks import router as tasks_router
@@ -84,6 +85,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(config_router)
     app.include_router(consciousness_router)
+    app.include_router(core_router)
     app.include_router(memory_router)
     app.include_router(soul_router)
     app.include_router(tasks_router)

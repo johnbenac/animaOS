@@ -169,7 +169,8 @@ def render_session_memory_text(notes: list[SessionNote]) -> str:
     total_len = 0
 
     for note in notes:
-        line = f"[{note.note_type}] {note.key}: {note.value}"
+        note_value = note.value
+        line = f"[{note.note_type}] {note.key}: {note_value}"
         if total_len + len(line) > settings.agent_session_memory_budget_chars:
             break
         lines.append(line)

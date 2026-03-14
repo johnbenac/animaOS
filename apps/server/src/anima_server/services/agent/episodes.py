@@ -188,7 +188,8 @@ async def _call_llm_for_episode(logs: list[MemoryDailyLog]) -> dict[str, Any]:
 
     llm = create_llm()
     response = await llm.ainvoke([
-        SystemMessage(content="You generate episode summaries. Respond only with JSON."),
+        SystemMessage(
+            content="You generate episode summaries. Respond only with JSON."),
         HumanMessage(content=prompt),
     ])
     content = getattr(response, "content", "")

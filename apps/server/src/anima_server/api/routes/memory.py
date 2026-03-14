@@ -239,14 +239,13 @@ async def search_memory(
             pass
 
     # Always run keyword search as fallback/supplement
-    pattern = f"%{q}%"
     items = list(
         db.scalars(
             select(MemoryItem)
             .where(
                 MemoryItem.user_id == user_id,
                 MemoryItem.superseded_by.is_(None),
-                MemoryItem.content.ilike(pattern),
+                MemoryItem.content.ilike(f"%{q}%"),
             )
             .order_by(MemoryItem.importance.desc(), MemoryItem.created_at.desc())
             .limit(20)
@@ -257,7 +256,7 @@ async def search_memory(
             select(MemoryEpisode)
             .where(
                 MemoryEpisode.user_id == user_id,
-                MemoryEpisode.summary.ilike(pattern),
+                MemoryEpisode.summary.ilike(f"%{q}%"),
             )
             .order_by(MemoryEpisode.created_at.desc())
             .limit(10)

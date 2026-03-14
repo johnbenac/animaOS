@@ -64,9 +64,11 @@ def _make_engine() -> Engine:
         )
 
         @event.listens_for(eng, "connect")
-        def _set_sqlcipher_key(dbapi_connection, connection_record):  # type: ignore[no-untyped-def]
+        # type: ignore[no-untyped-def]
+        def _set_sqlcipher_key(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA key = ?", (passphrase,))
+            escaped = passphrase.replace("'", "''")
+            cursor.execute(f"PRAGMA key = '{escaped}'")
             cursor.close()
 
         logger.info("Database encryption enabled (SQLCipher).")

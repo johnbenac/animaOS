@@ -141,7 +141,8 @@ async def scan_contradictions(
 
     for category in ("fact", "preference", "goal", "relationship"):
         with factory() as db:
-            items = get_memory_items(db, user_id=user_id, category=category, limit=100)
+            items = get_memory_items(
+                db, user_id=user_id, category=category, limit=100)
             if len(items) < 2:
                 continue
 
@@ -151,13 +152,19 @@ async def scan_contradictions(
             pairs: list[tuple[MemoryItem, MemoryItem]] = []
             for i, newer_item in enumerate(items):
                 for older_item in items[i + 1:]:
-                    sim = _similarity(older_item.content, newer_item.content)
+                    sim = _similarity(
+                        older_item.content,
+                        newer_item.content,
+                    )
                     if 0.3 < sim < 0.95:  # Similar but not duplicate
                         pairs.append((older_item, newer_item))
 
             for item_a, item_b in pairs[:10]:  # Cap per category
                 found += 1
-                resolution = await _check_contradiction(item_a.content, item_b.content)
+                resolution = await _check_contradiction(
+                    item_a.content,
+                    item_b.content,
+                )
                 if resolution is None:
                     continue
 
@@ -214,11 +221,12 @@ async def synthesize_profile(
     merged_count = 0
 
     with factory() as db:
-        facts = get_memory_items(db, user_id=user_id, category="fact", limit=50)
+        facts = get_memory_items(
+            db, user_id=user_id, category="fact", limit=50)
         if len(facts) < 2:
             return 0
 
-        merges = await _call_profile_synthesis(facts)
+        merges = await _call_profile_synthesis(facts, user_id=user_id)
         for merge in merges:
             old_ids = merge.get("old_ids", [])
             merged_content = merge.get("merged", "")
@@ -263,9 +271,11 @@ async def _check_contradiction(
         from anima_server.services.agent.consolidation import _parse_json_array
 
         llm = create_llm()
-        prompt = CONTRADICTION_PROMPT.format(memory_a=content_a, memory_b=content_b)
+        prompt = CONTRADICTION_PROMPT.format(
+            memory_a=content_a, memory_b=content_b)
         response = await llm.ainvoke([
-            SystemMessage(content="You check memory consistency. Respond only with JSON."),
+            SystemMessage(
+                content="You check memory consistency. Respond only with JSON."),
             HumanMessage(content=prompt),
         ])
         content = getattr(response, "content", "")
@@ -285,19 +295,21 @@ async def _check_contradiction(
         return None
 
 
-async def _call_profile_synthesis(facts: list[MemoryItem]) -> list[dict]:
+async def _call_profile_synthesis(facts: list[MemoryItem], *, user_id: int = 0) -> list[dict]:
     """Ask LLM to identify mergeable facts."""
     try:
         from anima_server.services.agent.llm import create_llm
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.consolidation import _parse_json_array
 
-        facts_text = "\n".join(f"[id={f.id}] {f.content}" for f in facts)
+        facts_text = "\n".join(
+            f"[id={f.id}] {f.content}" for f in facts)
         prompt = PROFILE_SYNTHESIS_PROMPT.format(facts=facts_text)
 
         llm = create_llm()
         response = await llm.ainvoke([
-            SystemMessage(content="You synthesize user profiles. Respond only with JSON."),
+            SystemMessage(
+                content="You synthesize user profiles. Respond only with JSON."),
             HumanMessage(content=prompt),
         ])
         content = getattr(response, "content", "")

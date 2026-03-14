@@ -80,7 +80,8 @@ def build_runtime_memory_blocks(
     if current_focus_block is not None:
         blocks.append(current_focus_block)
 
-    summary_block = build_thread_summary_block(db, thread_id=thread_id)
+    summary_block = build_thread_summary_block(
+        db, thread_id=thread_id, user_id=user_id)
     if summary_block is not None:
         blocks.append(summary_block)
 
@@ -155,11 +156,13 @@ def build_facts_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items_scored(db, user_id=user_id, category="fact", limit=30)
+    items = get_memory_items_scored(
+        db, user_id=user_id, category="fact", limit=30)
     if not items:
         return None
     touch_memory_items(db, items)
-    value = "\n".join(f"- {item.content}" for item in items)
+    value = "\n".join(
+        f"- {item.content}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -174,11 +177,13 @@ def build_preferences_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items_scored(db, user_id=user_id, category="preference", limit=20)
+    items = get_memory_items_scored(
+        db, user_id=user_id, category="preference", limit=20)
     if not items:
         return None
     touch_memory_items(db, items)
-    value = "\n".join(f"- {item.content}" for item in items)
+    value = "\n".join(
+        f"- {item.content}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -193,11 +198,13 @@ def build_goals_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items_scored(db, user_id=user_id, category="goal", limit=15)
+    items = get_memory_items_scored(
+        db, user_id=user_id, category="goal", limit=15)
     if not items:
         return None
     touch_memory_items(db, items)
-    value = "\n".join(f"- {item.content}" for item in items)
+    value = "\n".join(
+        f"- {item.content}" for item in items)
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -239,7 +246,8 @@ def build_tasks_memory_block(
                 overdue.append(t.text)
         lines.append(line)
 
-    header_parts = [f"{len(open_tasks)} open task{'s' if len(open_tasks) != 1 else ''}"]
+    header_parts = [
+        f"{len(open_tasks)} open task{'s' if len(open_tasks) != 1 else ''}"]
     if overdue:
         header_parts.append(f"{len(overdue)} overdue")
     header = ", ".join(header_parts) + f" (today: {today})"
@@ -260,11 +268,13 @@ def build_relationships_memory_block(
     *,
     user_id: int,
 ) -> MemoryBlock | None:
-    items = get_memory_items_scored(db, user_id=user_id, category="relationship", limit=15)
+    items = get_memory_items_scored(
+        db, user_id=user_id, category="relationship", limit=15)
     if not items:
         return None
     touch_memory_items(db, items)
-    value = "\n".join(f"- {item.content}" for item in items)
+    value = "\n".join(
+        f"- {item.content}" for item in items)
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -293,6 +303,7 @@ def build_thread_summary_block(
     db: Session,
     *,
     thread_id: int,
+    user_id: int | None = None,
 ) -> MemoryBlock | None:
     summary_row = db.scalar(
         select(AgentMessage)
@@ -307,7 +318,13 @@ def build_thread_summary_block(
     if summary_row is None:
         return None
 
-    summary_text = (summary_row.content_text or "").strip()
+    # Resolve user_id for decryption
+    uid = user_id
+    if uid is None:
+        thread = db.get(AgentThread, thread_id)
+        uid = thread.user_id if thread else 0
+
+    summary_text = summary_row.content_text.strip() if summary_row.content_text else ""
     if not summary_text:
         return None
 
@@ -334,7 +351,8 @@ def build_episodes_memory_block(
     lines: list[str] = []
     for ep in reversed(episodes):
         topics = ", ".join(ep.topics_json or [])
-        lines.append(f"- {ep.date}: {ep.summary} (Topics: {topics})")
+        lines.append(
+            f"- {ep.date}: {ep.summary} (Topics: {topics})")
     return MemoryBlock(
         label="recent_episodes",
         description="Recent conversation experiences with the user.",
@@ -409,11 +427,16 @@ def build_self_model_memory_blocks(
     result: list[MemoryBlock] = []
 
     section_config = [
-        ("identity", "self_identity", "Who I am in this relationship — my self-understanding."),
-        ("inner_state", "self_inner_state", "My current cognitive state — what I'm thinking about, what's unresolved."),
-        ("working_memory", "self_working_memory", "Things I'm holding in mind across sessions."),
-        ("growth_log", "self_growth_log", "How I've evolved — my recent changes and why."),
-        ("intentions", "self_intentions", "My active goals and learned behavioral rules."),
+        ("identity", "self_identity",
+         "Who I am in this relationship — my self-understanding."),
+        ("inner_state", "self_inner_state",
+         "My current cognitive state — what I'm thinking about, what's unresolved."),
+        ("working_memory", "self_working_memory",
+         "Things I'm holding in mind across sessions."),
+        ("growth_log", "self_growth_log",
+         "How I've evolved — my recent changes and why."),
+        ("intentions", "self_intentions",
+         "My active goals and learned behavioral rules."),
     ]
 
     for section, label, description in section_config:

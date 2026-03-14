@@ -37,11 +37,9 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    from anima_server.db.session import engine as app_engine
+
+    connectable = app_engine
 
     with connectable.connect() as connection:
         context.configure(

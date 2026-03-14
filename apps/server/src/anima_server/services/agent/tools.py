@@ -27,7 +27,8 @@ class _SimpleSchema:
 def tool(func: Callable[..., Any]) -> Any:
     """Minimal tool decorator replacing langchain_core.tools.tool."""
     func.name = func.__name__  # type: ignore[attr-defined]
-    func.description = (func.__doc__ or "").strip()  # type: ignore[attr-defined]
+    # type: ignore[attr-defined]
+    func.description = (func.__doc__ or "").strip()
     func.args_schema = _build_args_schema(func)  # type: ignore[attr-defined]
     return func
 
@@ -213,7 +214,7 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     )
     ctx.db.add(task)
     ctx.db.flush()
-    result = f"Task created: {task.text}"
+    result = f"Task created: {normalized_text}"
     if task.due_date:
         result += f" (due {task.due_date})"
     return result
@@ -232,7 +233,8 @@ def list_tasks(include_done: str = "false") -> str:
     query = select(Task).where(Task.user_id == ctx.user_id)
     if include_done.lower() not in ("true", "yes", "1"):
         query = query.where(Task.done == False)  # noqa: E712
-    query = query.order_by(Task.done, Task.priority.desc(), Task.created_at.desc())
+    query = query.order_by(
+        Task.done, Task.priority.desc(), Task.created_at.desc())
     tasks = list(ctx.db.scalars(query).all())
 
     if not tasks:
@@ -279,7 +281,8 @@ def complete_task(text: str) -> str:
         text_words = set(text_lower.split())
         task_words = set(task_lower.split())
         if text_words and task_words:
-            overlap = len(text_words & task_words) / max(len(text_words), len(task_words))
+            overlap = len(text_words & task_words) / \
+                max(len(text_words), len(task_words))
             if overlap > best_score:
                 best_score = overlap
                 best_task = t
@@ -328,7 +331,8 @@ def recall_memory(query: str, category: str = "") -> str:
         content_lower = item.content.lower()
         # Exact substring match scores highest
         if query_lower in content_lower:
-            scored.append((1.0, item.content, item.category))
+            scored.append(
+                (1.0, item.content, item.category))
             continue
         # Word overlap
         query_words = set(query_lower.split())
@@ -348,14 +352,16 @@ def recall_memory(query: str, category: str = "") -> str:
     for ep in episodes:
         summary_lower = ep.summary.lower()
         if query_lower in summary_lower:
-            scored.append((0.9, f"[Episode {ep.date}] {ep.summary}", "episode"))
+            scored.append(
+                (0.9, f"[Episode {ep.date}] {ep.summary}", "episode"))
             continue
         query_words = set(query_lower.split())
         summary_words = set(summary_lower.split())
         if query_words and summary_words:
             overlap = len(query_words & summary_words) / len(query_words)
             if overlap >= 0.5:
-                scored.append((overlap, f"[Episode {ep.date}] {ep.summary}", "episode"))
+                scored.append(
+                    (overlap, f"[Episode {ep.date}] {ep.summary}", "episode"))
 
     if not scored:
         return f"No memories found matching: {query}"
@@ -385,7 +391,8 @@ def get_tool_summaries(tools: Sequence[Any] | None = None) -> list[str]:
     summaries: list[str] = []
 
     for agent_tool in resolved_tools:
-        name = getattr(agent_tool, "name", "") or getattr(agent_tool, "__name__", "tool")
+        name = getattr(agent_tool, "name", "") or getattr(
+            agent_tool, "__name__", "tool")
         description = getattr(agent_tool, "description", "") or ""
         normalized_description = " ".join(description.strip().split())
         if normalized_description:

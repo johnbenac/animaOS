@@ -68,7 +68,8 @@ async def generate_embedding(text: str) -> list[float] | None:
     try:
         validate_provider_configuration(provider)
     except LLMConfigError as exc:
-        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
+        logger.debug(
+            "Skipping embedding generation for provider %s: %s", provider, exc)
         return None
 
     try:
@@ -77,10 +78,12 @@ async def generate_embedding(text: str) -> list[float] | None:
         # openrouter, vllm — all OpenAI-compatible
         return await _embed_openai_compatible(text)
     except LLMConfigError as exc:
-        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
+        logger.debug(
+            "Skipping embedding generation for provider %s: %s", provider, exc)
         return None
     except Exception:  # noqa: BLE001
-        logger.exception("Embedding generation failed for provider %s", provider)
+        logger.exception(
+            "Embedding generation failed for provider %s", provider)
         return None
 
 
@@ -172,7 +175,8 @@ async def semantic_search(
         )
         if chroma_results:
             # Resolve to actual MemoryItem objects
-            item_ids = [r["id"] for r in chroma_results if r["similarity"] >= similarity_threshold]
+            item_ids = [
+                r["id"] for r in chroma_results if r["similarity"] >= similarity_threshold]
             if item_ids:
                 items_by_id = {
                     item.id: item
@@ -298,13 +302,15 @@ def sync_to_vector_store(
         from anima_server.services.agent.vector_store import rebuild_user_index
 
         index_data = [
-            (item.id, item.content, item.embedding_json, item.category, item.importance)
+            (item.id, item.content,
+             item.embedding_json, item.category, item.importance)
             for item in items
             if isinstance(item.embedding_json, list) and item.embedding_json
         ]
         return rebuild_user_index(user_id, index_data)
     except Exception:  # noqa: BLE001
-        logger.exception("Failed to sync embeddings to vector store for user %d", user_id)
+        logger.exception(
+            "Failed to sync embeddings to vector store for user %d", user_id)
         return 0
 
 

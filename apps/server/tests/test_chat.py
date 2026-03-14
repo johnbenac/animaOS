@@ -121,7 +121,8 @@ def test_chat_requires_unlocked_session() -> None:
         )
 
     assert response.status_code == 401
-    assert response.json() == {"error": "Session locked. Please sign in again."}
+    assert response.json() == {
+        "error": "Session locked. Please sign in again."}
 
 
 def test_chat_returns_scaffold_response_and_tracks_turns() -> None:
@@ -285,19 +286,20 @@ def test_chat_persists_runtime_rows() -> None:
             finally:
                 session.close()
 
-    assert response.status_code == 200
-    assert thread.user_id == user_id
-    assert run.thread_id == thread.id
-    assert run.status == "completed"
-    assert run.mode == "blocking"
-    assert run.stop_reason == "terminal_tool"
-    assert step.run_id == run.id
-    assert step.step_index == 0
-    assert thread.next_message_sequence == 4
-    assert [message.role for message in messages] == ["user", "assistant", "tool"]
-    assert messages[0].content_text == "hello"
-    assert "turn 1" in (messages[1].content_text or "")
-    assert "turn 1" in (messages[2].content_text or "")
+            assert response.status_code == 200
+            assert thread.user_id == user_id
+            assert run.thread_id == thread.id
+            assert run.status == "completed"
+            assert run.mode == "blocking"
+            assert run.stop_reason == "terminal_tool"
+            assert step.run_id == run.id
+            assert step.step_index == 0
+            assert thread.next_message_sequence == 4
+            assert [message.role for message in messages] == [
+                "user", "assistant", "tool"]
+            assert messages[0].content_text == "hello"
+            assert "turn 1" in (messages[1].content_text or "")
+            assert "turn 1" in (messages[2].content_text or "")
 
 
 def test_chat_stream_returns_sse_events() -> None:
@@ -311,7 +313,8 @@ def test_chat_stream_returns_sse_events() -> None:
                 "POST",
                 "/api/chat",
                 headers=headers,
-                json={"message": "stream this", "userId": user_id, "stream": True},
+                json={"message": "stream this",
+                      "userId": user_id, "stream": True},
             ) as response:
                 body = "".join(response.iter_text())
 
@@ -477,7 +480,8 @@ def test_chat_ollama_provider_uses_live_adapter_surface(monkeypatch) -> None:
     assert response.json()["response"] == "hello from ollama adapter"
     assert "private reasoning" not in response.json()["response"]
     assert fake_client.tool_choice == "required"
-    tool_names = [getattr(tool, "name", "") for tool in fake_client.bound_tools]
+    tool_names = [getattr(tool, "name", "")
+                  for tool in fake_client.bound_tools]
     assert "current_datetime" in tool_names
     assert "send_message" in tool_names
     assert "note_to_self" in tool_names
@@ -621,7 +625,8 @@ def test_chat_compacts_thread_context_into_summary() -> None:
     assert second.status_code == 200
     assert third.status_code == 200
     assert "turn 3" in third.json()["response"]
-    summary_messages = [message for message in in_context_messages if message.role == "summary"]
+    summary_messages = [
+        message for message in in_context_messages if message.role == "summary"]
     assert len(summary_messages) == 1
     assert "Conversation summary:" in (summary_messages[0].content_text or "")
     assert thread.next_message_sequence == all_messages[-1].sequence_id + 1

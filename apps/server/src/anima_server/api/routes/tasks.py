@@ -36,7 +36,8 @@ async def list_tasks(
 ) -> list[TaskResponse]:
     session = require_unlocked_session(request)
     if session.user_id != userId:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session user mismatch.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Session user mismatch.")
 
     tasks = list(
         db.scalars(
@@ -56,7 +57,8 @@ async def create_task(
 ) -> TaskResponse:
     session = require_unlocked_session(request)
     if session.user_id != payload.userId:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Session user mismatch.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Session user mismatch.")
 
     task = Task(
         user_id=payload.userId,
@@ -81,7 +83,8 @@ async def update_task(
 
     task = db.get(Task, task_id)
     if task is None or task.user_id != session.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     if payload.text is not None:
         task.text = payload.text
@@ -109,7 +112,8 @@ async def delete_task(
 
     task = db.get(Task, task_id)
     if task is None or task.user_id != session.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
 
     db.delete(task)
     db.commit()

@@ -158,8 +158,9 @@ def synthesize_emotional_context(
         )
         if signal.topic:
             line += f" re: {signal.topic}"
-        if signal.evidence and len(signal.evidence) < 80:
-            line += f" — {signal.evidence}"
+        evidence_text = signal.evidence
+        if evidence_text and len(evidence_text) < 80:
+            line += f" — {evidence_text}"
 
         if total_len + len(line) > budget:
             break
@@ -172,9 +173,11 @@ def synthesize_emotional_context(
     # Determine dominant emotion
     emotion_counts: dict[str, float] = {}
     for s in signals[:5]:
-        emotion_counts[s.emotion] = emotion_counts.get(s.emotion, 0) + s.confidence
+        emotion_counts[s.emotion] = emotion_counts.get(
+            s.emotion, 0) + s.confidence
 
-    dominant = max(emotion_counts, key=emotion_counts.get) if emotion_counts else "calm"
+    dominant = max(
+        emotion_counts, key=emotion_counts.get) if emotion_counts else "calm"
 
     # Check trajectory
     if len(signals) >= 2:

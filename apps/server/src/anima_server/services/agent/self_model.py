@@ -21,7 +21,8 @@ from anima_server.models import SelfModelBlock
 
 logger = logging.getLogger(__name__)
 
-SECTIONS = ("identity", "inner_state", "working_memory", "growth_log", "intentions")
+SECTIONS = ("identity", "inner_state", "working_memory",
+            "growth_log", "intentions")
 
 _SEED_IDENTITY = """# Who I Am
 <!-- certainty: low -->
@@ -153,10 +154,12 @@ def set_self_model_block(
         and existing.content.strip()
     ):
         # Check if the proposed content is substantially different
-        existing_words = set(existing.content.lower().split())
+        existing_plaintext = existing.content
+        existing_words = set(existing_plaintext.lower().split())
         new_words = set(content.lower().split())
         if existing_words and new_words:
-            overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
+            overlap = len(existing_words & new_words) / \
+                max(len(existing_words), len(new_words))
             if overlap < 0.5:
                 # Too different — log to growth log instead of overwriting
                 logger.info(
@@ -213,8 +216,10 @@ def append_growth_log_entry(
     formatted = f"\n\n### {date_str} — {entry}"
 
     # Dedup: skip if a substantially similar entry already exists
-    if block is not None and _is_duplicate_growth_entry(block.content, entry):
-        return None
+    if block is not None:
+        block_content = block.content
+        if _is_duplicate_growth_entry(block_content, entry):
+            return None
 
     if block is None:
         block = SelfModelBlock(
@@ -233,7 +238,8 @@ def append_growth_log_entry(
     entries = [e.strip() for e in content.split("### ") if e.strip()]
     if len(entries) > max_entries:
         entries = entries[-max_entries:]
-    block.content = "\n\n".join(f"### {e}" for e in entries) if entries else ""
+    new_content = "\n\n".join(f"### {e}" for e in entries) if entries else ""
+    block.content = new_content
     block.version += 1
     block.updated_by = "sleep_time"
     block.updated_at = now
@@ -257,7 +263,8 @@ def _is_duplicate_growth_entry(existing_content: str, new_entry: str) -> bool:
         existing_words = set(entry_text.lower().split())
         if not existing_words:
             continue
-        overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
+        overlap = len(new_words & existing_words) / \
+            max(len(new_words), len(existing_words))
         if overlap > 0.7:
             return True
     return False
@@ -297,7 +304,8 @@ def ensure_self_model_exists(
 ) -> None:
     """Ensure self-model exists for user, seeding if necessary."""
     count = db.scalar(
-        select(SelfModelBlock.id).where(SelfModelBlock.user_id == user_id).limit(1)
+        select(SelfModelBlock.id).where(
+            SelfModelBlock.user_id == user_id).limit(1)
     )
     if count is None:
         seed_self_model(db, user_id=user_id)
@@ -316,7 +324,8 @@ def expire_working_memory_items(
         return 0
 
     today = datetime.now(UTC).date()
-    lines = block.content.split("\n")
+    content = block.content
+    lines = content.split("\n")
     kept: list[str] = []
     removed = 0
 

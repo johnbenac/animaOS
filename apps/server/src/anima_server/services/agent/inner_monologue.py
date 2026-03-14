@@ -186,8 +186,10 @@ async def run_quick_reflection(
 
             ensure_self_model_exists(db, user_id=user_id)
 
-            inner_state_block = get_self_model_block(db, user_id=user_id, section="inner_state")
-            working_memory_block = get_self_model_block(db, user_id=user_id, section="working_memory")
+            inner_state_block = get_self_model_block(
+                db, user_id=user_id, section="inner_state")
+            working_memory_block = get_self_model_block(
+                db, user_id=user_id, section="working_memory")
 
             # Get recent episodes
             from sqlalchemy import select
@@ -327,8 +329,10 @@ async def run_deep_monologue(
                 for ep in reversed(episodes)
             ) or "No episodes yet."
 
-            facts = get_memory_items(db, user_id=user_id, category="fact", limit=30)
-            facts_text = "\n".join(f"- {f.content}" for f in facts) or "No facts yet."
+            facts = get_memory_items(
+                db, user_id=user_id, category="fact", limit=30)
+            facts_text = "\n".join(
+                f"- {f.content}" for f in facts) or "No facts yet."
 
             signals = get_recent_signals(db, user_id=user_id, limit=10)
             signals_text = "\n".join(
