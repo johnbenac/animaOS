@@ -21,6 +21,9 @@ import {
   type SelfModelSection,
   type TaskItem,
   type User,
+  type DbTableInfo,
+  type DbTableData,
+  type DbQueryResult,
 } from "@anima/api-client";
 import { API_BASE } from "./runtime";
 
@@ -69,6 +72,9 @@ export const api: ApiClient & {
 };
 
 export type {
+  DbTableInfo,
+  DbTableData,
+  DbQueryResult,
   AgentConfig,
   AgentResponse,
   AuthResponse,

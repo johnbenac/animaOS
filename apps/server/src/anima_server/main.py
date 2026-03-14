@@ -14,6 +14,7 @@ from .api.routes.memory import router as memory_router
 from .api.routes.soul import router as soul_router
 from .api.routes.tasks import router as tasks_router
 from .api.routes.users import router as users_router
+from .api.routes.db import router as db_router
 from .api.routes.vault import router as vault_router
 from .config import settings
 from .services.core import ensure_core_manifest
@@ -86,6 +87,7 @@ def create_app() -> FastAPI:
     app.include_router(config_router)
     app.include_router(consciousness_router)
     app.include_router(core_router)
+    app.include_router(db_router)
     app.include_router(memory_router)
     app.include_router(soul_router)
     app.include_router(tasks_router)

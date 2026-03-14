@@ -188,6 +188,24 @@ export interface MemorySearchResult {
   importance: number;
 }
 
+export interface DbTableInfo {
+  name: string;
+  rowCount: number;
+}
+
+export interface DbTableData {
+  table: string;
+  columns: string[];
+  rows: Record<string, unknown>[];
+  total: number;
+}
+
+export interface DbQueryResult {
+  columns: string[];
+  rows: Record<string, unknown>[];
+  rowCount: number;
+}
+
 export interface MemoryOverviewData {
   totalItems: number;
   factCount: number;
@@ -294,7 +312,11 @@ export function createApiClient(options: ApiClientOptions) {
           throw new Error(payload.error);
         }
 
-        if (event === "chunk" && typeof payload.content === "string" && payload.content) {
+        if (
+          event === "chunk" &&
+          typeof payload.content === "string" &&
+          payload.content
+        ) {
           sawVisibleContent = true;
           yield payload.content;
           continue;
@@ -322,7 +344,11 @@ export function createApiClient(options: ApiClientOptions) {
       }
     }
 
-    if (!sawVisibleContent && !emittedTerminalToolOutput && terminalToolOutput) {
+    if (
+      !sawVisibleContent &&
+      !emittedTerminalToolOutput &&
+      terminalToolOutput
+    ) {
       yield terminalToolOutput;
     }
   }
@@ -374,11 +400,14 @@ export function createApiClient(options: ApiClientOptions) {
           method: "DELETE",
           body: { userId },
         }),
-      brief: (userId: number) => request<DailyBrief>(`/chat/brief?userId=${userId}`),
-      greeting: (userId: number) => request<Greeting>(`/chat/greeting?userId=${userId}`),
+      brief: (userId: number) =>
+        request<DailyBrief>(`/chat/brief?userId=${userId}`),
+      greeting: (userId: number) =>
+        request<Greeting>(`/chat/greeting?userId=${userId}`),
       nudges: (userId: number) =>
         request<{ nudges: Nudge[] }>(`/chat/nudges?userId=${userId}`),
-      home: (userId: number) => request<HomeData>(`/chat/home?userId=${userId}`),
+      home: (userId: number) =>
+        request<HomeData>(`/chat/home?userId=${userId}`),
       consolidate: (userId: number) =>
         request<{
           filesProcessed: number;
@@ -506,16 +535,17 @@ export function createApiClient(options: ApiClientOptions) {
           `/consciousness/${userId}/emotions?limit=${limit}`,
         ),
       getIntentions: (userId: number) =>
-        request<{ content: string }>(
-          `/consciousness/${userId}/intentions`,
-        ),
+        request<{ content: string }>(`/consciousness/${userId}/intentions`),
     },
     vault: {
       export: (passphrase: string) =>
-        request<{ filename: string; vault: string; size: number }>("/vault/export", {
-          method: "POST",
-          body: { passphrase },
-        }),
+        request<{ filename: string; vault: string; size: number }>(
+          "/vault/export",
+          {
+            method: "POST",
+            body: { passphrase },
+          },
+        ),
       import: (passphrase: string, vault: string) =>
         request<VaultImportResponse>("/vault/import", {
           method: "POST",
@@ -524,7 +554,21 @@ export function createApiClient(options: ApiClientOptions) {
     },
     system: {
       health: () =>
-        request<{ status: string; service?: string; environment?: string }>("/health"),
+        request<{ status: string; service?: string; environment?: string }>(
+          "/health",
+        ),
+    },
+    db: {
+      tables: () => request<DbTableInfo[]>("/db/tables"),
+      tableRows: (tableName: string, limit = 100, offset = 0) =>
+        request<DbTableData>(
+          `/db/tables/${encodeURIComponent(tableName)}?limit=${limit}&offset=${offset}`,
+        ),
+      query: (sql: string) =>
+        request<DbQueryResult>("/db/query", {
+          method: "POST",
+          body: { sql },
+        }),
     },
   };
 }

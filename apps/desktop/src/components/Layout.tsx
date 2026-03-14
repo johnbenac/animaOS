@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: "/soul", label: "Soul" },
   { to: "/consciousness", label: "Mind" },
   { to: "/settings", label: "Settings" },
+  { to: "/database", label: "DB" },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
