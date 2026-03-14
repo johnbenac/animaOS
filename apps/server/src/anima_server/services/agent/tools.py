@@ -290,6 +290,80 @@ def complete_task(text: str) -> str:
     return f"Completed: {best_task.text}"
 
 
+@tool
+def recall_memory(query: str, category: str = "") -> str:
+    """Search your memory for information about the user. Use this when the user asks
+    what you remember, or when you need to look up something specific about them.
+    Returns matching memories ranked by relevance.
+    Optional category filter: fact, preference, goal, relationship (or empty for all).
+    Examples:
+    - "what do you remember about my sister?" -> query="sister"
+    - "what are my goals?" -> query="goals", category="goal"
+    """
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.memory_store import get_memory_items
+    from anima_server.models import MemoryItem, MemoryEpisode
+    from sqlalchemy import select
+
+    ctx = get_tool_context()
+    query_lower = query.lower().strip()
+
+    if not query_lower:
+        return "Please provide a search query."
+
+    cat = category.strip().lower() if category else None
+    if cat and cat not in ("fact", "preference", "goal", "relationship"):
+        cat = None
+
+    # Search memory items by text match
+    items = get_memory_items(
+        ctx.db, user_id=ctx.user_id, category=cat, limit=100,
+    )
+    scored: list[tuple[float, str, str]] = []
+    for item in items:
+        content_lower = item.content.lower()
+        # Exact substring match scores highest
+        if query_lower in content_lower:
+            scored.append((1.0, item.content, item.category))
+            continue
+        # Word overlap
+        query_words = set(query_lower.split())
+        content_words = set(content_lower.split())
+        if query_words and content_words:
+            overlap = len(query_words & content_words) / len(query_words)
+            if overlap >= 0.5:
+                scored.append((overlap, item.content, item.category))
+
+    # Also search episodes
+    episodes = list(ctx.db.scalars(
+        select(MemoryEpisode)
+        .where(MemoryEpisode.user_id == ctx.user_id)
+        .order_by(MemoryEpisode.created_at.desc())
+        .limit(50)
+    ).all())
+    for ep in episodes:
+        summary_lower = ep.summary.lower()
+        if query_lower in summary_lower:
+            scored.append((0.9, f"[Episode {ep.date}] {ep.summary}", "episode"))
+            continue
+        query_words = set(query_lower.split())
+        summary_words = set(summary_lower.split())
+        if query_words and summary_words:
+            overlap = len(query_words & summary_words) / len(query_words)
+            if overlap >= 0.5:
+                scored.append((overlap, f"[Episode {ep.date}] {ep.summary}", "episode"))
+
+    if not scored:
+        return f"No memories found matching: {query}"
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    lines: list[str] = []
+    for score, content, cat_label in scored[:10]:
+        lines.append(f"- [{cat_label}] {content}")
+
+    return f"Found {len(scored)} matching memories:\n" + "\n".join(lines)
+
+
 def get_tools() -> list[Any]:
     """Return all tools available to the agent."""
     return [
@@ -297,6 +371,7 @@ def get_tools() -> list[Any]:
         note_to_self, dismiss_note, save_to_memory,
         set_intention, complete_goal,
         create_task, list_tasks, complete_task,
+        recall_memory,
     ]
 
 

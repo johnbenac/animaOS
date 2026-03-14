@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from collections.abc import Generator
 from contextlib import contextmanager
 
@@ -1024,3 +1025,184 @@ def test_executor_rejects_parse_error_args() -> None:
     )
     assert result.is_error is True
     assert "malformed" in result.output.lower()
+
+
+# --- Recall Memory Tool Tests ---
+
+
+def test_recall_memory_exact_match() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.models import MemoryItem
+
+        db.add(MemoryItem(user_id=user.id, content="User's sister is named Alice", category="fact", importance=3, source="extraction"))
+        db.add(MemoryItem(user_id=user.id, content="User likes hiking on weekends", category="preference", importance=2, source="extraction"))
+        db.flush()
+
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            result = recall_memory("sister")
+            assert "Alice" in result
+            assert "sister" in result.lower()
+        finally:
+            clear_tool_context()
+
+
+def test_recall_memory_no_match() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            result = recall_memory("quantum physics")
+            assert "no memories found" in result.lower()
+        finally:
+            clear_tool_context()
+
+
+def test_recall_memory_category_filter() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.models import MemoryItem
+
+        db.add(MemoryItem(user_id=user.id, content="User prefers dark mode", category="preference", importance=2, source="extraction"))
+        db.add(MemoryItem(user_id=user.id, content="User works at a startup", category="fact", importance=3, source="extraction"))
+        db.flush()
+
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            # Search with category filter — only preferences
+            result = recall_memory("dark mode", category="preference")
+            assert "dark mode" in result.lower()
+        finally:
+            clear_tool_context()
+
+
+def test_recall_memory_episode_search() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.models import MemoryEpisode
+
+        db.add(MemoryEpisode(
+            user_id=user.id, thread_id=thread.id,
+            date="2026-03-10", summary="Discussed weekend hiking plans and trail recommendations",
+            significance_score=3,
+        ))
+        db.flush()
+
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            result = recall_memory("hiking")
+            assert "hiking" in result.lower()
+            assert "Episode" in result
+        finally:
+            clear_tool_context()
+
+
+def test_recall_memory_word_overlap_match() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.models import MemoryItem
+
+        db.add(MemoryItem(user_id=user.id, content="User enjoys running marathons every spring", category="preference", importance=3, source="extraction"))
+        db.flush()
+
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            result = recall_memory("running marathons")
+            assert "marathon" in result.lower()
+        finally:
+            clear_tool_context()
+
+
+def test_recall_memory_empty_query() -> None:
+    with _db_session() as db:
+        user, thread = _setup(db)
+        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
+        try:
+            from anima_server.services.agent.tools import recall_memory
+            result = recall_memory("")
+            assert "provide" in result.lower()
+        finally:
+            clear_tool_context()
+
+
+# --- Encrypted Core Enforcement Tests ---
+
+
+def test_encrypted_core_requires_passphrase() -> None:
+    """core_require_encryption=True without passphrase should raise RuntimeError."""
+    from unittest.mock import patch
+
+    with patch("anima_server.db.session.settings") as mock_settings:
+        mock_settings.database_url = "sqlite://"
+        mock_settings.database_echo = False
+        mock_settings.core_passphrase = ""
+        mock_settings.core_require_encryption = True
+
+        from anima_server.db.session import _make_engine
+
+        with pytest.raises(RuntimeError, match="ANIMA_CORE_PASSPHRASE is not set"):
+            _make_engine()
+
+
+def test_encrypted_core_requires_sqlcipher() -> None:
+    """core_require_encryption=True with passphrase but no sqlcipher3 should raise RuntimeError."""
+    import importlib
+    from unittest.mock import patch
+
+    with patch("anima_server.db.session.settings") as mock_settings:
+        mock_settings.database_url = "sqlite://"
+        mock_settings.database_echo = False
+        mock_settings.core_passphrase = "test-secret"
+        mock_settings.core_require_encryption = True
+
+        # Block sqlcipher3 import
+        import builtins
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "sqlcipher3":
+                raise ImportError("mocked")
+            return real_import(name, *args, **kwargs)
+
+        from anima_server.db.session import _make_engine
+
+        with patch.object(builtins, "__import__", side_effect=mock_import):
+            with pytest.raises(RuntimeError, match="sqlcipher3 is not installed"):
+                _make_engine()
+
+
+def test_encrypted_core_fallback_without_enforcement() -> None:
+    """Without core_require_encryption, missing sqlcipher3 should fall back gracefully."""
+    from unittest.mock import patch
+    import builtins
+
+    with patch("anima_server.db.session.settings") as mock_settings:
+        mock_settings.database_url = "sqlite://"
+        mock_settings.database_echo = False
+        mock_settings.core_passphrase = "test-secret"
+        mock_settings.core_require_encryption = False
+
+        real_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "sqlcipher3":
+                raise ImportError("mocked")
+            return real_import(name, *args, **kwargs)
+
+        from anima_server.db.session import _make_engine
+
+        with patch.object(builtins, "__import__", side_effect=mock_import):
+            eng = _make_engine()
+            assert eng is not None

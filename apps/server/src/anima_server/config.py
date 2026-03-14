@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     agent_stream_chunk_size: int = 48
     agent_background_memory_enabled: bool = True
     core_passphrase: str = ""
+    core_require_encryption: bool = False
     agent_extraction_model: str = ""
     agent_extraction_provider: str = ""
     agent_session_memory_max_notes: int = 20

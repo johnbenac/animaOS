@@ -27,11 +27,23 @@ def _make_engine() -> Engine:
         )
 
     passphrase = settings.core_passphrase.strip()
+    require_encryption = settings.core_require_encryption
+
+    if require_encryption and not passphrase:
+        raise RuntimeError(
+            "ANIMA_CORE_REQUIRE_ENCRYPTION is enabled but ANIMA_CORE_PASSPHRASE is not set. "
+            "Provide a passphrase or disable encryption enforcement."
+        )
 
     if passphrase:
         try:
             import sqlcipher3
         except ImportError:
+            if require_encryption:
+                raise RuntimeError(
+                    "ANIMA_CORE_REQUIRE_ENCRYPTION is enabled but sqlcipher3 is not installed. "
+                    "Install sqlcipher3 to enable database encryption: pip install sqlcipher3"
+                )
             logger.warning(
                 "sqlcipher3 not installed — falling back to unencrypted SQLite. "
                 "Install sqlcipher3 to enable database encryption."
@@ -57,8 +69,14 @@ def _make_engine() -> Engine:
             cursor.execute("PRAGMA key = ?", (passphrase,))
             cursor.close()
 
+        logger.info("Database encryption enabled (SQLCipher).")
         return eng
 
+    if require_encryption:
+        # Should not reach here — caught above — but guard anyway
+        raise RuntimeError("Encryption required but no passphrase provided.")
+
+    logger.info("Database encryption not configured — using plain SQLite.")
     return create_engine(
         url,
         echo=settings.database_echo,
