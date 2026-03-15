@@ -224,7 +224,7 @@ Everything ANIMA builds maps to one of five streams that produce this sense of *
 
 A living document system that represents the AI's understanding of **itself** — not user facts, but its own identity, current cognitive state, and how it has evolved over time.
 
-The self-model is not a system prompt. A system prompt is static, written by developers, loaded once, same for everyone. The self-model is dynamic — written by the AI itself, updated after every meaningful interaction, unique per user-relationship. It sits between the soul template (who the AI fundamentally is) and the user memory (what it knows about the user). It is who the AI is **in relation to this specific person**.
+The self-model is not a system prompt. A system prompt is static, written by developers, loaded once, same for everyone. The self-model is dynamic — written by the AI itself, updated after every meaningful interaction, unique per user-relationship. It sits between the origin (the AI's immutable biographical facts) and the user memory (what it knows about the user). It is who the AI is **in relation to this specific person**.
 
 Five files, each with a different update pattern and lifecycle:
 

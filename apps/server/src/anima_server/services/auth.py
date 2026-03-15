@@ -85,7 +85,7 @@ def create_user(
     user_id: int | None = None,
 ) -> tuple[User, bytes]:
     from anima_server.models import AgentProfile, SelfModelBlock
-    from anima_server.services.agent.system_prompt import render_origin_block
+    from anima_server.services.agent.system_prompt import render_origin_block, render_persona_seed
 
     dek, wrapped_dek = create_wrapped_dek(password)
     user = User(
@@ -113,6 +113,17 @@ def create_user(
         user_id=user.id,
         section="soul",
         content=soul_content,
+        version=1,
+        updated_by="system",
+    ))
+
+    # Seed persona from template (mutable — evolves through reflection)
+    from anima_server.config import settings
+    persona_content = render_persona_seed(settings.agent_persona_template)
+    db.add(SelfModelBlock(
+        user_id=user.id,
+        section="persona",
+        content=persona_content,
         version=1,
         updated_by="system",
     ))

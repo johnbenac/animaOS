@@ -16,6 +16,7 @@ from anima_server.services.agent.memory_blocks import MemoryBlock, serialize_mem
 @dataclass(frozen=True, slots=True)
 class SystemPromptContext:
     persona_template: str = "default"
+    persona_content: str = ""
     tool_summaries: Sequence[str] = field(default_factory=tuple)
     memory_blocks: Sequence[MemoryBlock] = field(default_factory=tuple)
     dynamic_identity: str = ""
@@ -55,16 +56,20 @@ def build_system_prompt(
             "now_iso": now.isoformat(),
         },
     )
-    persona = build_persona_prompt(resolved.persona_template)
+    persona = resolved.persona_content.strip() if resolved.persona_content.strip(
+    ) else build_persona_prompt(resolved.persona_template)
     dynamic_identity = resolved.dynamic_identity.strip()
     filtered_blocks = tuple(resolved.memory_blocks)
     if dynamic_identity:
         filtered_blocks = tuple(
-            block for block in filtered_blocks if block.label != "self_identity"
+            block for block in filtered_blocks
+            if block.label not in ("self_identity", "persona")
         )
     else:
-        dynamic_identity, filtered_blocks = split_prompt_memory_blocks(
+        dynamic_identity, persona_from_blocks, filtered_blocks = split_prompt_memory_blocks(
             filtered_blocks)
+        if persona_from_blocks:
+            persona = persona_from_blocks
 
     memory_blocks = serialize_memory_blocks(filtered_blocks)
     template_context = {
@@ -109,6 +114,15 @@ def build_persona_prompt(template_name: str) -> str:
     return render_template(template_path, {})
 
 
+def render_persona_seed(template_name: str) -> str:
+    """Render a persona template into content to be stored in the DB.
+
+    Used once at provisioning time. The stored content becomes the living
+    persona block that evolves through reflection.
+    """
+    return build_persona_prompt(template_name)
+
+
 def render_origin_block(
     agent_name: str = "Anima",
     creator_name: str = "",
@@ -129,8 +143,13 @@ def render_origin_block(
 
 def split_prompt_memory_blocks(
     memory_blocks: Sequence[MemoryBlock],
-) -> tuple[str, tuple[MemoryBlock, ...]]:
+) -> tuple[str, str, tuple[MemoryBlock, ...]]:
+    """Extract dynamic_identity and persona content from memory blocks.
+
+    Returns (dynamic_identity, persona_content, remaining_blocks).
+    """
     dynamic_identity = ""
+    persona_content = ""
     filtered_blocks: list[Any] = []
 
     for block in memory_blocks:
@@ -139,9 +158,14 @@ def split_prompt_memory_blocks(
             continue
         if block.label == "self_identity":
             continue
+        if block.label == "persona" and not persona_content:
+            persona_content = block.value.strip()
+            continue
+        if block.label == "persona":
+            continue
         filtered_blocks.append(block)
 
-    return dynamic_identity, tuple(filtered_blocks)
+    return dynamic_identity, persona_content, tuple(filtered_blocks)
 
 
 def render_template(path: Path, context: dict[str, Any]) -> str:

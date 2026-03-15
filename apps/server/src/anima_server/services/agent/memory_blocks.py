@@ -36,6 +36,11 @@ def build_runtime_memory_blocks(
     soul_block = build_soul_biography_block(db, user_id=user_id)
     blocks.append(soul_block)
 
+    # Persona block (Priority 0 — living persona, seeded at provisioning, evolves)
+    persona_block = build_persona_block(db, user_id=user_id)
+    if persona_block is not None:
+        blocks.append(persona_block)
+
     # User directive (Priority 0 — user-authored customisation)
     user_directive_block = build_user_directive_memory_block(
         db, user_id=user_id)
@@ -411,6 +416,33 @@ def build_soul_biography_block(
         label="soul",
         description="My origin — immutable biographical truth. This is who I am.",
         value=value,
+    )
+
+
+def build_persona_block(
+    db: Session,
+    *,
+    user_id: int,
+) -> MemoryBlock | None:
+    """Build the living persona block from the DB.
+
+    Seeded from a template at provisioning and evolved through reflection.
+    """
+    from anima_server.models import SelfModelBlock
+
+    block = db.scalar(
+        select(SelfModelBlock).where(
+            SelfModelBlock.user_id == user_id,
+            SelfModelBlock.section == "persona",
+        )
+    )
+    if block is None or not block.content.strip():
+        return None
+
+    return MemoryBlock(
+        label="persona",
+        description="My personality, voice, and relational style — this evolves as I grow.",
+        value=block.content.strip(),
     )
 
 

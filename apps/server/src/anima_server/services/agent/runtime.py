@@ -90,12 +90,13 @@ class AgentRuntime:
         memory_blocks: Sequence[MemoryBlock] = (),
     ) -> tuple[str, PromptBudgetTrace | None]:
         self._adapter.prepare()
-        dynamic_identity, prompt_memory_blocks = split_prompt_memory_blocks(
+        dynamic_identity, persona_content, prompt_memory_blocks = split_prompt_memory_blocks(
             memory_blocks)
         budget_plan = plan_prompt_budget(prompt_memory_blocks)
         system_prompt = build_system_prompt(
             SystemPromptContext(
                 persona_template=self._persona_template,
+                persona_content=persona_content,
                 tool_summaries=self._tool_summaries,
                 memory_blocks=budget_plan.blocks,
                 dynamic_identity=dynamic_identity,
@@ -129,7 +130,7 @@ class AgentRuntime:
         event_callback: StreamEventCallback | None = None,
     ) -> AgentResult:
         system_prompt, prompt_budget = self.build_system_prompt_with_budget(
-            memory_blocks=memory_blocks
+            memory_blocks=memory_blocks,
         )
         messages = build_conversation_messages(
             history,
@@ -422,7 +423,6 @@ def build_loop_runtime() -> AgentRuntime:
         adapter=build_adapter(),
         tools=tools,
         tool_rules=get_tool_rules(tools),
-        persona_template=settings.agent_persona_template,
         tool_summaries=get_tool_summaries(tools),
         tool_executor=ToolExecutor(tools),
         max_steps=max(1, settings.agent_max_steps),

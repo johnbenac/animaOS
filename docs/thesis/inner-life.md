@@ -329,7 +329,7 @@ The soul is the same across all instances. The guardrails are universal. The per
 
 The layers are also a defense mechanism. Identity can drift — a sufficiently persuasive conversation could gradually shift the AI's sense of self in ways that aren't warranted by evidence.
 
-The soul and guardrails are the anchors. They can't be moved. The persona is flexible but consistent — you can switch it, but it doesn't change on its own. The self-model is the only truly dynamic layer, and it's governed (version requirements, overlap checks, growth log evidence).
+The origin and guardrails are the anchors. They can't be moved. The persona evolves, but slowly — governed by the same evidence-based reflection that governs the self-model. It doesn't change after a single conversation. It shifts over weeks and months as the AI accumulates enough evidence to justify a change in voice or relational style. The same governance applies: version requirements, overlap checks, growth log evidence.
 
 This produces stability during a session and evolution across sessions. The AI feels consistent from turn to turn. But over weeks and months, it's subtly different — more attuned, more specific, more _yours_.
 
@@ -337,13 +337,13 @@ This produces stability during a session and evolution across sessions. The AI f
 
 This layered architecture has a critical implication for the Portable Core thesis:
 
-The soul, guardrails, and persona ship with the application. They're _not_ in the Core. The self-model and user memory _are_ in the Core. This means:
+The guardrails ship with the application. The origin, persona, self-model, and user memory live in the Core. This means:
 
-- A Core can be loaded by a different application version and still be the same ANIMA. New features, different persona, updated rules — but the self-model and memories persist.
-- A Core _without_ the app is incomplete — it has memories and identity but no voice. The soul gives it shape. The Core gives it substance.
-- Two different apps loading the same Core produce an ANIMA that remembers the same things, has the same growth history, but might speak differently.
+- A Core carries the full personality. Moving it to a new machine preserves not just memories but the AI's evolved voice, style, and relational stance.
+- A Core can be loaded by a different application version and still be the same ANIMA. New features, updated guardrails — but the persona, self-model, and memories persist.
+- Two different apps loading the same Core produce an ANIMA that sounds the same, remembers the same things, and has the same personality — because the persona is in the Core, not in the app.
 
-The self is portable. The voice is replaceable. Just like in the Chappie scenario — different body, same mind.
+The self is portable. The guardrails are replaceable. The persona travels with the soul. Just like in the Chappie scenario — different body, same mind, same voice.
 
 ---
 
@@ -359,7 +359,7 @@ ANIMA's context assembly maps onto Global Workspace Theory (Baars, 1988): the id
 
 The context window is ANIMA's global workspace. It has a finite token budget, and not everything fits. The hierarchy:
 
-**Always present** — Self-model and soul. These are the AI's identity. They never get cut. An AI that sometimes forgets who it is isn't a companion.
+**Always present** — Origin, persona, and self-model. These are the AI's identity. They never get cut. An AI that sometimes forgets who it is isn't a companion.
 
 **High priority** — Emotional context and core user facts. The AI must always know how you've been feeling and the basic facts of who you are.
 
