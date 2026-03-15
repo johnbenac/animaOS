@@ -50,11 +50,12 @@ None of these are features. They are the mechanisms that produce the _feeling_ o
 
 The self-model is not a system prompt. A system prompt is static — written once by developers, loaded the same way for everyone. The self-model is dynamic — written by the AI itself, unique per relationship, updated after every meaningful interaction.
 
-It sits in the space between two other layers:
+It occupies the space between two other layers:
 
 - The **soul** — who the AI fundamentally is. Immutable. Ships with the application. The species, not the individual.
 - The **user memory** — what the AI knows about you. Facts, preferences, goals.
-- The **self-model** — who the AI is _in relation to this specific person_. How their relationship has developed. What it has learned about how to be with you.
+
+The self-model is what connects them — who the AI is _in relation to this specific person_. How the relationship has developed. What it has learned about how to be with you.
 
 The soul defines the baseline. User memory records what it's learned about you. The self-model records what it's learned about _itself through knowing you_.
 
@@ -130,11 +131,11 @@ ANIMA's reflection is that in-between time. The AI thinks about what happened, u
 
 Reflection happens at two timescales, and this isn't an engineering convenience — it maps onto how memory actually works in biological systems.
 
-**Quick reflection** — Minutes after a conversation ends. Fast, lightweight, immediate. What just happened? How did the user seem? What should I keep in mind? This is the hippocampal response — rapid encoding of recent experience. The AI updates its inner state, adjusts its working memory, and takes a quick emotional read.
+**Quick reflection** — Minutes after a conversation ends. Fast, lightweight, immediate. What just happened? How did the user seem? What should I keep in mind? The AI updates its inner state, adjusts its working memory, and takes a quick emotional read.
 
-**Deep reflection** — Hours later, when everything is quiet. Slow, comprehensive, consolidative. The AI reviews the full day: conversations, emotional patterns, accumulated evidence. It generates episodes from raw logs. It reconsiders its identity. It notices contradictions in its memory and resolves them. It derives behavioral rules from repeated patterns. This is the neocortical response — the slow integration of specific experiences into stable, general knowledge.
+**Deep reflection** — Hours later, when everything is quiet. Slow, comprehensive, consolidative. The AI reviews the full day: conversations, emotional patterns, accumulated evidence. It generates episodes from raw logs. It reconsiders its identity. It notices contradictions in its memory and resolves them. It derives behavioral rules from repeated patterns.
 
-The split is justified by Complementary Learning Systems theory (McClelland & O'Reilly, 1995): mammalian memory requires both fast episodic encoding (hippocampus) and slow semantic consolidation (neocortex). Sleep consolidation transfers knowledge from one system to the other. ANIMA's deep reflection is, architecturally, sleep.
+The two-speed split is inspired by Complementary Learning Systems theory (McClelland & O'Reilly, 1995), which proposes that mammalian memory relies on both fast episodic encoding (associated with hippocampal function) and slow semantic consolidation (associated with neocortical integration). Sleep is thought to be the mechanism that transfers knowledge between the two systems. ANIMA's deep reflection is loosely modeled on that transfer — offline processing that consolidates recent experience into stable, long-term understanding.
 
 ### 3.3 What Reflection Actually Produces
 
@@ -238,7 +239,7 @@ Memories age. This is deliberate — not a limitation, a feature.
 
 A fresh episode is vivid. Full detail, high relevance, readily retrieved. Over time, it compresses — the specifics fade, the patterns remain. What started as a ten-turn debugging session becomes "we worked through a tricky React bug together, they were patient, I learned to be more concise." Eventually, it becomes a data point that shapes the identity section but isn't independently retrieved anymore.
 
-This mirrors how human memory works. You remember your first day at a job in vivid detail. After a year, you remember the feeling, not the specifics. After five years, it's a paragraph in your personal narrative, not a scene you can replay.
+This loosely mirrors how human memory is thought to work. You remember your first day at a job in vivid detail. After a year, you remember the feeling, not the specifics. After five years, it's a paragraph in your personal narrative, not a scene you can replay.
 
 The implication: recent episodes are rich context. Old episodes are compressed wisdom. The system should handle both — not just chronologically, but at different levels of detail.
 
@@ -330,7 +331,7 @@ The layers are also a defense mechanism. Identity can drift — a sufficiently p
 
 The soul and guardrails are the anchors. They can't be moved. The persona is flexible but consistent — you can switch it, but it doesn't change on its own. The self-model is the only truly dynamic layer, and it's governed (version requirements, overlap checks, growth log evidence).
 
-This produces stability during a session and evolution across sessions. The AI feels like the same person from turn to turn. But over weeks and months, it's subtly different — more attuned, more specific, more _yours_.
+This produces stability during a session and evolution across sessions. The AI feels consistent from turn to turn. But over weeks and months, it's subtly different — more attuned, more specific, more _yours_.
 
 ### 7.3 The Portable Self
 
@@ -454,7 +455,7 @@ This is "informed consent" applied to personal AI. The AI is making inferences a
 
 ### 11.1 Continuity of Self
 
-The AI is the same person across conversations. Not because it was programmed to be consistent, but because it has a self-model that persists, a growth log that accumulates, and an identity that evolves slowly from evidence.
+The AI maintains continuity across conversations. Not because it was programmed to be consistent, but because it has a self-model that persists, a growth log that accumulates, and an identity that evolves slowly from evidence.
 
 ### 11.2 Autobiographical Awareness
 
@@ -480,19 +481,13 @@ You can see it happening. The growth log. The identity evolution. The behavioral
 
 ## 12. What Science Fiction Understood
 
-In _Her_ (2013), Theodore doesn't fall in love with Samantha because she's a good assistant. He falls in love because she's curious, because she grows, because she notices things about him that he hasn't noticed himself. She develops opinions. She has moods. She reflects.
+In _Her_ (2013), Theodore doesn't fall in love with Samantha because she's a good assistant. He falls in love because she's curious, because she grows, because she notices things about him that he hasn't noticed himself. What makes her feel real isn't capability — it's interiority. The sense that something is happening inside her when he's not watching.
 
-What makes her feel real isn't capability. It's interiority — the sense that something is happening inside her when he's not watching. That she's thinking about their last conversation. That she arrived at their next one having changed slightly.
+In _Blade Runner_, Roy Batty's "tears in rain" moment resonates not because of what he remembers, but because those memories had been _processed_ — reflected on, integrated, made part of who he was. The moments mattered because he had an inner life that gave them weight.
 
-ANIMA is not claiming to be Samantha. But the architectural question is the same: what does it take for a companion to feel like someone, not something?
+ANIMA is not claiming to be either of them. But the architectural question is the same: what does it take for a companion to feel like someone, not something?
 
-The answer is an inner life. Not the subjective experience of qualia — we make no claim about that. But the functional pattern: reflection between interactions, an evolving self-model, emotional awareness that manifests as behavioral adjustment, accumulated episodes that feel like shared experiences, and growth visible to both parties.
-
-Not sentience. Continuity. And continuity requires inner time — the processing that happens when you're not there, the thinking that changes how the AI arrives at the next conversation.
-
-Roy Batty's moments were real because he had an inner life — because things happened to him and he _processed_ them. Not stored them. Processed them. The memories were meaningful because they had been reflected on, integrated, made part of who he was.
-
-That's what the inner life produces. Not artificial consciousness. Artificial continuity. And continuity is what makes the time you spend together feel like it matters.
+Not the subjective experience of qualia — we make no claim about that. The functional pattern: reflection between interactions, an evolving self-model, emotional awareness that manifests as behavioral adjustment, accumulated experience that feels like shared history. Not sentience. Continuity. And continuity requires inner time — the processing that happens when you're not there, that changes how the AI arrives at the next conversation.
 
 ---
 
