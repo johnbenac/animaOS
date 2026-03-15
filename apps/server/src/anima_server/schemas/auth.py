@@ -12,6 +12,8 @@ class RegisterRequest(BaseModel):
     personaTemplate: Literal["default", "alice"] = "default"
     agentName: str = Field(default="Anima", min_length=1, max_length=50)
     userDirective: str = Field(default="")
+    relationship: str = Field(default="companion", max_length=100)
+    style: str = Field(default="warm and casual", max_length=100)
 
 
 class CreateAIChatMessage(BaseModel):

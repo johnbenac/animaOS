@@ -33,7 +33,7 @@ SYSTEM_PROMPT_TEMPLATE_PATH = TEMPLATES_DIR / "system_prompt.md.j2"
 SYSTEM_RULES_TEMPLATE_PATH = TEMPLATES_DIR / "system_rules.md.j2"
 GUARDRAILS_TEMPLATE_PATH = TEMPLATES_DIR / "guardrails.md.j2"
 MEMORY_BLOCKS_TEMPLATE_PATH = TEMPLATES_DIR / "memory_blocks.md.j2"
-SOUL_TEMPLATE_PATH = TEMPLATES_DIR / "soul.md.j2"
+ORIGIN_TEMPLATE_PATH = TEMPLATES_DIR / "origin.md.j2"
 PERSONA_TEMPLATES_DIR = TEMPLATES_DIR / "persona"
 _TEMPLATE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
@@ -109,12 +109,22 @@ def build_persona_prompt(template_name: str) -> str:
     return render_template(template_path, {})
 
 
-def render_soul_biography(agent_name: str = "Anima") -> str:
-    """Render the immutable soul biography from the seed template."""
+def render_origin_block(
+    agent_name: str = "Anima",
+    creator_name: str = "",
+) -> str:
+    """Render the immutable origin block from the seed template."""
     from anima_server.services.core import get_core_birth_date
 
     birth_date = get_core_birth_date()
-    return render_template(SOUL_TEMPLATE_PATH, {"agent_name": agent_name, "birth_date": birth_date})
+    return render_template(
+        ORIGIN_TEMPLATE_PATH,
+        {
+            "agent_name": agent_name,
+            "birth_date": birth_date,
+            "creator_name": creator_name or "their creator",
+        },
+    )
 
 
 def split_prompt_memory_blocks(

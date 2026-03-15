@@ -80,11 +80,14 @@ def create_user(
     display_name: str,
     agent_name: str = "Anima",
     user_directive: str = "",
+    relationship: str = "companion",
+    style: str = "warm and casual",
+    persona_template: str = "default",
     *,
     user_id: int | None = None,
 ) -> tuple[User, bytes]:
-    from anima_server.models import SelfModelBlock
-    from anima_server.services.agent.system_prompt import render_soul_biography
+    from anima_server.models import AgentProfile, SelfModelBlock
+    from anima_server.services.agent.system_prompt import render_origin_block
 
     dek, wrapped_dek = create_wrapped_dek(password)
     user = User(
@@ -97,8 +100,19 @@ def create_user(
     db.flush()
     db.add(build_user_key(user.id, wrapped_dek))
 
-    # Seed immutable soul biography
-    soul_content = render_soul_biography(agent_name=agent_name)
+    # Seed structured agent profile for fast lookup
+    db.add(AgentProfile(
+        user_id=user.id,
+        agent_name=agent_name,
+        creator_name=display_name,
+        relationship=relationship,
+        style=style,
+        persona_template=persona_template,
+    ))
+
+    # Seed immutable origin block
+    soul_content = render_origin_block(
+        agent_name=agent_name, creator_name=display_name)
     db.add(SelfModelBlock(
         user_id=user.id,
         section="soul",

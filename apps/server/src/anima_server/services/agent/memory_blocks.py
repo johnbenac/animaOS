@@ -396,13 +396,8 @@ def build_soul_biography_block(
     *,
     user_id: int,
 ) -> MemoryBlock:
-    """Build the immutable soul biography block.
-
-    Reads from the DB (seeded at user creation). Falls back to rendering
-    the template for legacy users who don't have a stored soul row.
-    """
+    """Build the immutable origin block from the DB."""
     from anima_server.models import SelfModelBlock
-    from anima_server.services.agent.system_prompt import render_soul_biography
 
     block = db.scalar(
         select(SelfModelBlock).where(
@@ -410,10 +405,7 @@ def build_soul_biography_block(
             SelfModelBlock.section == "soul",
         )
     )
-    if block is not None and block.content.strip():
-        value = block.content.strip()
-    else:
-        value = render_soul_biography()
+    value = block.content.strip() if block is not None else ""
 
     return MemoryBlock(
         label="soul",

@@ -12,6 +12,7 @@ from anima_server.models.agent_runtime import (
     SessionNote,
 )
 from anima_server.models.consciousness import (
+    AgentProfile,
     EmotionalSignal,
     SelfModelBlock,
 )
@@ -22,6 +23,7 @@ from anima_server.models.user_key import UserKey
 
 __all__ = [
     "AgentMessage",
+    "AgentProfile",
     "AgentRun",
     "AgentStep",
     "AgentThread",

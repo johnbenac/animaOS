@@ -46,6 +46,43 @@ class SelfModelBlock(Base):
     )
 
 
+class AgentProfile(Base):
+    """Structured agent identity attributes — fast-lookup companion to the soul self_model_block.
+
+    Stores the discrete facts collected during the creation ceremony so they
+    are queryable without parsing prose content. One row per user.
+    """
+
+    __tablename__ = "agent_profile"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    agent_name: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="Anima")
+    creator_name: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="")
+    relationship: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="companion")
+    style: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="warm and casual")
+    persona_template: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="default")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class EmotionalSignal(Base):
     """Detected emotional signal from a conversation turn.
 
@@ -67,7 +104,8 @@ class EmotionalSignal(Base):
     emotion: Mapped[str] = mapped_column(
         String(32), nullable=False,
     )  # frustrated, excited, anxious, calm, stressed, relieved, curious, disappointed
-    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
+    confidence: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5)
     evidence_type: Mapped[str] = mapped_column(
         String(24), nullable=False, default="linguistic",
     )  # explicit, linguistic, behavioral, contextual
@@ -75,9 +113,11 @@ class EmotionalSignal(Base):
     trajectory: Mapped[str] = mapped_column(
         String(24), nullable=False, default="stable",
     )  # escalating, de-escalating, stable, shifted
-    previous_emotion: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    previous_emotion: Mapped[str | None] = mapped_column(
+        String(32), nullable=True)
     topic: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    acted_on: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    acted_on: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
