@@ -70,7 +70,8 @@ def test_login_me_and_logout_use_the_same_unlock_token() -> None:
 
         locked_response = client.get("/api/auth/me", headers=headers)
         assert locked_response.status_code == 401
-        assert locked_response.json() == {"error": "Session locked. Please sign in again."}
+        assert locked_response.json() == {
+            "error": "Session locked. Please sign in again."}
 
 
 def test_login_rejects_invalid_credentials() -> None:
@@ -159,3 +160,27 @@ def test_change_password_rejects_wrong_old_password() -> None:
 
         assert change_response.status_code == 401
         assert change_response.json() == {"error": "Invalid credentials"}
+
+
+def test_register_blocked_after_provisioning() -> None:
+    with managed_test_client("anima-auth-test-") as client:
+        _register_user(client, username="owner",
+                       password="pw1234", name="Owner")
+
+        second = client.post(
+            "/api/auth/register",
+            json={"username": "intruder", "password": "pw1234", "name": "Nope"},
+        )
+        assert second.status_code == 403
+        assert second.json() == {"error": "Core is already provisioned"}
+
+
+def test_health_provisioned_flag_after_register() -> None:
+    with managed_test_client("anima-auth-test-", invalidate_agent=False) as client:
+        health_before = client.get("/api/health").json()
+        assert health_before["provisioned"] is False
+
+        _register_user(client)
+
+        health_after = client.get("/api/health").json()
+        assert health_after["provisioned"] is True

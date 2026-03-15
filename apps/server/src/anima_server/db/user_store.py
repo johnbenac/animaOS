@@ -25,7 +25,7 @@ from anima_server.services.auth import (
     normalize_username,
     serialize_user,
 )
-from anima_server.services.core import allocate_user_id, ensure_core_manifest, set_next_user_id
+from anima_server.services.core import allocate_user_id, ensure_core_manifest, is_provisioned, set_next_user_id, set_owner_user_id
 from anima_server.services.storage import get_user_data_dir
 from anima_server.services.vault import export_database_snapshot, restore_database_snapshot
 
@@ -62,7 +62,6 @@ def list_user_ids() -> list[int]:
     user_ids: list[int] = []
     if not users_root.is_dir():
         return user_ids
-
     for child in users_root.iterdir():
         if not child.is_dir():
             continue
@@ -72,9 +71,7 @@ def list_user_ids() -> list[int]:
             continue
         if get_user_database_path(user_id).is_file():
             user_ids.append(user_id)
-
-    user_ids.sort()
-    return user_ids
+    return sorted(user_ids)
 
 
 def find_account_by_username(
@@ -115,11 +112,11 @@ def register_account(
     agent_name: str = "Anima",
     user_directive: str = "",
 ) -> tuple[dict[str, object], bytes]:
+    if is_provisioned():
+        raise ValueError("Core is already provisioned")
     normalized = normalize_username(username)
     if not normalized:
         raise ValueError("Username is required")
-    if username_exists(normalized):
-        raise ValueError("Username already taken")
 
     user_id = allocate_user_id()
     factory = ensure_user_database(user_id)
@@ -133,7 +130,8 @@ def register_account(
             user_directive=user_directive,
             user_id=user_id,
         )
-        return serialize_user(user), dek
+    set_owner_user_id(user_id)
+    return serialize_user(user), dek
 
 
 def authenticate_account(username: str, password: str) -> tuple[dict[str, object], bytes]:
@@ -166,7 +164,8 @@ def _migrate_legacy_shared_database_locked() -> None:
             if bind is None or not inspect(bind).has_table("users"):
                 return
 
-            users = list(legacy_db.scalars(select(User).order_by(User.id)).all())
+            users = list(legacy_db.scalars(
+                select(User).order_by(User.id)).all())
             if not users:
                 return
 
@@ -225,7 +224,8 @@ def make_legacy_database_path() -> Path | None:
 
 
 def _legacy_backup_path(shared_db_path: Path) -> Path:
-    candidate = shared_db_path.with_name(f"{shared_db_path.stem}.legacy-shared{shared_db_path.suffix}")
+    candidate = shared_db_path.with_name(
+        f"{shared_db_path.stem}.legacy-shared{shared_db_path.suffix}")
     if not candidate.exists():
         return candidate
 

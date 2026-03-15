@@ -92,7 +92,7 @@ async def send_message(
 @router.get("/history", response_model=list[ChatHistoryMessage])
 async def get_chat_history(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ) -> list[ChatHistoryMessage]:
@@ -135,7 +135,7 @@ async def reset_chat_thread(
 @router.get("/brief")
 async def get_brief(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Quick context brief (static, no LLM). Use /greeting for personalized greetings."""
@@ -160,7 +160,7 @@ async def get_brief(
 @router.get("/greeting")
 async def get_greeting(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Generate a personalized greeting using the agent's self-model and context.
@@ -188,7 +188,7 @@ async def get_greeting(
 @router.get("/nudges")
 async def get_nudges(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     db: Session = Depends(get_db),
 ) -> dict[str, list[dict[str, object]]]:
     require_unlocked_user(request, userId)
@@ -216,7 +216,7 @@ async def get_nudges(
 @router.get("/home")
 async def get_home(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     require_unlocked_user(request, userId)

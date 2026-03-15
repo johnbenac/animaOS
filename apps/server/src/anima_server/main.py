@@ -18,7 +18,7 @@ from .api.routes.users import router as users_router
 from .api.routes.db import router as db_router
 from .api.routes.vault import router as vault_router
 from .config import settings
-from .services.core import ensure_core_manifest
+from .services.core import ensure_core_manifest, is_provisioned
 from .db.user_store import ensure_per_user_databases_ready
 
 CORS_ORIGINS = [
@@ -46,7 +46,8 @@ class SidecarNonceMiddleware(BaseHTTPMiddleware):
     local processes cannot obtain it.
     """
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    # type: ignore[override]
+    async def dispatch(self, request: Request, call_next):
         nonce = settings.sidecar_nonce
         if nonce and request.url.path not in _NONCE_EXEMPT_PATHS:
             header_value = (request.headers.get("x-anima-nonce") or "").strip()
@@ -114,11 +115,12 @@ def create_app() -> FastAPI:
 
     @app.get("/health", tags=["system"])
     @app.get("/api/health", tags=["system"])
-    async def health() -> dict[str, str]:
+    async def health() -> dict[str, object]:
         return {
             "status": "ok",
             "service": "server",
             "environment": settings.app_env,
+            "provisioned": is_provisioned(),
         }
 
     app.include_router(auth_router)

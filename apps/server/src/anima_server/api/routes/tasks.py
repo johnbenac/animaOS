@@ -31,7 +31,7 @@ def _task_to_response(task: Task) -> TaskResponse:
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
     request: Request,
-    userId: int = Query(gt=0),
+    userId: int = Query(ge=0),
     db: Session = Depends(get_db),
 ) -> list[TaskResponse]:
     session = require_unlocked_session(request)

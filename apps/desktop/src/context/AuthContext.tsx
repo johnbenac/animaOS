@@ -5,7 +5,13 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { api, clearUnlockToken, getUnlockToken, setSidecarNonce, type User } from "../lib/api";
+import {
+  api,
+  clearUnlockToken,
+  getUnlockToken,
+  setSidecarNonce,
+  type User,
+} from "../lib/api";
 import { discoverSidecarNonce } from "../lib/runtime";
 
 interface AuthContextType {
@@ -14,6 +20,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isProvisioned: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -30,6 +37,7 @@ function purgeLegacyStoredUser(): void {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
+  const [isProvisioned, setIsProvisioned] = useState(false);
   const [user, setUser] = useState<User | null>(() => {
     purgeLegacyStoredUser();
     return null;
@@ -42,6 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Discover sidecar nonce before making any API calls.
         const nonce = await discoverSidecarNonce();
         if (nonce) setSidecarNonce(nonce);
+
+        // Check provisioning state from health endpoint.
+        try {
+          const health = await api.system.health();
+          if (!cancelled) setIsProvisioned(health.provisioned === true);
+        } catch {
+          // Server unreachable — assume not provisioned.
+        }
 
         const token = getUnlockToken();
         if (!token) {
@@ -73,14 +89,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const handleSetUser = (u: User | null) => {
+    setUser(u);
+    if (u) setIsProvisioned(true);
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user,
-        setUser,
+        setUser: handleSetUser,
         logout,
         isAuthenticated: !!user,
         isLoading,
+        isProvisioned,
       }}
     >
       {children}

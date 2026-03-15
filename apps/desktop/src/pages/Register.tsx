@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { Field } from "@anima/ui";
 import { api, setUnlockToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -7,6 +7,11 @@ import { useAuth } from "../context/AuthContext";
 type RegisterStep = "account" | "create-ai";
 
 export default function Register() {
+  const { isProvisioned } = useAuth();
+
+  if (isProvisioned) {
+    return <Navigate to="/login" replace />;
+  }
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -193,16 +198,6 @@ export default function Register() {
                 {isAccountStep ? "Continue" : loading ? "Creating…" : "Create"}
               </button>
             </div>
-
-            <p className="mt-6 text-center text-xs text-text-muted">
-              Already have an account?{" "}
-              <Link
-                to="/login"
-                className="text-text underline underline-offset-4 transition-opacity hover:opacity-70"
-              >
-                Sign in
-              </Link>
-            </p>
           </form>
         </div>
       </div>

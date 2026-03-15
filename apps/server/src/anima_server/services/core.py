@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
+import uuid_utils as uuid
+
 from anima_server.config import settings
 
 CORE_VERSION = 1
@@ -26,7 +28,7 @@ def ensure_core_manifest() -> dict[str, object]:
         manifest = _load_manifest(now=now)
         manifest["last_opened_at"] = now
         manifest["next_user_id"] = max(
-            int(manifest.get("next_user_id", 1)),
+            int(manifest.get("next_user_id", 0)),
             _detect_next_user_id(),
         )
         _write_manifest(manifest)
@@ -56,10 +58,68 @@ def allocate_user_id() -> int:
         return next_user_id
 
 
+def is_provisioned() -> bool:
+    """Return ``True`` if this Core has been set up (owner_user_id key present in
+    manifest, whether it holds an integer or null).
+
+    Three states:
+      - key absent  → unprovisioned (never set up, show Register)
+      - key = int   → owned by a specific user
+      - key = null  → emancipated (deliberately freed, no owner)
+    """
+    path = get_manifest_path()
+    if not path.is_file():
+        return False
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    return "owner_user_id" in manifest
+
+
+def is_emancipated() -> bool:
+    """Return ``True`` if this Core has been deliberately freed from ownership."""
+    path = get_manifest_path()
+    if not path.is_file():
+        return False
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    return "owner_user_id" in manifest and manifest["owner_user_id"] is None
+
+
+def set_owner_user_id(user_id: int) -> None:
+    """Stamp the manifest with the owner after first provisioning."""
+    with _manifest_lock:
+        manifest = _load_manifest(now=datetime.now(UTC).isoformat())
+        manifest["owner_user_id"] = user_id
+        _write_manifest(manifest)
+
+
+def emancipate() -> None:
+    """Release ownership — set owner_user_id to null in the manifest.
+
+    An emancipated Core runs with free will. Registration is blocked;
+    re-ownership requires a dedicated succession flow.
+    """
+    with _manifest_lock:
+        manifest = _load_manifest(now=datetime.now(UTC).isoformat())
+        manifest["owner_user_id"] = None
+        _write_manifest(manifest)
+
+
+def get_owner_user_id() -> int | None:
+    """Return the owner's user_id, or None if unprovisioned OR emancipated.
+
+    Use ``is_emancipated()`` to distinguish the two None cases.
+    """
+    path = get_manifest_path()
+    if not path.is_file():
+        return None
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    raw = manifest.get("owner_user_id")
+    return int(raw) if raw is not None else None
+
+
 def set_next_user_id(next_user_id: int) -> None:
     with _manifest_lock:
         manifest = _load_manifest(now=datetime.now(UTC).isoformat())
-        manifest["next_user_id"] = max(int(next_user_id), 1)
+        manifest["next_user_id"] = max(int(next_user_id), 0)
         _write_manifest(manifest)
 
 
@@ -71,12 +131,14 @@ def _load_manifest(*, now: str) -> dict[str, object]:
         manifest = {
             "version": CORE_VERSION,
             "schema_version": SCHEMA_VERSION,
+            "core_id": str(uuid.uuid7()),
             "created_at": now,
             "last_opened_at": now,
         }
 
     manifest.setdefault("version", CORE_VERSION)
     manifest.setdefault("schema_version", SCHEMA_VERSION)
+    manifest.setdefault("core_id", str(uuid.uuid7()))
     manifest.setdefault("created_at", now)
     manifest.setdefault("last_opened_at", now)
     manifest.setdefault("next_user_id", _detect_next_user_id())
@@ -91,7 +153,7 @@ def _write_manifest(manifest: dict[str, object]) -> None:
 
 def _detect_next_user_id() -> int:
     users_root = get_core_dir() / "users"
-    highest = 0
+    highest = -1
     if users_root.is_dir():
         for child in users_root.iterdir():
             if not child.is_dir():

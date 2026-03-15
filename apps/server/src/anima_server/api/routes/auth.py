@@ -82,12 +82,15 @@ def register(
         )
     except ValueError as exc:
         detail = str(exc)
+        if detail == "Core is already provisioned":
+            raise HTTPException(status_code=403, detail=detail) from None
         if detail == "Username already taken":
             raise HTTPException(status_code=409, detail=detail) from None
         raise HTTPException(
             status_code=422, detail=detail) from None
 
-    response["unlockToken"] = unlock_session_store.create(int(response["id"]), dek)
+    response["unlockToken"] = unlock_session_store.create(
+        int(response["id"]), dek)
     return response
 
 

@@ -43,7 +43,7 @@ class TaskResponse(BaseModel):
 
 
 class TaskCreateRequest(BaseModel):
-    userId: int = Field(gt=0)
+    userId: int = Field(ge=0)
     text: str = Field(min_length=1)
     priority: int = Field(default=2, ge=1, le=5)
     dueDate: str | None = None

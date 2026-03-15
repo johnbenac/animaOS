@@ -585,9 +585,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     system: {
       health: () =>
-        request<{ status: string; service?: string; environment?: string }>(
-          "/health",
-        ),
+        request<{
+          status: string;
+          service?: string;
+          environment?: string;
+          provisioned?: boolean;
+        }>("/health"),
     },
     db: {
       tables: () => request<DbTableInfo[]>("/db/tables"),

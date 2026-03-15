@@ -1,5 +1,13 @@
 # Docs Changelog
 
+## 2026-03-16
+
+- added `docs/architecture/core-ownership-model.md` documenting the single-owner provisioning model: manifest-based `owner_user_id` as the provisioning gate, UUID v7 `core_id` as the Core's permanent identity, user slot allocation starting at 0, and the distinction between new machine (new `data_dir`) vs. new user (new slot)
+- removed `user_id` config field and `ANIMA_USER_ID` env var — new machine simulation now uses `ANIMA_DATA_DIR` instead
+- replaced filesystem heuristic in `is_provisioned()` with manifest read of `owner_user_id`; `register_account()` now stamps `owner_user_id` in the manifest after creating the first user
+- switched `core_id` generation from UUID v4 to UUID v7 (time-ordered, Rust-backed via `uuid_utils`)
+- restored full multi-user infrastructure (`list_user_ids` scans all slots, `allocate_user_id` increments) while keeping the single-owner provisioning guard intact
+
 ## 2026-03-14
 
 - clarified the runtime identity layering in docs: `persona` is now documented as a thin seed, `soul` as the user-specific charter, and `self_identity` as the evolving adaptive layer

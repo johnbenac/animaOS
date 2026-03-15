@@ -10,6 +10,7 @@ def test_health() -> None:
             "status": "ok",
             "service": "server",
             "environment": "development",
+            "provisioned": False,
         }
 
 
@@ -22,4 +23,5 @@ def test_api_health() -> None:
             "status": "ok",
             "service": "server",
             "environment": "development",
+            "provisioned": False,
         }

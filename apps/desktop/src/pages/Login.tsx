@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Field } from "@anima/ui";
 import { api, setUnlockToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
@@ -33,9 +33,7 @@ export default function Login() {
     <div className="flex items-center justify-center min-h-screen p-8">
       <div className="w-full max-w-[380px]">
         <div className="text-center mb-12">
-          <div className="text-4xl text-text-muted/10 mb-4 select-none">
-            ◈
-          </div>
+          <div className="text-4xl text-text-muted/10 mb-4 select-none">◈</div>
           <h1 className="font-mono text-lg font-medium tracking-[0.3em] uppercase text-text">
             ANIMA
           </h1>
@@ -74,19 +72,9 @@ export default function Login() {
             className="w-full py-2.5 bg-text text-bg rounded-md text-sm font-medium tracking-wide cursor-pointer transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
             disabled={loading}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? "Unlocking..." : "Unlock"}
           </button>
         </form>
-
-        <p className="text-center mt-6 text-xs text-text-muted">
-          Don't have an account?{" "}
-          <Link
-            to="/register"
-            className="text-text hover:opacity-70 underline underline-offset-4"
-          >
-            Create one
-          </Link>
-        </p>
       </div>
     </div>
   );

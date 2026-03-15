@@ -27,16 +27,17 @@ def _register_user(
 
 def test_export_vault_requires_unlock_session() -> None:
     with managed_test_client("anima-vault-test-") as client:
-        response = client.post("/api/vault/export", json={"passphrase": "vault-pass"})
+        response = client.post("/api/vault/export",
+                               json={"passphrase": "vault-pass"})
 
         assert response.status_code == 401
-        assert response.json() == {"error": "Session locked. Please sign in again."}
+        assert response.json() == {
+            "error": "Session locked. Please sign in again."}
 
 
 def test_export_and_import_vault_restores_auth_and_files() -> None:
     with managed_test_client("anima-vault-test-") as client:
         alice = _register_user(client)
-        _register_user(client, username="bob", password="otherpw", name="Bob")
 
         user_id = int(alice["id"])
         headers = {"x-anima-unlock": alice["unlockToken"]}
@@ -68,7 +69,8 @@ def test_export_and_import_vault_restores_auth_and_files() -> None:
         import_response = client.post(
             "/api/vault/import",
             headers=headers,
-            json={"passphrase": "vault-pass", "vault": export_payload["vault"]},
+            json={"passphrase": "vault-pass",
+                  "vault": export_payload["vault"]},
         )
 
         assert import_response.status_code == 200
@@ -85,7 +87,8 @@ def test_export_and_import_vault_restores_auth_and_files() -> None:
             assert [record.username for record in users] == ["alice"]
             assert users[0].display_name == "Alice"
 
-        assert (user_dir / "memory" / "entry.md").read_text(encoding="utf-8") == "hello from vault"
+        assert (user_dir / "memory" /
+                "entry.md").read_text(encoding="utf-8") == "hello from vault"
 
         stale_session_response = client.get(
             "/api/auth/me",
@@ -98,12 +101,6 @@ def test_export_and_import_vault_restores_auth_and_files() -> None:
             json={"username": "alice", "password": "pw123"},
         )
         assert login_response.status_code == 200
-
-        bob_login = client.post(
-            "/api/auth/login",
-            json={"username": "bob", "password": "otherpw"},
-        )
-        assert bob_login.status_code == 200
 
 
 def test_import_vault_rejects_wrong_passphrase() -> None:
@@ -121,7 +118,8 @@ def test_import_vault_rejects_wrong_passphrase() -> None:
         import_response = client.post(
             "/api/vault/import",
             headers={"x-anima-unlock": token},
-            json={"passphrase": "wrong-pass", "vault": export_response.json()["vault"]},
+            json={"passphrase": "wrong-pass",
+                  "vault": export_response.json()["vault"]},
         )
 
         assert import_response.status_code == 400
