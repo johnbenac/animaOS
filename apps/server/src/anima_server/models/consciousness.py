@@ -67,10 +67,6 @@ class AgentProfile(Base):
         String(100), nullable=False, default="")
     relationship: Mapped[str] = mapped_column(
         String(100), nullable=False, default="companion")
-    style: Mapped[str] = mapped_column(
-        String(100), nullable=False, default="warm and casual")
-    persona_template: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="default")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -81,8 +81,6 @@ def create_user(
     agent_name: str = "Anima",
     user_directive: str = "",
     relationship: str = "companion",
-    style: str = "warm and casual",
-    persona_template: str = "default",
     *,
     user_id: int | None = None,
 ) -> tuple[User, bytes]:
@@ -106,8 +104,6 @@ def create_user(
         agent_name=agent_name,
         creator_name=display_name,
         relationship=relationship,
-        style=style,
-        persona_template=persona_template,
     ))
 
     # Seed immutable origin block

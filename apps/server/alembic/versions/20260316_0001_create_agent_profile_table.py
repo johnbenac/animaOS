@@ -27,10 +27,6 @@ def upgrade() -> None:
                   nullable=False, server_default=""),
         sa.Column("relationship", sa.String(length=100),
                   nullable=False, server_default="companion"),
-        sa.Column("style", sa.String(length=100), nullable=False,
-                  server_default="warm and casual"),
-        sa.Column("persona_template", sa.String(length=32),
-                  nullable=False, server_default="default"),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),

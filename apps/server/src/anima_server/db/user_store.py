@@ -112,8 +112,6 @@ def register_account(
     agent_name: str = "Anima",
     user_directive: str = "",
     relationship: str = "companion",
-    style: str = "warm and casual",
-    persona_template: str = "default",
 ) -> tuple[dict[str, object], bytes]:
     if is_provisioned():
         raise ValueError("Core is already provisioned")
@@ -132,8 +130,6 @@ def register_account(
             agent_name=agent_name,
             user_directive=user_directive,
             relationship=relationship,
-            style=style,
-            persona_template=persona_template,
             user_id=user_id,
         )
     set_owner_user_id(user_id)
