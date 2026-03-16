@@ -29,6 +29,7 @@ def build_runtime_memory_blocks(
     user_id: int,
     thread_id: int,
     semantic_results: list[tuple[int, str, float]] | None = None,
+    query_embedding: list[float] | None = None,
 ) -> tuple[MemoryBlock, ...]:
     blocks: list[MemoryBlock] = []
 
@@ -67,15 +68,18 @@ def build_runtime_memory_blocks(
         if semantic_block is not None:
             blocks.append(semantic_block)
 
-    facts_block = build_facts_memory_block(db, user_id=user_id)
+    facts_block = build_facts_memory_block(
+        db, user_id=user_id, query_embedding=query_embedding)
     if facts_block is not None:
         blocks.append(facts_block)
 
-    preferences_block = build_preferences_memory_block(db, user_id=user_id)
+    preferences_block = build_preferences_memory_block(
+        db, user_id=user_id, query_embedding=query_embedding)
     if preferences_block is not None:
         blocks.append(preferences_block)
 
-    goals_block = build_goals_memory_block(db, user_id=user_id)
+    goals_block = build_goals_memory_block(
+        db, user_id=user_id, query_embedding=query_embedding)
     if goals_block is not None:
         blocks.append(goals_block)
 
@@ -83,7 +87,8 @@ def build_runtime_memory_blocks(
     if tasks_block is not None:
         blocks.append(tasks_block)
 
-    relationships_block = build_relationships_memory_block(db, user_id=user_id)
+    relationships_block = build_relationships_memory_block(
+        db, user_id=user_id, query_embedding=query_embedding)
     if relationships_block is not None:
         blocks.append(relationships_block)
 
@@ -135,9 +140,10 @@ def build_facts_memory_block(
     db: Session,
     *,
     user_id: int,
+    query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="fact", limit=30)
+        db, user_id=user_id, category="fact", limit=30, query_embedding=query_embedding)
     if not items:
         return None
     touch_memory_items(db, items)
@@ -156,9 +162,10 @@ def build_preferences_memory_block(
     db: Session,
     *,
     user_id: int,
+    query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="preference", limit=20)
+        db, user_id=user_id, category="preference", limit=20, query_embedding=query_embedding)
     if not items:
         return None
     touch_memory_items(db, items)
@@ -177,9 +184,10 @@ def build_goals_memory_block(
     db: Session,
     *,
     user_id: int,
+    query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="goal", limit=15)
+        db, user_id=user_id, category="goal", limit=15, query_embedding=query_embedding)
     if not items:
         return None
     touch_memory_items(db, items)
@@ -247,9 +255,10 @@ def build_relationships_memory_block(
     db: Session,
     *,
     user_id: int,
+    query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="relationship", limit=15)
+        db, user_id=user_id, category="relationship", limit=15, query_embedding=query_embedding)
     if not items:
         return None
     touch_memory_items(db, items)

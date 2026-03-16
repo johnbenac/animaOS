@@ -16,6 +16,14 @@ _DECAY_HALF_LIFE_DAYS = 14.0
 _WEIGHT_IMPORTANCE = 0.4
 _WEIGHT_RECENCY = 0.35
 _WEIGHT_ACCESS = 0.25
+# Per-category weights for query-aware scoring: (retrieval_weight, query_weight)
+_CATEGORY_QUERY_WEIGHTS: dict[str, tuple[float, float]] = {
+    "fact": (0.5, 0.5),
+    "preference": (0.4, 0.6),
+    "goal": (0.7, 0.3),
+    "relationship": (0.3, 0.7),
+}
+_DEFAULT_QUERY_WEIGHTS: tuple[float, float] = (0.5, 0.5)
 _WORD_RE = re.compile(r"[a-z0-9']+")
 _TOKEN_STOPWORDS = frozenset({
     "a", "an", "the", "i", "me", "my", "am", "is", "are", "was", "were",
@@ -227,8 +235,13 @@ def get_memory_items_scored(
     category: str | None = None,
     limit: int = 50,
     now: datetime | None = None,
+    query_embedding: list[float] | None = None,
 ) -> list[MemoryItem]:
-    """Retrieve memory items ranked by a multi-factor score: importance, recency, access frequency."""
+    """Retrieve memory items ranked by a multi-factor score: importance, recency, access frequency.
+
+    When *query_embedding* is provided, blends the retrieval score with cosine
+    similarity to the query using per-category weights.
+    """
     query = select(MemoryItem).where(
         MemoryItem.user_id == user_id,
         MemoryItem.superseded_by.is_(None),
@@ -245,6 +258,27 @@ def get_memory_items_scored(
 
     ref_now = now or datetime.now(UTC)
     scored = [(_retrieval_score(item, ref_now), item) for item in items]
+
+    if query_embedding is not None:
+        from anima_server.services.agent.embeddings import _parse_embedding, cosine_similarity
+
+        w_retrieval, w_query = _CATEGORY_QUERY_WEIGHTS.get(
+            category or "", _DEFAULT_QUERY_WEIGHTS,
+        )
+        blended: list[tuple[float, MemoryItem]] = []
+        for base_score, item in scored:
+            item_emb = _parse_embedding(item.embedding_json)
+            if item_emb is not None:
+                sim = cosine_similarity(query_embedding, item_emb)
+                # Normalize sim from [-1,1] to [0,1] for blending
+                sim_norm = (sim + 1.0) / 2.0
+                final = w_retrieval * base_score + w_query * sim_norm
+            else:
+                final = base_score
+            blended.append((final, item))
+        blended.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in blended[:limit]]
+
     scored.sort(key=lambda pair: pair[0], reverse=True)
     return [item for _, item in scored[:limit]]
 

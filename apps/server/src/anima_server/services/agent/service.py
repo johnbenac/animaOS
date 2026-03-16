@@ -478,27 +478,31 @@ async def _prepare_turn_context(
 
     # Semantic retrieval is always per-turn (query-dependent).
     semantic_results: list[tuple[int, str, float]] | None = None
+    query_embedding: list[float] | None = None
     try:
-        from anima_server.services.agent.embeddings import semantic_search
-        hits = await semantic_search(
+        from anima_server.services.agent.embeddings import adaptive_filter, hybrid_search
+        search_result = await hybrid_search(
             db, user_id=user_id, query=user_message,
-            limit=8, similarity_threshold=0.35,
+            limit=15, similarity_threshold=0.25,
         )
-        if hits:
+        query_embedding = search_result.query_embedding
+        if search_result.items:
+            filtered = adaptive_filter(search_result.items)
             semantic_results = [(item.id, item.content, score)
-                                for item, score in hits]
+                                for item, score in filtered]
     except Exception:  # noqa: BLE001
         pass
 
     # Use companion-cached static blocks, reload from DB only if stale.
     static_blocks = companion.ensure_memory_loaded(db)
 
-    # If we have semantic results, build a full block set with the
-    # semantic block injected.  Otherwise use static blocks as-is.
-    if semantic_results:
+    # If we have semantic results or a query embedding, build fresh
+    # blocks so query-aware scoring can re-rank facts/preferences/etc.
+    if semantic_results or query_embedding is not None:
         memory_blocks = build_runtime_memory_blocks(
             db, user_id=user_id, thread_id=thread.id,
             semantic_results=semantic_results,
+            query_embedding=query_embedding,
         )
         # Re-populate the cache with the freshly-built static subset so
         # the next turn that has no semantic changes still benefits.
