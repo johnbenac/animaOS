@@ -258,6 +258,10 @@ class AnimaCompanion:
         self.set_memory_cache(blocks)
         return blocks
 
+    def invalidate_history(self) -> None:
+        """Clear the conversation window so the next call reloads from DB."""
+        self._conversation_window.clear()
+
     def ensure_history_loaded(self, db: Session) -> list[StoredMessage]:
         """Return the conversation window, loading from DB if empty."""
         if self._conversation_window:

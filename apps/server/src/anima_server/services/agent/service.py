@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from threading import Lock
 
+logger = logging.getLogger(__name__)
+
 from anima_server.config import settings
-from anima_server.services.agent.compaction import compact_thread_context, estimate_message_tokens
+from anima_server.services.agent.compaction import CompactionResult, compact_thread_context, estimate_message_tokens
 from anima_server.services.agent.companion import (
     AnimaCompanion,
     get_companion,
@@ -34,6 +37,7 @@ from anima_server.services.agent.persistence import (
     save_approval_checkpoint,
 )
 from anima_server.services.agent.runtime import AgentRuntime, build_loop_runtime
+from anima_server.services.agent.llm import ContextWindowOverflowError
 from anima_server.services.agent.runtime_types import DryRunResult, StepFailedError, StepProgression, StopReason, ToolCall
 from anima_server.services.agent.sequencing import (
     count_persisted_result_messages,
@@ -613,15 +617,40 @@ async def _invoke_turn_runtime(
     set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
     try:
         runner = get_or_build_runner()
-        return await runner.invoke(
-            user_message,
-            user_id,
-            turn_ctx.history,
-            conversation_turn_count=turn_ctx.conversation_turn_count,
-            memory_blocks=turn_ctx.memory_blocks,
-            event_callback=event_callback,
-            cancel_event=cancel_event,
-        )
+        try:
+            return await runner.invoke(
+                user_message,
+                user_id,
+                turn_ctx.history,
+                conversation_turn_count=turn_ctx.conversation_turn_count,
+                memory_blocks=turn_ctx.memory_blocks,
+                event_callback=event_callback,
+                cancel_event=cancel_event,
+            )
+        except StepFailedError as exc:
+            if not _should_retry_after_compaction(exc):
+                raise
+            # Context overflow: compact and retry once.
+            compacted = _emergency_compact(db, thread=thread, run=run)
+            if not compacted:
+                raise
+            logger.info(
+                "Context overflow detected — compacted %d messages, retrying",
+                compacted.compacted_message_count,
+            )
+            turn_ctx = _rebuild_turn_context_after_compaction(
+                db, user_id=user_id, thread=thread,
+                user_message=user_message, turn_ctx=turn_ctx,
+            )
+            return await runner.invoke(
+                user_message,
+                user_id,
+                turn_ctx.history,
+                conversation_turn_count=turn_ctx.conversation_turn_count,
+                memory_blocks=turn_ctx.memory_blocks,
+                event_callback=event_callback,
+                cancel_event=cancel_event,
+            )
     except StepFailedError as exc:
         _handle_step_failure(db, run=run, user_msg=user_msg, err=exc)
         raise exc.cause from exc
@@ -635,6 +664,58 @@ async def _invoke_turn_runtime(
         raise
     finally:
         clear_tool_context()
+
+
+def _should_retry_after_compaction(exc: StepFailedError) -> bool:
+    """Return True if the step failure looks like a context overflow."""
+    if not settings.agent_context_overflow_retry:
+        return False
+    return isinstance(exc.cause, ContextWindowOverflowError)
+
+
+def _emergency_compact(
+    db: Session,
+    *,
+    thread: AgentThread,
+    run: AgentRun,
+) -> CompactionResult | None:
+    """Run compaction mid-turn to recover from context overflow.
+
+    Uses aggressive settings: keep fewer messages and reserve no prompt
+    tokens (since the overflow already happened).
+    """
+    keep_last = max(1, settings.agent_compaction_keep_last_messages // 2)
+    result = compact_thread_context(
+        db,
+        thread=thread,
+        run_id=run.id,
+        trigger_token_limit=1,  # force compaction
+        keep_last_messages=keep_last,
+        reserved_prompt_tokens=0,
+    )
+    if result is not None:
+        db.flush()
+    return result
+
+
+def _rebuild_turn_context_after_compaction(
+    db: Session,
+    *,
+    user_id: int,
+    thread: AgentThread,
+    user_message: str,
+    turn_ctx: _TurnContext,
+) -> _TurnContext:
+    """Reload history and memory after emergency compaction."""
+    companion = _get_companion(user_id)
+    companion.invalidate_history()
+    history = companion.ensure_history_loaded(db)
+    conversation_turn_count = count_messages_by_role(db, thread.id, "user")
+    return _TurnContext(
+        history=history,
+        conversation_turn_count=conversation_turn_count,
+        memory_blocks=turn_ctx.memory_blocks,
+    )
 
 
 def _handle_step_failure(

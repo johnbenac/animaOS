@@ -42,6 +42,10 @@ from anima_server.services.agent.compaction import estimate_message_tokens
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.adapters import build_adapter
 from anima_server.config import settings
+from anima_server.services.agent.llm import (
+    ContextWindowOverflowError,
+    LLMInvocationError,
+)
 
 import asyncio
 import logging
@@ -51,6 +55,24 @@ from dataclasses import replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """Return True if the exception is transient and worth retrying."""
+    if isinstance(exc, ContextWindowOverflowError):
+        return False
+    if isinstance(exc, asyncio.TimeoutError):
+        return True
+    if isinstance(exc, LLMInvocationError):
+        msg = str(exc).lower()
+        # Rate limits and server errors are retryable
+        for pattern in ("429", "500", "502", "503", "504", "rate limit",
+                        "overloaded", "temporarily unavailable", "try again"):
+            if pattern in msg:
+                return True
+    if isinstance(exc, (ConnectionError, OSError)):
+        return True
+    return False
 
 
 StreamEventCallback = Callable[[AgentStreamEvent], Awaitable[None]]
@@ -608,38 +630,24 @@ class AgentRuntime:
         )
         streamed_assistant_text = False
 
+        retry_limit = max(0, settings.agent_llm_retry_limit)
+        backoff_factor = settings.agent_llm_retry_backoff_factor
+        max_delay = settings.agent_llm_retry_max_delay
+
         try:
-            timeout = settings.agent_llm_timeout
-            if event_callback is None:
-                step_result = await asyncio.wait_for(
-                    self._adapter.invoke(request), timeout=timeout,
-                )
-                ctx.llm_end_time = time.monotonic()
-                ctx.progression = StepProgression.RESPONSE_RECEIVED
-            else:
-                step_result = None
-                try:
-                    async for stream_event in self._adapter.stream(request):
-                        # Mid-stream cancellation check
-                        if cancel_event is not None and cancel_event.is_set():
-                            raise _CancelledDuringStream()
-                        if stream_event.content_delta:
-                            if ctx.ttft_time is None:
-                                ctx.ttft_time = time.monotonic()
-                            streamed_assistant_text = True
-                            await event_callback(build_chunk_event(stream_event.content_delta))
-                        if stream_event.result is not None:
-                            step_result = stream_event.result
-                except asyncio.TimeoutError:
-                    raise
+            step_result = await self._invoke_llm_with_retry(
+                ctx=ctx,
+                request=request,
+                event_callback=event_callback,
+                cancel_event=cancel_event,
+                retry_limit=retry_limit,
+                backoff_factor=backoff_factor,
+                max_delay=max_delay,
+            )
 
-                ctx.llm_end_time = time.monotonic()
-
-                if step_result is None:
-                    raise RuntimeError(
-                        "Adapter stream ended without a final step result.")
-
-                ctx.progression = StepProgression.RESPONSE_RECEIVED
+            # Track whether we streamed content to the client.
+            if event_callback is not None and step_result.assistant_text:
+                streamed_assistant_text = True
 
             # Emit reasoning event before any chunk/tool events for this step.
             if event_callback is not None and step_result.reasoning_content:
@@ -664,6 +672,74 @@ class AgentRuntime:
             raise StepFailedError(exc, ctx) from exc
 
         return step_result, streamed_assistant_text, ctx
+
+    async def _invoke_llm_with_retry(
+        self,
+        *,
+        ctx: StepContext,
+        request: LLMRequest,
+        event_callback: StreamEventCallback | None,
+        cancel_event: asyncio.Event | None,
+        retry_limit: int,
+        backoff_factor: float,
+        max_delay: float,
+    ) -> StepExecutionResult:
+        """Call the adapter with exponential backoff for transient errors.
+
+        Non-retryable errors (context overflow, config errors, auth failures)
+        are raised immediately.  Transient errors (timeouts, rate limits,
+        server errors) are retried up to *retry_limit* times.
+        """
+        last_exc: Exception | None = None
+
+        for attempt in range(1, retry_limit + 2):  # attempt 1 .. retry_limit+1
+            try:
+                timeout = settings.agent_llm_timeout
+                if event_callback is None:
+                    step_result = await asyncio.wait_for(
+                        self._adapter.invoke(request), timeout=timeout,
+                    )
+                    ctx.llm_end_time = time.monotonic()
+                    ctx.progression = StepProgression.RESPONSE_RECEIVED
+                else:
+                    step_result = None
+                    async for stream_event in self._adapter.stream(request):
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _CancelledDuringStream()
+                        if stream_event.content_delta:
+                            if ctx.ttft_time is None:
+                                ctx.ttft_time = time.monotonic()
+                            await event_callback(build_chunk_event(stream_event.content_delta))
+                        if stream_event.result is not None:
+                            step_result = stream_event.result
+
+                    ctx.llm_end_time = time.monotonic()
+
+                    if step_result is None:
+                        raise RuntimeError(
+                            "Adapter stream ended without a final step result.")
+
+                    ctx.progression = StepProgression.RESPONSE_RECEIVED
+
+                return step_result
+
+            except _CancelledDuringStream:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                is_last_attempt = attempt > retry_limit
+                if is_last_attempt or not _is_retryable_error(exc):
+                    raise
+                delay = min(backoff_factor * (2 ** (attempt - 1)), max_delay)
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s. Retrying in %.1fs",
+                    attempt, retry_limit + 1, exc, delay,
+                )
+                await asyncio.sleep(delay)
+
+        # Should never reach here, but satisfy the type checker.
+        assert last_exc is not None
+        raise last_exc
 
     async def _coerce_terminal_send_message(
         self,

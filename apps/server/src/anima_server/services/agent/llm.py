@@ -27,6 +27,10 @@ class LLMInvocationError(RuntimeError):
     """Raised when a configured provider cannot be reached or returns an error."""
 
 
+class ContextWindowOverflowError(LLMInvocationError):
+    """Raised when the LLM reports that the input exceeds the context window."""
+
+
 class ChatClient(Protocol):
     async def ainvoke(self, input: Sequence[Any]) -> Any:
         """Invoke the chat model with a normalized message list."""
@@ -112,20 +116,45 @@ def require_provider_api_key(provider: str) -> str:
     return api_key
 
 
+_CONTEXT_OVERFLOW_PATTERNS = (
+    "context length",
+    "context_length",
+    "maximum context",
+    "token limit",
+    "context window",
+    "too many tokens",
+    "input is too long",
+    "prompt is too long",
+    "exceeds the model",
+    "reduce the length",
+    "maximum number of tokens",
+)
+
+
+def _is_context_overflow_message(text: str) -> bool:
+    lowered = text.lower()
+    return any(pattern in lowered for pattern in _CONTEXT_OVERFLOW_PATTERNS)
+
+
 def wrap_llm_error(exc: Exception, *, provider: str, base_url: str) -> LLMInvocationError:
     if isinstance(exc, httpx.HTTPStatusError):
         detail = exc.response.text.strip()
-        if detail:
-            return LLMInvocationError(
-                f"{provider} returned {exc.response.status_code} from {base_url!r}: {detail}"
-            )
-        return LLMInvocationError(
-            f"{provider} returned {exc.response.status_code} from {base_url!r}."
+        msg = (
+            f"{provider} returned {exc.response.status_code} from {base_url!r}: {detail}"
+            if detail
+            else f"{provider} returned {exc.response.status_code} from {base_url!r}."
         )
+        if detail and _is_context_overflow_message(detail):
+            return ContextWindowOverflowError(msg)
+        return LLMInvocationError(msg)
 
     if isinstance(exc, httpx.HTTPError):
         return LLMInvocationError(
             f"Failed to reach {provider} at {base_url!r}: {exc}"
         )
 
-    return LLMInvocationError(str(exc))
+    error_str = str(exc)
+    if _is_context_overflow_message(error_str):
+        return ContextWindowOverflowError(error_str)
+
+    return LLMInvocationError(error_str)
