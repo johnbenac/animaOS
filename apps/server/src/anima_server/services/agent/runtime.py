@@ -1,25 +1,22 @@
 from __future__ import annotations
-
-import asyncio
-import time
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
-from typing import Any
-
-from anima_server.config import settings
-from anima_server.services.agent.adapters import build_adapter
-from anima_server.services.agent.adapters.base import BaseLLMAdapter
-from anima_server.services.agent.compaction import estimate_message_tokens
-from anima_server.services.agent.executor import ToolExecutor
-from anima_server.services.agent.memory_blocks import MemoryBlock
-from anima_server.services.agent.messages import (
-    build_conversation_messages,
-    make_assistant_message,
-    make_tool_message,
-    message_content,
+from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
+from anima_server.services.agent.system_prompt import (
+    SystemPromptContext,
+    build_system_prompt,
+    split_prompt_memory_blocks,
 )
-from anima_server.services.agent.rules import ToolRule, ToolRulesSolver
+from anima_server.services.agent.prompt_budget import PromptBudgetTrace, plan_prompt_budget
+from anima_server.services.agent.streaming import (
+    AgentStreamEvent,
+    build_chunk_event,
+    build_reasoning_event,
+    build_timing_event,
+    build_tool_call_event,
+    build_tool_return_event,
+)
+from anima_server.services.agent.state import AgentResult, StoredMessage
 from anima_server.services.agent.runtime_types import (
+    DryRunResult,
     LLMRequest,
     MessageSnapshot,
     StepContext,
@@ -32,24 +29,35 @@ from anima_server.services.agent.runtime_types import (
     ToolCall,
     ToolExecutionResult,
 )
-from anima_server.services.agent.state import AgentResult, StoredMessage
-from anima_server.services.agent.streaming import (
-    AgentStreamEvent,
-    build_chunk_event,
-    build_reasoning_event,
-    build_timing_event,
-    build_tool_call_event,
-    build_tool_return_event,
+from anima_server.services.agent.rules import ToolRule, ToolRulesSolver
+from anima_server.services.agent.messages import (
+    build_conversation_messages,
+    make_assistant_message,
+    make_tool_message,
+    message_content,
 )
-from anima_server.services.agent.prompt_budget import PromptBudgetTrace, plan_prompt_budget
-from anima_server.services.agent.system_prompt import (
-    SystemPromptContext,
-    build_system_prompt,
-    split_prompt_memory_blocks,
-)
-from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
+from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.executor import ToolExecutor
+from anima_server.services.agent.compaction import estimate_message_tokens
+from anima_server.services.agent.adapters.base import BaseLLMAdapter
+from anima_server.services.agent.adapters import build_adapter
+from anima_server.config import settings
+
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
 
 StreamEventCallback = Callable[[AgentStreamEvent], Awaitable[None]]
+
+
+class _CancelledDuringStream(Exception):
+    """Raised inside _run_step when the cancel event fires mid-stream."""
 
 
 class AgentRuntime:
@@ -72,6 +80,9 @@ class AgentRuntime:
         }
         self._tool_names = tuple(self._tool_registry)
         self._tool_rules = tuple(tool_rules)
+        if self._tool_rules:
+            ToolRulesSolver(self._tool_rules).warn_unknown_tools(
+                self._tool_names)
         self._persona_template = persona_template
         self._tool_summaries = tuple(tool_summaries)
         self._tool_executor = tool_executor or ToolExecutor(
@@ -135,7 +146,9 @@ class AgentRuntime:
         conversation_turn_count: int | None = None,
         memory_blocks: Sequence[MemoryBlock] = (),
         event_callback: StreamEventCallback | None = None,
-    ) -> AgentResult:
+        dry_run: bool = False,
+        cancel_event: asyncio.Event | None = None,
+    ) -> AgentResult | DryRunResult:
         system_prompt, prompt_budget = self.build_system_prompt_with_budget(
             memory_blocks=memory_blocks,
         )
@@ -144,13 +157,53 @@ class AgentRuntime:
             user_message,
             system_prompt=system_prompt,
         )
+
+        rules_solver = ToolRulesSolver(self._tool_rules)
+        allowed_tool_names = tuple(
+            sorted(rules_solver.get_allowed_tools(self._tool_names))
+        )
+
+        # --- Dry-run: return prompt assembly without side effects ---
+        if dry_run:
+            request_messages = _snapshot_messages(messages)
+            tool_schemas = tuple(
+                _tool_schema(self._tool_registry[name])
+                for name in allowed_tool_names
+                if name in self._tool_registry
+            )
+            estimated_tokens = estimate_message_tokens(
+                content_text=system_prompt,
+                content_json=None,
+                tool_name=None,
+            )
+            for snap in request_messages:
+                estimated_tokens += estimate_message_tokens(
+                    content_text=snap.content,
+                    content_json=None,
+                    tool_name=snap.tool_name,
+                )
+            return DryRunResult(
+                system_prompt=system_prompt,
+                messages=request_messages,
+                tool_schemas=tool_schemas,
+                allowed_tools=allowed_tool_names,
+                memory_blocks=tuple(memory_blocks),
+                estimated_prompt_tokens=estimated_tokens,
+                prompt_budget=prompt_budget,
+            )
+
+        # --- Normal execution ---
         stop_reason = StopReason.END_TURN
         response = ""
         tools_used: list[str] = []
         step_traces: list[StepTrace] = []
-        rules_solver = ToolRulesSolver(self._tool_rules)
 
         for step_index in range(self._max_steps):
+            # --- Cancellation check (step boundary) ---
+            if cancel_event is not None and cancel_event.is_set():
+                stop_reason = StopReason.CANCELLED
+                break
+
             request_messages = _snapshot_messages(messages)
             allowed_tool_names = tuple(
                 sorted(rules_solver.get_allowed_tools(self._tool_names))
@@ -159,16 +212,21 @@ class AgentRuntime:
                 rules_solver.should_force_tool_call()
                 or "send_message" in allowed_tool_names
             )
-            step_result, streamed_assistant_text, step_ctx = await self._run_step(
-                messages=messages,
-                user_id=user_id,
-                conversation_turn_count=conversation_turn_count,
-                step_index=step_index,
-                system_prompt=system_prompt,
-                allowed_tool_names=allowed_tool_names,
-                force_tool_call=force_tool_call,
-                event_callback=event_callback,
-            )
+            try:
+                step_result, streamed_assistant_text, step_ctx = await self._run_step(
+                    messages=messages,
+                    user_id=user_id,
+                    conversation_turn_count=conversation_turn_count,
+                    step_index=step_index,
+                    system_prompt=system_prompt,
+                    allowed_tool_names=allowed_tool_names,
+                    force_tool_call=force_tool_call,
+                    event_callback=event_callback,
+                    cancel_event=cancel_event,
+                )
+            except _CancelledDuringStream:
+                stop_reason = StopReason.CANCELLED
+                break
             tool_results: list[ToolExecutionResult] = []
             terminal_tool_hit = False
             awaiting_approval = False
@@ -346,6 +404,7 @@ class AgentRuntime:
         allowed_tool_names: Sequence[str],
         force_tool_call: bool,
         event_callback: StreamEventCallback | None = None,
+        cancel_event: asyncio.Event | None = None,
     ) -> tuple[StepExecutionResult, bool, StepContext]:
         ctx = StepContext(
             step_index=step_index,
@@ -380,6 +439,9 @@ class AgentRuntime:
                 step_result = None
                 try:
                     async for stream_event in self._adapter.stream(request):
+                        # Mid-stream cancellation check
+                        if cancel_event is not None and cancel_event.is_set():
+                            raise _CancelledDuringStream()
                         if stream_event.content_delta:
                             if ctx.ttft_time is None:
                                 ctx.ttft_time = time.monotonic()
@@ -415,6 +477,8 @@ class AgentRuntime:
                         tool_calls=step_result.tool_calls,
                     )
                 )
+        except _CancelledDuringStream:
+            raise
         except Exception as exc:
             raise StepFailedError(exc, ctx) from exc
 
@@ -467,6 +531,8 @@ def _default_response(stop_reason: StopReason) -> str:
         return "Agent runtime reached the maximum step limit without a final response."
     if stop_reason == StopReason.AWAITING_APPROVAL:
         return "Agent runtime is waiting for approval before running a tool."
+    if stop_reason == StopReason.CANCELLED:
+        return ""
     return ""
 
 
@@ -577,6 +643,20 @@ def _snapshot_tool_calls(raw_tool_calls: object) -> tuple[ToolCall, ...]:
         )
 
     return tuple(tool_calls)
+
+
+def _tool_schema(tool: Any) -> dict[str, Any]:
+    """Extract a JSON-safe schema dict from a tool for dry-run output."""
+    schema: dict[str, Any] = {"name": _tool_name(tool)}
+    if hasattr(tool, "description"):
+        schema["description"] = tool.description
+    if hasattr(tool, "args_schema"):
+        try:
+            schema["parameters"] = tool.args_schema.model_json_schema()
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to extract schema for tool %s", _tool_name(tool))
+    return schema
 
 
 def _tool_name(tool: Any) -> str:

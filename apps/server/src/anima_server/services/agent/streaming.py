@@ -119,6 +119,13 @@ def build_error_event(error_text: str) -> AgentStreamEvent:
     )
 
 
+def build_cancelled_event(run_id: int) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        event="cancelled",
+        data={"runId": run_id},
+    )
+
+
 def build_stream_events(
     result: AgentResult,
     *,

@@ -72,7 +72,8 @@ def list_transcript_messages(
             AgentMessage.role.in_(("user", "assistant", "system", "tool")),
             AgentMessage.content_text.is_not(None),
             AgentMessage.content_text != "",
-            or_(AgentMessage.run_id.is_(None), AgentRun.status != "failed"),
+            or_(AgentMessage.run_id.is_(None),
+                AgentRun.status.notin_(("failed", "cancelled"))),
         )
         .order_by(desc(AgentMessage.sequence_id))
         .limit(limit)
@@ -195,6 +196,25 @@ def mark_run_failed(db: Session, run: AgentRun, error_text: str) -> None:
     run.error_text = error_text
     run.completed_at = datetime.now(UTC)
     db.add(run)
+
+
+def cancel_run(db: Session, run_id: int) -> AgentRun | None:
+    """Mark a run as cancelled.  Returns the run, or None if not found.
+
+    Idempotent: if the run is already terminal (completed, failed,
+    cancelled) the existing row is returned without modification.
+    """
+    run = db.get(AgentRun, run_id)
+    if run is None:
+        return None
+    if run.status in ("completed", "failed", "cancelled"):
+        return run
+    run.status = "cancelled"
+    run.stop_reason = "cancelled"
+    run.completed_at = datetime.now(UTC)
+    db.add(run)
+    db.flush()
+    return run
 
 
 def reset_thread(db: Session, user_id: int) -> None:

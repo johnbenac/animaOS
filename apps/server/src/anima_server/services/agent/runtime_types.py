@@ -11,6 +11,7 @@ class StopReason(StrEnum):
     TERMINAL_TOOL = "terminal_tool"
     MAX_STEPS = "max_steps"
     AWAITING_APPROVAL = "awaiting_approval"
+    CANCELLED = "cancelled"
 
 
 class StepProgression(IntEnum):
@@ -118,6 +119,19 @@ class StepContext:
     start_time: float = 0.0
     ttft_time: float | None = None
     llm_end_time: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DryRunResult:
+    """Returned by invoke(dry_run=True) with the full prompt assembly."""
+
+    system_prompt: str
+    messages: tuple[Any, ...]
+    tool_schemas: tuple[dict[str, Any], ...]
+    allowed_tools: tuple[str, ...]
+    memory_blocks: tuple[Any, ...]
+    estimated_prompt_tokens: int
+    prompt_budget: Any | None  # PromptBudgetTrace
 
 
 class StepFailedError(Exception):

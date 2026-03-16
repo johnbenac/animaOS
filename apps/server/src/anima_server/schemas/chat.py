@@ -38,3 +38,26 @@ class ChatHistoryMessage(BaseModel):
 
 class ChatHistoryClearResponse(BaseModel):
     status: str
+
+
+class CancelRunRequest(BaseModel):
+    userId: int = Field(ge=0)
+
+
+class CancelRunResponse(BaseModel):
+    runId: int
+    status: str
+
+
+class DryRunRequest(BaseModel):
+    message: str = Field(min_length=1)
+    userId: int = Field(ge=0)
+
+
+class DryRunResponse(BaseModel):
+    systemPrompt: str
+    messages: list[dict] = Field(default_factory=list)
+    allowedTools: list[str]
+    estimatedPromptTokens: int
+    toolSchemas: list[dict]
+    memoryBlockCount: int

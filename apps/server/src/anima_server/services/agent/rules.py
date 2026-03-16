@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,11 +29,31 @@ class RequiresApprovalToolRule:
     tool_name: str
 
 
+@dataclass(frozen=True, slots=True)
+class PrerequisiteToolRule:
+    """Tool B is unavailable until tool A has been called this turn."""
+
+    prerequisite_tool: str
+    dependent_tool: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConditionalToolRule:
+    """Output-based routing: tool_name's return value maps to a child tool."""
+
+    tool_name: str
+    child_output_mapping: dict[str, str]  # output value → child tool name
+    default_child: str | None = None
+    require_output_mapping: bool = False
+
+
 ToolRule = (
     TerminalToolRule
     | InitToolRule
     | ChildToolRule
     | RequiresApprovalToolRule
+    | PrerequisiteToolRule
+    | ConditionalToolRule
 )
 
 
@@ -55,8 +79,56 @@ class ToolRulesSolver:
             for rule in tool_rules
             if isinstance(rule, RequiresApprovalToolRule)
         }
+        self._prerequisite_rules = tuple(
+            rule for rule in tool_rules if isinstance(rule, PrerequisiteToolRule)
+        )
+        self._conditional_rules = {
+            rule.tool_name: rule
+            for rule in tool_rules
+            if isinstance(rule, ConditionalToolRule)
+        }
         self._call_history: list[str] = []
         self._last_tool_return_value: str | None = None
+
+        # Validate: warn on empty conditional mappings
+        for rule in tool_rules:
+            if isinstance(rule, ConditionalToolRule) and not rule.child_output_mapping:
+                raise ValueError(
+                    f"ConditionalToolRule for {rule.tool_name!r} has empty child_output_mapping."
+                )
+
+        # Detect circular dependencies in prerequisite rules
+        _detect_cycles(self._prerequisite_rules, self._conditional_rules)
+
+    def warn_unknown_tools(self, known_tools: Collection[str]) -> None:
+        """Log warnings for rules that reference tools not in the registry."""
+        known = _normalize_tool_names(known_tools)
+        for rule in self._init_rules:
+            if rule.tool_name not in known:
+                logger.warning(
+                    "InitToolRule references unknown tool %r", rule.tool_name)
+        for name in self._terminal_tools:
+            if name not in known:
+                logger.warning(
+                    "TerminalToolRule references unknown tool %r", name)
+        for rule in self._prerequisite_rules:
+            if rule.prerequisite_tool not in known:
+                logger.warning(
+                    "PrerequisiteToolRule references unknown prerequisite tool %r", rule.prerequisite_tool)
+            if rule.dependent_tool not in known:
+                logger.warning(
+                    "PrerequisiteToolRule references unknown dependent tool %r", rule.dependent_tool)
+        for rule in self._conditional_rules.values():
+            if rule.tool_name not in known:
+                logger.warning(
+                    "ConditionalToolRule references unknown tool %r", rule.tool_name)
+            for child in rule.child_output_mapping.values():
+                if child not in known:
+                    logger.warning(
+                        "ConditionalToolRule maps to unknown child tool %r", child)
+            if rule.default_child and rule.default_child not in known:
+                logger.warning(
+                    "ConditionalToolRule default_child references unknown tool %r", rule.default_child)
 
     @property
     def call_history(self) -> tuple[str, ...]:
@@ -72,23 +144,81 @@ class ToolRulesSolver:
             return set()
 
         if not self._call_history and self._init_rules:
-            return {
+            allowed = {
                 rule.tool_name
                 for rule in self._init_rules
                 if rule.tool_name in available_tools
             }
+            return self._apply_prerequisite_filter(allowed, available_tools)
 
         if self._call_history:
             last_tool = self._call_history[-1]
+
+            # Conditional rules (output-based routing) take priority
+            cond_rule = self._conditional_rules.get(last_tool)
+            if cond_rule is not None:
+                cond_result = self._evaluate_conditional_rule(
+                    cond_rule, available_tools)
+                if cond_result is not None:
+                    return self._apply_prerequisite_filter(cond_result, available_tools)
+
+            # Child rules (static parent→children mapping)
             child_rule = self._child_rules.get(last_tool)
             if child_rule is not None:
-                return {
+                allowed = {
                     child
                     for child in child_rule.children
                     if child in available_tools
                 }
+                return self._apply_prerequisite_filter(allowed, available_tools)
 
-        return set(available_tools)
+        return self._apply_prerequisite_filter(set(available_tools), available_tools)
+
+    def _apply_prerequisite_filter(
+        self, allowed: set[str], available_tools: set[str],
+    ) -> set[str]:
+        """Remove tools whose prerequisites have not been called this turn."""
+        if not self._prerequisite_rules:
+            return allowed
+        called = set(self._call_history)
+        for rule in self._prerequisite_rules:
+            if (
+                rule.dependent_tool in allowed
+                and rule.prerequisite_tool not in called
+            ):
+                allowed = allowed - {rule.dependent_tool}
+        return allowed
+
+    def _evaluate_conditional_rule(
+        self, rule: ConditionalToolRule, available_tools: set[str],
+    ) -> set[str] | None:
+        """Return the allowed tool set based on the last tool's output."""
+        response = self._last_tool_return_value
+        if response is None:
+            if rule.require_output_mapping:
+                return set()
+            return {rule.default_child} & available_tools if rule.default_child else None
+
+        # Try to parse JSON and extract message field (Letta convention)
+        output_value = response
+        try:
+            parsed = json.loads(response)
+            if isinstance(parsed, dict) and "message" in parsed:
+                output_value = str(parsed["message"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Match output to mapping
+        for key, child_tool in rule.child_output_mapping.items():
+            if _matches_conditional_key(output_value, key):
+                return {child_tool} & available_tools
+
+        # No match
+        if rule.require_output_mapping:
+            return set()
+        if rule.default_child:
+            return {rule.default_child} & available_tools
+        return None
 
     def should_force_tool_call(self) -> bool:
         if not self._call_history and self._init_rules:
@@ -172,3 +302,60 @@ def _normalize_tool_names(tool_names: Collection[str]) -> set[str]:
         if name:
             normalized.add(name)
     return normalized
+
+
+def _matches_conditional_key(output: str, key: str) -> bool:
+    """Check if an output string matches a conditional mapping key."""
+    output_lower = output.strip().lower()
+    key_lower = key.strip().lower()
+    if key_lower in ("true", "false"):
+        return output_lower == key_lower
+    return output_lower == key_lower
+
+
+def _detect_cycles(
+    prerequisite_rules: Sequence[PrerequisiteToolRule],
+    conditional_rules: dict[str, ConditionalToolRule],
+) -> None:
+    """Detect circular dependencies across prerequisite and conditional rules.
+
+    Builds a directed graph of all tool dependencies and checks for cycles
+    using DFS.  Raises ValueError if a cycle is found.
+    """
+    # Build adjacency list: edge from A → B means "A must run before B"
+    edges: dict[str, set[str]] = {}
+    for rule in prerequisite_rules:
+        edges.setdefault(rule.prerequisite_tool, set()
+                         ).add(rule.dependent_tool)
+    for rule_tool, rule in conditional_rules.items():
+        for child in rule.child_output_mapping.values():
+            edges.setdefault(rule_tool, set()).add(child)
+        if rule.default_child:
+            edges.setdefault(rule_tool, set()).add(rule.default_child)
+
+    if not edges:
+        return
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {}
+
+    def dfs(node: str) -> list[str] | None:
+        color[node] = GRAY
+        for neighbour in edges.get(node, ()):
+            c = color.get(neighbour, WHITE)
+            if c == GRAY:
+                return [node, neighbour]
+            if c == WHITE:
+                path = dfs(neighbour)
+                if path is not None:
+                    return [node] + path
+        color[node] = BLACK
+        return None
+
+    for node in list(edges):
+        if color.get(node, WHITE) == WHITE:
+            cycle_path = dfs(node)
+            if cycle_path is not None:
+                raise ValueError(
+                    f"Circular tool rule dependency detected: {' → '.join(cycle_path)}"
+                )

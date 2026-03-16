@@ -21,6 +21,7 @@ from anima_server.services.agent.memory_blocks import MemoryBlock, build_runtime
 from anima_server.services.agent.llm import invalidate_llm_cache
 from anima_server.services.agent.persistence import (
     append_user_message,
+    cancel_run,
     count_messages_by_role,
     create_run,
     get_or_create_thread,
@@ -31,7 +32,7 @@ from anima_server.services.agent.persistence import (
     reset_thread,
 )
 from anima_server.services.agent.runtime import AgentRuntime, build_loop_runtime
-from anima_server.services.agent.runtime_types import StepFailedError, StepProgression
+from anima_server.services.agent.runtime_types import DryRunResult, StepFailedError, StepProgression, StopReason
 from anima_server.services.agent.sequencing import (
     count_persisted_result_messages,
     reserve_message_sequences,
@@ -39,6 +40,7 @@ from anima_server.services.agent.sequencing import (
 from anima_server.services.agent.state import AgentResult, StoredMessage
 from anima_server.services.agent.streaming import (
     AgentStreamEvent,
+    build_cancelled_event,
     build_done_event,
     build_error_event,
     build_usage_event,
@@ -87,6 +89,50 @@ async def run_agent(user_message: str, user_id: int, db: Session) -> AgentResult
     return await _execute_agent_turn(user_message, user_id, db)
 
 
+async def cancel_agent_run(run_id: int, user_id: int, db: Session) -> AgentRun | None:
+    """Cancel a running agent turn by run id."""
+    run = cancel_run(db, run_id)
+    if run is None:
+        return None
+    companion = get_companion()
+    if companion is not None and companion.user_id == user_id:
+        companion.set_cancel(run_id)
+    db.commit()
+    return run
+
+
+async def dry_run_agent(user_message: str, user_id: int, db: Session) -> DryRunResult:
+    """Execute a dry run: build the full prompt but do not call the LLM.
+
+    Does not create any DB records (threads, messages, runs).
+    """
+    companion = _get_companion(user_id)
+
+    # Look up existing thread without creating one.
+    from sqlalchemy import select as sa_select
+    from anima_server.models import AgentThread as AgentThreadModel
+    thread = db.scalar(sa_select(AgentThreadModel).where(
+        AgentThreadModel.user_id == user_id))
+
+    history: list[StoredMessage] = []
+    memory_blocks: tuple[MemoryBlock, ...] = ()
+    if thread is not None:
+        companion.thread_id = thread.id
+        history = companion.ensure_history_loaded(db)
+        memory_blocks = companion.ensure_memory_loaded(db)
+
+    runner = get_or_build_runner()
+    result = await runner.invoke(
+        user_message,
+        user_id,
+        history,
+        memory_blocks=memory_blocks,
+        dry_run=True,
+    )
+    assert isinstance(result, DryRunResult)
+    return result
+
+
 async def _execute_agent_turn(
     user_message: str,
     user_id: int,
@@ -116,12 +162,26 @@ async def _execute_agent_turn_locked(
     )
 
     # Stage 2: Invoke the runtime
-    result = await _invoke_turn_runtime(
-        user_message, user_id, db,
-        thread=thread, run=run, user_msg=user_msg,
-        turn_ctx=turn_ctx,
-        event_callback=event_callback,
-    )
+    companion = _get_companion(user_id)
+    cancel_event = companion.create_cancel_event(run.id)
+    try:
+        result = await _invoke_turn_runtime(
+            user_message, user_id, db,
+            thread=thread, run=run, user_msg=user_msg,
+            turn_ctx=turn_ctx,
+            event_callback=event_callback,
+            cancel_event=cancel_event,
+        )
+    finally:
+        companion.clear_cancel_event(run.id)
+
+    # Handle cancellation: persist cancel status and emit event
+    if result.stop_reason == StopReason.CANCELLED.value:
+        cancel_run(db, run.id)
+        db.commit()
+        if event_callback is not None:
+            await event_callback(build_cancelled_event(run.id))
+        return result
 
     # Stage 3: Persist result
     _persist_turn_result(
@@ -262,6 +322,7 @@ async def _invoke_turn_runtime(
     turn_ctx: _TurnContext,
     event_callback: Callable[[AgentStreamEvent],
                              Awaitable[None]] | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> AgentResult:
     """Stage 2: Set tool context and invoke the agent runtime."""
     set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
@@ -274,6 +335,7 @@ async def _invoke_turn_runtime(
             conversation_turn_count=turn_ctx.conversation_turn_count,
             memory_blocks=turn_ctx.memory_blocks,
             event_callback=event_callback,
+            cancel_event=cancel_event,
         )
     except StepFailedError as exc:
         _handle_step_failure(db, run=run, user_msg=user_msg, err=exc)

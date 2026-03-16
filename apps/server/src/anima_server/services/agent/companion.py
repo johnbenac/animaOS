@@ -12,6 +12,7 @@ The runtime itself stays stateless. AnimaCompanion feeds it cached state.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 from threading import Lock
@@ -63,6 +64,9 @@ class AnimaCompanion:
         self._conversation_window: list[StoredMessage] = []
         self._system_prompt: str | None = None
         self._emotional_state: dict[str, object] | None = None
+
+        # Cancellation events keyed by run_id.
+        self._cancel_events: dict[int, asyncio.Event] = {}
 
     # ------------------------------------------------------------------
     # Public cache API
@@ -155,6 +159,39 @@ class AnimaCompanion:
     @emotional_state.setter
     def emotional_state(self, value: dict[str, object] | None) -> None:
         self._emotional_state = value
+
+    # -- cancellation -------------------------------------------------
+
+    def create_cancel_event(self, run_id: int) -> asyncio.Event:
+        """Create and return a cancellation event for *run_id*."""
+        event = asyncio.Event()
+        self._cancel_events[run_id] = event
+        return event
+
+    def set_cancel(self, run_id: int) -> None:
+        """Signal cancellation for *run_id* (idempotent)."""
+        event = self._cancel_events.get(run_id)
+        if event is not None:
+            event.set()
+        else:
+            # Run may have already completed; create a pre-set event
+            # so any late check still sees the cancellation.
+            ev = asyncio.Event()
+            ev.set()
+            self._cancel_events[run_id] = ev
+
+    def is_cancelled(self, run_id: int) -> bool:
+        """Check whether *run_id* has been cancelled."""
+        event = self._cancel_events.get(run_id)
+        return event is not None and event.is_set()
+
+    def get_cancel_event(self, run_id: int) -> asyncio.Event | None:
+        """Return the cancel event for *run_id*, or None."""
+        return self._cancel_events.get(run_id)
+
+    def clear_cancel_event(self, run_id: int) -> None:
+        """Remove the cancel event once the run is terminal."""
+        self._cancel_events.pop(run_id, None)
 
     # -- lifecycle ----------------------------------------------------
 

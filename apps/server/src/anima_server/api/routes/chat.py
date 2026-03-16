@@ -15,14 +15,20 @@ from anima_server.db import get_db
 from anima_server.db.session import build_session_factory_for_db
 from anima_server.models import AgentMessage, AgentThread, MemoryDailyLog, MemoryItem, Task
 from anima_server.schemas.chat import (
+    CancelRunRequest,
+    CancelRunResponse,
     ChatHistoryClearResponse,
     ChatHistoryMessage,
     ChatRequest,
     ChatResetRequest,
     ChatResetResponse,
     ChatResponse,
+    DryRunRequest,
+    DryRunResponse,
 )
 from anima_server.services.agent import (
+    cancel_agent_run,
+    dry_run_agent,
     ensure_agent_ready,
     list_agent_history,
     reset_agent_thread,
@@ -380,3 +386,58 @@ async def trigger_deep_monologue(
 
 def _format_sse_event(event: str, data: dict[str, object]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@router.post("/runs/{run_id}/cancel", response_model=CancelRunResponse)
+async def cancel_run(
+    run_id: int,
+    payload: CancelRunRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> CancelRunResponse:
+    """Request cancellation of a running agent turn."""
+    require_unlocked_user(request, payload.userId)
+    from anima_server.models import AgentRun as AgentRunModel
+
+    run = db.get(AgentRunModel, run_id)
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.user_id != payload.userId:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Not authorized to cancel this run")
+    cancelled = await cancel_agent_run(run_id, payload.userId, db)
+    if cancelled is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return CancelRunResponse(runId=cancelled.id, status=cancelled.status)
+
+
+@router.post("/dry-run", response_model=DryRunResponse)
+async def dry_run(
+    payload: DryRunRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> DryRunResponse:
+    """Assemble the full prompt without calling the LLM."""
+    require_unlocked_user(request, payload.userId)
+
+    try:
+        result = await dry_run_agent(payload.message, payload.userId, db)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+    return DryRunResponse(
+        systemPrompt=result.system_prompt,
+        messages=[
+            {"role": m.role, "content": m.content}
+            for m in result.messages
+        ],
+        allowedTools=list(result.allowed_tools),
+        estimatedPromptTokens=result.estimated_prompt_tokens,
+        toolSchemas=list(result.tool_schemas),
+        memoryBlockCount=len(result.memory_blocks),
+    )
