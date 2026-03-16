@@ -151,11 +151,20 @@ def persist_agent_result(
             prompt_budget=result.prompt_budget if trace_index == 0 else None,
         )
 
+        # Inner thought steps are persisted for observability but excluded
+        # from the in-context conversation window — they'd waste tokens
+        # replaying "Thought recorded. Proceed..." on every future turn.
+        is_inner_thought_step = (
+            trace.tool_calls
+            and len(trace.tool_calls) == 1
+            and trace.tool_calls[0].name == "inner_thought"
+        )
+
         if trace.assistant_text or trace.tool_calls:
             if sequence_id is None:
                 raise RuntimeError(
                     "Missing reserved message sequence for assistant output.")
-            append_message(
+            msg = append_message(
                 db,
                 thread=thread,
                 run_id=run.id,
@@ -169,13 +178,16 @@ def persist_agent_result(
                 if trace.tool_calls
                 else None,
             )
+            if is_inner_thought_step:
+                msg.is_in_context = False
+                db.add(msg)
             sequence_id = sequence_id + 1
 
         for tool_result in trace.tool_results:
             if sequence_id is None:
                 raise RuntimeError(
                     "Missing reserved message sequence for tool output.")
-            append_message(
+            msg = append_message(
                 db,
                 thread=thread,
                 run_id=run.id,
@@ -186,6 +198,9 @@ def persist_agent_result(
                 tool_name=tool_result.name,
                 tool_call_id=tool_result.call_id,
             )
+            if is_inner_thought_step:
+                msg.is_in_context = False
+                db.add(msg)
             sequence_id = sequence_id + 1
 
     finalize_run(db, run=run, result=result)

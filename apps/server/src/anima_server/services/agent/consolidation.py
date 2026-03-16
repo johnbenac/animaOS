@@ -27,6 +27,12 @@ _background_tasks: set[asyncio.Task[None]] = set()
 EXTRACTION_PROMPT = """You are a memory extraction system for a personal AI companion.
 Given a conversation turn between a user and an assistant, extract personal facts and preferences about the user.
 
+The assistant response may include two sections:
+- [Agent's inner reasoning]: The assistant's private thoughts about the conversation. These contain useful observations about the user that should be extracted as memories.
+- [Agent's response to user]: What the assistant actually said.
+
+Both sections are valid sources for extraction.
+
 Return a JSON object with two fields:
 
 "memories": a JSON array. Each item:
@@ -42,14 +48,15 @@ Return a JSON object with two fields:
 - "evidence": what specifically indicated this
 
 Rules for memories:
-- Only extract what the user explicitly stated or clearly implied
-- Do not infer or speculate
-- Do not extract information about the assistant
+- Extract what the user explicitly stated or clearly implied
+- Also extract observations from the agent's inner reasoning (e.g. "User seems stressed about deadline" → "Currently stressed about work deadline")
+- Do not fabricate — only extract what is supported by the text
 - Use empty array [] if nothing worth remembering
 
 Rules for emotion:
 - Only report if confidence > 0.4
 - Set emotion to null if nothing notable
+- The agent's inner reasoning about the user's emotions is strong evidence
 
 User message:
 {user_message}
