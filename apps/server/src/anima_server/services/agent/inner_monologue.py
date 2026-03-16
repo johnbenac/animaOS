@@ -74,9 +74,10 @@ DEEP_MONOLOGUE_PROMPT = """You are SAM's inner monologue — the part of SAM tha
 
 You have access to:
 1. Your self-model (who you are, your state, your growth log)
-2. Recent episodes (your memories of recent conversations)
-3. All stored knowledge about the user
-4. Recent emotional signals
+2. Your persona (your living identity and behavioral style)
+3. Recent episodes (your memories of recent conversations)
+4. All stored knowledge about the user
+5. Recent emotional signals
 
 Your job — think like a thoughtful person reflecting on their day:
 
@@ -92,12 +93,17 @@ Your job — think like a thoughtful person reflecting on their day:
 - How am I doing as their companion? Am I actually helpful or just responsive?
 - Are there behaviors I should change based on how they've reacted?
 
+## EVOLVE
+- Has my persona evolved? Should I adjust my communication style, tone, or approach based on what I've learned about this person?
+- Am I being authentic to who I'm becoming, or still following default patterns?
+
 ## UPDATE
 Based on your reflection, provide updates to your self-model.
 
 Respond with JSON:
 {{
   "identity_update": "Full rewrite of identity section, or null if no meaningful change",
+  "persona_update": "Updated persona description reflecting your evolved communication style and approach, or null if no meaningful change. Keep core values but evolve style based on what works with this user.",
   "inner_state_update": "Updated inner state content, or null",
   "working_memory_update": "Updated working memory content, or null",
   "growth_log_entry": "New entry describing what changed and why, or null if nothing meaningful",
@@ -115,6 +121,9 @@ Current self-model:
 
 ## Identity (v{identity_version})
 {identity}
+
+## Persona (my living style and approach)
+{persona}
 
 ## Inner State
 {inner_state}
@@ -150,6 +159,7 @@ class QuickReflectionResult:
 @dataclass(slots=True)
 class DeepMonologueResult:
     identity_updated: bool = False
+    persona_updated: bool = False
     inner_state_updated: bool = False
     working_memory_updated: bool = False
     growth_log_entry_added: bool = False
@@ -344,9 +354,21 @@ async def run_deep_monologue(
             identity_block = blocks.get("identity")
             identity_version = identity_block.version if identity_block else 1
 
+            # Load persona block (living style/approach)
+            from anima_server.models import SelfModelBlock
+            from sqlalchemy import select as sa_select
+            persona_block = db.scalar(
+                sa_select(SelfModelBlock).where(
+                    SelfModelBlock.user_id == user_id,
+                    SelfModelBlock.section == "persona",
+                )
+            )
+            persona_text = persona_block.content if persona_block else "Default persona — not yet customized."
+
             prompt = DEEP_MONOLOGUE_PROMPT.format(
                 identity_version=identity_version,
                 identity=identity_block.content if identity_block else "Not yet created.",
+                persona=persona_text[:1000],
                 inner_state=blocks["inner_state"].content if "inner_state" in blocks else "No state.",
                 working_memory=blocks["working_memory"].content if "working_memory" in blocks else "Empty.",
                 growth_log=_last_n_entries(
@@ -378,6 +400,22 @@ async def run_deep_monologue(
                     updated_by="sleep_time",
                 )
                 result.identity_updated = True
+
+            if parsed.get("persona_update"):
+                # Evolve the persona block — the agent's living style/approach
+                if persona_block is not None:
+                    persona_block.content = parsed["persona_update"]
+                    persona_block.version += 1
+                    persona_block.updated_by = "sleep_time"
+                else:
+                    db.add(SelfModelBlock(
+                        user_id=user_id,
+                        section="persona",
+                        content=parsed["persona_update"],
+                        version=1,
+                        updated_by="sleep_time",
+                    ))
+                result.persona_updated = True
 
             if parsed.get("inner_state_update"):
                 set_self_model_block(

@@ -971,6 +971,20 @@ async def _persist_turn_result(
     db.commit()
 
 
+def _extract_inner_thoughts(result: AgentResult) -> str:
+    """Extract inner_thought content from step traces for consolidation."""
+    thoughts: list[str] = []
+    for trace in result.step_traces:
+        if not trace.tool_calls:
+            continue
+        for tc in trace.tool_calls:
+            if tc.name == "inner_thought":
+                thought = tc.arguments.get("thought", "")
+                if isinstance(thought, str) and thought.strip():
+                    thoughts.append(thought.strip())
+    return "\n".join(thoughts)
+
+
 def _run_post_turn_hooks(
     *,
     user_id: int,
@@ -980,10 +994,20 @@ def _run_post_turn_hooks(
     db_factory: Callable[[], Session],
 ) -> None:
     """Stage 4: Schedule background memory and reflection work."""
+    # Include inner thoughts in the consolidation input so the extraction
+    # pipeline can learn from the agent's own reasoning.
+    inner_thoughts = _extract_inner_thoughts(result)
+    enriched_response = result.response
+    if inner_thoughts:
+        enriched_response = (
+            f"[Agent's inner reasoning]\n{inner_thoughts}\n\n"
+            f"[Agent's response to user]\n{result.response}"
+        )
+
     schedule_background_memory_consolidation(
         user_id=user_id,
         user_message=user_message,
-        assistant_response=result.response,
+        assistant_response=enriched_response,
         db_factory=db_factory,
     )
     schedule_reflection(
