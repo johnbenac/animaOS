@@ -12,7 +12,6 @@ from __future__ import annotations
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -25,7 +24,7 @@ from anima_server.db.base import Base
 from anima_server.models import MemoryClaim, MemoryClaimEvidence, MemoryItem, MemoryItemTag, User
 from anima_server.services.agent.vector_store import (
     InMemoryVectorStore,
-    SqliteVecStore,
+    OrmVecStore,
 )
 import anima_server.services.agent.embeddings as emb
 from anima_server.services.agent.memory_store import (
@@ -103,91 +102,81 @@ def _make_item(
 # ===========================================================================
 
 
-class TestSqliteVecStore:
-    """SqliteVecStore: persistent, cosine similarity, CRUD."""
+class TestOrmVecStore:
+    """OrmVecStore: persistent in per-user anima.db, cosine similarity, CRUD."""
 
-    def test_upsert_and_search(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        store.upsert(1, item_id=1, content="hiking", embedding=[
-                     1.0, 0.0, 0.0], category="preference", importance=4)
-        store.upsert(1, item_id=2, content="engineer", embedding=[
-                     0.0, 1.0, 0.0], category="fact", importance=5)
+    def test_upsert_and_search(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            store.upsert(1, item_id=1, content="hiking", embedding=[
+                         1.0, 0.0, 0.0], category="preference", importance=4)
+            store.upsert(1, item_id=2, content="engineer", embedding=[
+                         0.0, 1.0, 0.0], category="fact", importance=5)
 
-        results = store.search_by_vector(
-            1, query_embedding=[0.9, 0.1, 0.0], limit=5)
-        assert len(results) == 2
-        assert results[0].item_id == 1
-        assert results[0].similarity > 0.8
+            results = store.search_by_vector(
+                1, query_embedding=[0.9, 0.1, 0.0], limit=5)
+            assert len(results) == 2
+            assert results[0].item_id == 1
+            assert results[0].similarity > 0.8
 
-    def test_category_filter(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        store.upsert(1, item_id=1, content="hiking", embedding=[
-                     1.0, 0.0], category="preference")
-        store.upsert(1, item_id=2, content="engineer",
-                     embedding=[0.0, 1.0], category="fact")
+    def test_category_filter(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            store.upsert(1, item_id=1, content="hiking", embedding=[
+                         1.0, 0.0], category="preference")
+            store.upsert(1, item_id=2, content="engineer",
+                         embedding=[0.0, 1.0], category="fact")
 
-        results = store.search_by_vector(
-            1, query_embedding=[1.0, 0.0], limit=5, category="fact")
-        assert len(results) == 1
-        assert results[0].item_id == 2
+            results = store.search_by_vector(
+                1, query_embedding=[1.0, 0.0], limit=5, category="fact")
+            assert len(results) == 1
+            assert results[0].item_id == 2
 
-    def test_delete(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        store.upsert(1, item_id=10, content="test", embedding=[1.0, 0.0])
-        assert store.count(1) == 1
-        store.delete(1, item_id=10)
-        assert store.count(1) == 0
+    def test_delete(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            store.upsert(1, item_id=10, content="test", embedding=[1.0, 0.0])
+            assert store.count(1) == 1
+            store.delete(1, item_id=10)
+            assert store.count(1) == 0
 
-    def test_rebuild(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        items = [
-            (1, "a", [1.0, 0.0], "fact", 3),
-            (2, "b", [0.0, 1.0], "fact", 4),
-        ]
-        assert store.rebuild(1, items) == 2
-        assert store.count(1) == 2
-        # Rebuild with fewer items replaces
-        assert store.rebuild(1, items[:1]) == 1
-        assert store.count(1) == 1
+    def test_rebuild(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            items = [
+                (1, "a", [1.0, 0.0], "fact", 3),
+                (2, "b", [0.0, 1.0], "fact", 4),
+            ]
+            assert store.rebuild(1, items) == 2
+            assert store.count(1) == 2
+            # Rebuild with fewer items replaces
+            assert store.rebuild(1, items[:1]) == 1
+            assert store.count(1) == 1
 
-    def test_persistence(self, tmp_path: Path) -> None:
-        db_path = tmp_path / "vec.db"
-        store1 = SqliteVecStore(db_path)
-        store1.upsert(1, item_id=1, content="persisted",
-                      embedding=[1.0, 0.0, 0.0])
-        # Close connection without deleting the file
-        store1._conn.close()
-        store1._conn = None
+    def test_text_search(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            store.upsert(
+                1, item_id=1, content="I love hiking in mountains", embedding=[1.0, 0.0])
+            store.upsert(
+                1, item_id=2, content="software engineer at Google", embedding=[0.0, 1.0])
 
-        # Re-open same DB file: data should survive
-        store2 = SqliteVecStore(db_path)
-        assert store2.count(1) == 1
-        results = store2.search_by_vector(
-            1, query_embedding=[1.0, 0.0, 0.0], limit=1)
-        assert results[0].content == "persisted"
+            results = store.search_by_text(
+                1, query_text="hiking mountains", limit=5)
+            assert len(results) >= 1
+            assert results[0].item_id == 1
 
-    def test_text_search(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        store.upsert(
-            1, item_id=1, content="I love hiking in mountains", embedding=[1.0, 0.0])
-        store.upsert(
-            1, item_id=2, content="software engineer at Google", embedding=[0.0, 1.0])
+    def test_user_isolation(self) -> None:
+        with _db_session() as db:
+            store = OrmVecStore(db)
+            store.upsert(1, item_id=1, content="user1", embedding=[1.0, 0.0])
+            store.upsert(2, item_id=2, content="user2", embedding=[0.0, 1.0])
 
-        results = store.search_by_text(
-            1, query_text="hiking mountains", limit=5)
-        assert len(results) >= 1
-        assert results[0].item_id == 1
-
-    def test_user_isolation(self, tmp_path: Path) -> None:
-        store = SqliteVecStore(tmp_path / "vec.db")
-        store.upsert(1, item_id=1, content="user1", embedding=[1.0, 0.0])
-        store.upsert(2, item_id=2, content="user2", embedding=[0.0, 1.0])
-
-        assert store.count(1) == 1
-        assert store.count(2) == 1
-        results = store.search_by_vector(
-            1, query_embedding=[1.0, 0.0], limit=10)
-        assert all(r.content == "user1" for r in results)
+            assert store.count(1) == 1
+            assert store.count(2) == 1
+            results = store.search_by_vector(
+                1, query_embedding=[1.0, 0.0], limit=10)
+            assert all(r.content == "user1" for r in results)
 
 
 class TestInMemoryVectorStore:

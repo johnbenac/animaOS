@@ -9,7 +9,6 @@ Covers:
 
 from __future__ import annotations
 
-import gc
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -103,18 +102,10 @@ def _make_item(
 @pytest.fixture(autouse=True)
 def _isolate_vector_store(managed_tmp_path: Path):
     """Fresh vector store for each test."""
-    vs._client = None
-    vs._legacy_cleanup_done = False
-    with patch.object(vs, "settings") as mock_settings:
-        mock_settings.data_dir = managed_tmp_path
-        yield
-    if vs._client is not None:
-        try:
-            vs._client.clear_system_cache()
-        except Exception:
-            pass
-    vs._client = None
-    gc.collect()
+    vs.reset_vector_store()
+    vs.use_in_memory_store()
+    yield
+    vs.reset_vector_store()
 
 
 # ===================================================================
@@ -689,6 +680,7 @@ class TestHybridSearchIntegration:
                 user.id, item_id=item_sem.id,
                 content=item_sem.content, embedding=[1.0, 0.0, 0.0],
                 category="fact", importance=3,
+                db=db,
             )
 
             # Item found by keyword (text overlap) but different embedding
@@ -700,6 +692,7 @@ class TestHybridSearchIntegration:
                 user.id, item_id=item_kw.id,
                 content=item_kw.content, embedding=[0.0, 1.0, 0.0],
                 category="fact", importance=3,
+                db=db,
             )
 
             db.commit()
@@ -758,6 +751,7 @@ class TestHybridSearchIntegration:
                 user.id, item_id=item.id,
                 content=item.content, embedding=[0.1, 0.2, 0.3],
                 category="fact", importance=3,
+                db=db,
             )
             db.commit()
 

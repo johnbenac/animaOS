@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     database_url: str = DEFAULT_DATABASE_URL
     database_echo: bool = False
     data_dir: Path = DEFAULT_DATA_DIR
-    agent_provider: str = "scaffold"
-    agent_model: str = "llama3.2"
+    agent_provider: str = "ollama"
+    agent_model: str = "qwen3.5:35b"
     agent_persona_template: str = "default"
     agent_base_url: str = ""
     agent_api_key: str = ""

@@ -191,17 +191,16 @@ async def delete_memory_item(
         )
     db.delete(existing)
     db.commit()
-    _remove_from_vector_store(user_id, item_id)
+    _remove_from_vector_store(user_id, item_id, db)
     return {"deleted": True}
 
 
-def _remove_from_vector_store(user_id: int, item_id: int) -> None:
-    """Best-effort removal from ChromaDB. Silently skips if vector store is not initialized."""
+def _remove_from_vector_store(user_id: int, item_id: int, db: Session) -> None:
+    """Best-effort removal from the per-user vector store."""
     try:
-        import anima_server.services.agent.vector_store as vs
+        from anima_server.services.agent.vector_store import delete_memory
 
-        if vs._client is not None:
-            vs.delete_memory(user_id, item_id=item_id)
+        delete_memory(user_id, item_id=item_id, db=db)
     except Exception:  # noqa: BLE001
         pass
 
@@ -326,7 +325,8 @@ async def list_episodes(
             time=ep.time,
             summary=df(user_id, ep.summary),
             topics=ep.topics_json or [],
-            emotionalArc=df(user_id, ep.emotional_arc) if ep.emotional_arc else None,
+            emotionalArc=df(
+                user_id, ep.emotional_arc) if ep.emotional_arc else None,
             significanceScore=ep.significance_score,
             turnCount=ep.turn_count,
             createdAt=ep.created_at,

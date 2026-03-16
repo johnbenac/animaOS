@@ -53,6 +53,7 @@ export interface ChatMessage {
   model?: string;
   provider?: string;
   createdAt?: string;
+  reasoning?: string;
 }
 
 export interface AgentResponse {
@@ -323,6 +324,15 @@ export function createApiClient(options: ApiClientOptions) {
         }
 
         if (
+          event === "reasoning" &&
+          typeof payload.content === "string" &&
+          payload.content
+        ) {
+          yield `\x00REASONING\x00${payload.content}`;
+          continue;
+        }
+
+        if (
           event === "chunk" &&
           typeof payload.content === "string" &&
           payload.content
@@ -342,24 +352,28 @@ export function createApiClient(options: ApiClientOptions) {
           continue;
         }
 
-        if (
-          event === "done" &&
-          !sawVisibleContent &&
-          !emittedTerminalToolOutput &&
-          terminalToolOutput
-        ) {
+        if (event === "done" && terminalToolOutput && !emittedTerminalToolOutput) {
           emittedTerminalToolOutput = true;
-          yield terminalToolOutput;
+          if (!sawVisibleContent) {
+            // No chunks were streamed — emit the terminal tool output
+            // as the complete response.
+            yield terminalToolOutput;
+          } else {
+            // Chunks were streamed (model likely output tool calls as
+            // text). Emit a reset marker followed by the clean terminal
+            // output so the UI can replace the raw streamed content.
+            yield `\x00CONTENT_RESET\x00${terminalToolOutput}`;
+          }
         }
       }
     }
 
-    if (
-      !sawVisibleContent &&
-      !emittedTerminalToolOutput &&
-      terminalToolOutput
-    ) {
-      yield terminalToolOutput;
+    if (terminalToolOutput && !emittedTerminalToolOutput) {
+      if (!sawVisibleContent) {
+        yield terminalToolOutput;
+      } else {
+        yield `\x00CONTENT_RESET\x00${terminalToolOutput}`;
+      }
     }
   }
 

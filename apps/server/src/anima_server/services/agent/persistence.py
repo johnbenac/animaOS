@@ -86,14 +86,22 @@ def list_transcript_messages(
         .limit(limit)
     ).all()
     rows.reverse()
-    # Filter out assistant rows that are tool-call wrappers; the actual
-    # response text lives in the paired "tool" row that follows.
+    # Filter out:
+    # 1. Assistant rows that are tool-call wrappers (the actual response
+    #    text lives in the paired "tool" row from send_message).
+    # 2. Tool-result rows from internal tools (inner_thought, note_to_self,
+    #    etc.) — only send_message results are user-visible responses.
     return [
         row for row in rows
         if not (
             row.role == "assistant"
             and isinstance(row.content_json, dict)
             and "tool_calls" in row.content_json
+        )
+        and not (
+            row.role == "tool"
+            and row.tool_name is not None
+            and row.tool_name != "send_message"
         )
     ]
 

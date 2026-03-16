@@ -44,6 +44,7 @@ export default function Chat() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState("");
+  const [reasoningBuffer, setReasoningBuffer] = useState("");
   const [error, setError] = useState("");
   const [translateLang, setTranslateLang] = useState(getDefaultLang);
   const [showLangSettings, setShowLangSettings] = useState(false);
@@ -163,10 +164,25 @@ export default function Chat() {
 
     setStreaming(true);
     setStreamBuffer("");
+    setReasoningBuffer("");
+
+    const CONTENT_RESET = "\x00CONTENT_RESET\x00";
+    const REASONING_PREFIX = "\x00REASONING\x00";
 
     try {
       let fullResponse = "";
+      let fullReasoning = "";
       for await (const chunk of api.chat.stream(userMsg, user.id)) {
+        if (chunk.startsWith(REASONING_PREFIX)) {
+          fullReasoning += chunk.slice(REASONING_PREFIX.length);
+          setReasoningBuffer(fullReasoning);
+          continue;
+        }
+        if (chunk.startsWith(CONTENT_RESET)) {
+          fullResponse = chunk.slice(CONTENT_RESET.length);
+          setStreamBuffer(fullResponse);
+          continue;
+        }
         fullResponse += chunk;
         setStreamBuffer(fullResponse);
       }
@@ -176,9 +192,11 @@ export default function Chat() {
         userId: user.id,
         role: "assistant",
         content: fullResponse || "[no response]",
+        reasoning: fullReasoning || undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamBuffer("");
+      setReasoningBuffer("");
     } catch (err: any) {
       setError(err.message || "Connection failed");
       // Preserve any partial streamed content as a visible message
@@ -196,6 +214,7 @@ export default function Chat() {
       });
     } finally {
       setStreaming(false);
+      setReasoningBuffer("");
       inputRef.current?.focus();
     }
   };
@@ -299,6 +318,21 @@ export default function Chat() {
             />
           ))}
 
+          {/* Reasoning indicator (thinking) */}
+          {streaming && reasoningBuffer && (
+            <div className="flex gap-3 animate-in fade-in duration-200">
+              <div className="text-[10px] text-text-muted/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
+                THINK
+              </div>
+              <div className="max-w-[86%] md:max-w-[74%] xl:max-w-[64%] bg-primary/[0.04] border border-primary/15 rounded-md px-3 py-2.5 md:px-4 md:py-3">
+                <div className="text-[12px] text-text-muted/70 whitespace-pre-wrap break-words leading-relaxed font-mono">
+                  {reasoningBuffer}
+                  <span className="inline-block w-1.5 h-3 bg-primary/40 ml-0.5 animate-pulse" />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Streaming indicator */}
           {streaming && streamBuffer && (
             <div className="flex gap-3 animate-in fade-in duration-200">
@@ -316,7 +350,7 @@ export default function Chat() {
             </div>
           )}
 
-          {streaming && !streamBuffer && (
+          {streaming && !streamBuffer && !reasoningBuffer && (
             <div className="flex gap-3 animate-in fade-in duration-200">
               <div className="text-[10px] text-text-muted/70 pt-1.5 select-none shrink-0 w-8 text-right uppercase">
                 {AI_LABEL}
@@ -393,6 +427,7 @@ function MessageBubble({
   const isSystem = message.role === "system";
   const [translation, setTranslation] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(false);
 
   const handleTranslate = async () => {
     if (translating) return;
@@ -466,8 +501,23 @@ function MessageBubble({
           </div>
         )}
 
+        {/* Reasoning (thinking) collapsible */}
+        {showReasoning && message.reasoning && (
+          <div className="mt-1.5 w-full px-3 py-2 md:px-4 md:py-2.5 rounded bg-primary/[0.04] border border-primary/15 text-[12px] text-text-muted/70 leading-relaxed font-mono whitespace-pre-wrap break-words max-h-60 overflow-y-auto">
+            {message.reasoning}
+          </div>
+        )}
+
         {/* Actions row — visible on hover */}
         <div className="flex items-center gap-3 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+          {!isUser && message.reasoning && (
+            <button
+              onClick={() => setShowReasoning((v) => !v)}
+              className="text-[10px] text-primary/50 hover:text-primary uppercase tracking-wider transition-colors"
+            >
+              {showReasoning ? "HIDE THINK" : "THINK"}
+            </button>
+          )}
           <button
             onClick={handleTranslate}
             disabled={translating}

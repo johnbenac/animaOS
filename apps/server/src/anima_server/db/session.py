@@ -63,12 +63,22 @@ def _make_engine(database_url: str | None = None) -> Engine:
                 "sqlcipher3 not installed - falling back to unencrypted SQLite. "
                 "Install sqlcipher3 to enable database encryption."
             )
-            return create_engine(
+            eng = create_engine(
                 url,
                 echo=settings.database_echo,
                 future=True,
                 connect_args={"check_same_thread": False},
             )
+
+            @event.listens_for(eng, "connect")
+            def _set_sqlite_pragmas_fallback(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+                del connection_record
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode = WAL")
+                cursor.execute("PRAGMA busy_timeout = 5000")
+                cursor.close()
+
+            return eng
 
         eng = create_engine(
             url,
@@ -84,6 +94,8 @@ def _make_engine(database_url: str | None = None) -> Engine:
             cursor = dbapi_connection.cursor()
             escaped = passphrase.replace("'", "''")
             cursor.execute(f"PRAGMA key = '{escaped}'")
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.execute("PRAGMA busy_timeout = 5000")
             cursor.close()
 
         logger.info("Database encryption enabled (SQLCipher).")
@@ -93,12 +105,22 @@ def _make_engine(database_url: str | None = None) -> Engine:
         raise RuntimeError("Encryption required but no passphrase provided.")
 
     logger.info("Database encryption not configured - using plain SQLite.")
-    return create_engine(
+    eng = create_engine(
         url,
         echo=settings.database_echo,
         future=True,
         connect_args={"check_same_thread": False},
     )
+
+    @event.listens_for(eng, "connect")
+    def _set_sqlite_pragmas_plain(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+        del connection_record
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode = WAL")
+        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.close()
+
+    return eng
 
 
 def get_engine(database_url: str) -> Engine:

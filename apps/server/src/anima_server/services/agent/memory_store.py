@@ -375,12 +375,11 @@ def supersede_memory_item(
     db.add(old_item)
     db.flush()
 
-    # Remove superseded item from vector store (only if already initialized)
+    # Remove superseded item from vector store
     try:
-        import anima_server.services.agent.vector_store as vs
+        from anima_server.services.agent.vector_store import delete_memory
 
-        if vs._client is not None:
-            vs.delete_memory(old_item.user_id, item_id=old_item_id)
+        delete_memory(old_item.user_id, item_id=old_item_id, db=db)
     except Exception:  # noqa: BLE001
         pass
 
@@ -439,7 +438,8 @@ def set_current_focus(
         .limit(1)
     )
     if existing is not None:
-        relation = _classify_memory_relation(df(user_id, existing.content), focus, "focus")
+        relation = _classify_memory_relation(
+            df(user_id, existing.content), focus, "focus")
         if relation == "duplicate":
             return existing
         return supersede_memory_item(

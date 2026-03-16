@@ -1,8 +1,8 @@
 """Vector embedding support for semantic memory search.
 
 Generates embeddings via LLM providers and stores them in both:
-- Persistent vector store (for fast indexed similarity search)
-- MemoryItem.embedding_json (for vault export/import portability)
+- MemoryVector table in per-user anima.db (for fast similarity search)
+- MemoryItem.embedding_json (for portability / brute-force fallback)
 
 All supported providers (ollama, openrouter, vllm) expose an
 OpenAI-compatible /v1/embeddings endpoint, so we use a single
@@ -232,27 +232,28 @@ async def semantic_search(
     limit: int = 10,
     similarity_threshold: float = 0.3,
 ) -> list[tuple[MemoryItem, float]]:
-    """Search memory items by semantic similarity using ChromaDB.
+    """Search memory items by semantic similarity.
 
-    Falls back to brute-force cosine over embedding_json if ChromaDB has no data.
+    Uses the per-user vector store first, falls back to brute-force cosine
+    over embedding_json if the vector store has no data.
     """
     query_embedding = await generate_embedding(query)
     if query_embedding is None:
         return []
 
-    # Try ChromaDB first (fast, indexed)
+    # Try vector store first (per-user anima.db)
     try:
         from anima_server.services.agent.vector_store import search_similar
 
-        chroma_results = search_similar(
+        vs_results = search_similar(
             user_id,
             query_embedding=query_embedding,
             limit=limit,
+            db=db,
         )
-        if chroma_results:
-            # Resolve to actual MemoryItem objects
+        if vs_results:
             item_ids = [
-                r["id"] for r in chroma_results if r["similarity"] >= similarity_threshold]
+                r["id"] for r in vs_results if r["similarity"] >= similarity_threshold]
             if item_ids:
                 items_by_id = {
                     item.id: item
@@ -261,12 +262,12 @@ async def semantic_search(
                     ).all()
                 }
                 results: list[tuple[MemoryItem, float]] = []
-                for r in chroma_results:
+                for r in vs_results:
                     if r["similarity"] >= similarity_threshold and r["id"] in items_by_id:
                         results.append((items_by_id[r["id"]], r["similarity"]))
                 return results[:limit]
     except Exception:  # noqa: BLE001
-        logger.debug("ChromaDB search failed, falling back to brute-force")
+        logger.debug("Vector store search failed, falling back to brute-force")
 
     # Fallback: brute-force over embedding_json column
     items = list(
@@ -298,18 +299,17 @@ async def embed_memory_item(
 ) -> bool:
     """Generate and store an embedding for a single memory item.
 
-    Stores in both the SQLite JSON column (for portability) and ChromaDB (for search).
+    Stores in both the embedding_json column (for portability/fallback)
+    and the MemoryVector table (for fast search).
     Returns True if successful.
     """
     embedding = await generate_embedding(item.content)
     if embedding is None:
         return False
 
-    # Store in SQLite for vault export/import
     item.embedding_json = embedding
     db.flush()
 
-    # Store in ChromaDB for fast search
     try:
         from anima_server.services.agent.vector_store import upsert_memory
 
@@ -320,9 +320,10 @@ async def embed_memory_item(
             embedding=embedding,
             category=item.category,
             importance=item.importance,
+            db=db,
         )
     except Exception:  # noqa: BLE001
-        logger.debug("Failed to upsert item %d into ChromaDB", item.id)
+        logger.debug("Failed to upsert item %d into vector store", item.id)
 
     return True
 
@@ -366,6 +367,7 @@ async def backfill_embeddings(
                 embedding=embedding,
                 category=item.category,
                 importance=item.importance,
+                db=db,
             )
         except Exception:  # noqa: BLE001
             logger.debug("Failed to upsert item %d into vector store", item.id)
@@ -381,7 +383,7 @@ def sync_to_vector_store(
     *,
     user_id: int,
 ) -> int:
-    """Sync all items with existing embeddings into ChromaDB. Used after vault import."""
+    """Sync all items with existing embeddings into the vector store. Used after vault import."""
     items = list(
         db.scalars(
             select(MemoryItem).where(
@@ -404,7 +406,7 @@ def sync_to_vector_store(
             for item in items
             if isinstance(item.embedding_json, list) and item.embedding_json
         ]
-        return rebuild_user_index(user_id, index_data)
+        return rebuild_user_index(user_id, index_data, db=db)
     except Exception:  # noqa: BLE001
         logger.exception(
             "Failed to sync embeddings to vector store for user %d", user_id)
@@ -506,6 +508,7 @@ async def hybrid_search(
         try:
             sem_results = search_similar(
                 user_id, query_embedding=query_embedding, limit=limit,
+                db=db,
             )
             semantic_ranked = [
                 (r["id"], r["similarity"])
@@ -540,7 +543,8 @@ async def hybrid_search(
     # --- Keyword leg ---
     keyword_ranked: list[tuple[int, float]] = []
     try:
-        kw_results = search_by_text(user_id, query_text=query, limit=limit)
+        kw_results = search_by_text(
+            user_id, query_text=query, limit=limit, db=db)
         keyword_ranked = [
             (r["id"], r["similarity"])
             for r in kw_results

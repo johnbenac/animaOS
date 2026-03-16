@@ -12,6 +12,7 @@ from anima_server.models.agent_runtime import (
     MemoryEpisode,
     MemoryItem,
     MemoryItemTag,
+    MemoryVector,
     SessionNote,
 )
 from anima_server.models.consciousness import (
@@ -39,6 +40,7 @@ __all__ = [
     "MemoryEpisode",
     "MemoryItem",
     "MemoryItemTag",
+    "MemoryVector",
     "SelfModelBlock",
     "SessionNote",
     "TelegramLink",

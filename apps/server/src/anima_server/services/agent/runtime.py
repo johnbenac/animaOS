@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
 from anima_server.services.agent.system_prompt import (
     SystemPromptContext,
@@ -49,9 +50,10 @@ from anima_server.services.agent.llm import (
 
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -257,31 +259,51 @@ class AgentRuntime:
             rule_violation_hit = False
 
             if not step_result.tool_calls:
-                synthetic_terminal_tool = await self._coerce_terminal_send_message(
+                coerced = await self._coerce_text_tool_calls(
                     step_result=step_result,
                     allowed_tool_names=allowed_tool_names,
                     step_index=step_index,
                     event_callback=event_callback,
                 )
-                if synthetic_terminal_tool is not None:
-                    synthetic_tool_call, synthetic_tool_result = synthetic_terminal_tool
-                    if synthetic_tool_call.name not in tools_used:
-                        tools_used.append(synthetic_tool_call.name)
-                    response = synthetic_tool_result.output or response
+                if coerced is not None:
+                    all_coerced_calls = tuple(tc for tc, _ in coerced)
+                    all_coerced_results = tuple(tr for _, tr in coerced)
+                    for tc, tr in coerced:
+                        if tc.name not in tools_used:
+                            tools_used.append(tc.name)
+                        # Feed tool results back into messages so the
+                        # loop can continue if no terminal tool was hit.
+                        messages.append(
+                            make_tool_message(
+                                tr.output,
+                                tool_call_id=tc.id,
+                                tool_name=tc.name,
+                            )
+                        )
                     step_ctx.progression = StepProgression.TOOLS_COMPLETED
                     step_traces.append(
                         _build_step_trace(
                             step_ctx, step_result, request_messages,
                             allowed_tool_names, force_tool_call,
-                            tool_calls=(synthetic_tool_call,),
-                            tool_results=(synthetic_tool_result,),
+                            tool_calls=all_coerced_calls,
+                            tool_results=all_coerced_results,
                         )
                     )
                     if event_callback is not None:
                         await event_callback(
                             build_timing_event(step_index, _compute_timing(step_ctx)))
-                    stop_reason = StopReason.TERMINAL_TOOL
-                    break
+                    # Check if any coerced call was terminal (send_message).
+                    terminal_hit = any(tr.is_terminal for _, tr in coerced)
+                    if terminal_hit:
+                        response = next(
+                            (tr.output for _, tr in coerced if tr.is_terminal),
+                            response,
+                        )
+                        stop_reason = StopReason.TERMINAL_TOOL
+                        break
+                    # Non-terminal coerced calls (e.g. inner_thought) —
+                    # continue the loop so the model can proceed.
+                    continue
 
                 response = step_result.assistant_text or response
                 if (
@@ -769,32 +791,60 @@ class AgentRuntime:
         assert last_exc is not None
         raise last_exc
 
-    async def _coerce_terminal_send_message(
+    async def _coerce_text_tool_calls(
         self,
         *,
         step_result: StepExecutionResult,
         allowed_tool_names: Sequence[str],
         step_index: int,
         event_callback: StreamEventCallback | None,
-    ) -> tuple[ToolCall, ToolExecutionResult] | None:
+    ) -> list[tuple[ToolCall, ToolExecutionResult]] | None:
+        """Detect and execute tool calls that the model output as plain text.
+
+        Some models (especially smaller ones) emit tool calls like
+        ``inner_thought("thinking...")`` or ``send_message("hello")`` as
+        plain text instead of structured tool calls.  This method parses
+        those patterns and executes them as if they were real tool calls,
+        keeping the cognitive loop intact.
+        """
         if not step_result.assistant_text.strip():
             return None
-        if "send_message" not in self._tool_registry:
-            return None
 
-        tool_call = ToolCall(
-            id=f"synthetic-send-message-{step_index}",
-            name="send_message",
-            arguments={"message": step_result.assistant_text},
+        parsed = _parse_text_tool_calls(
+            step_result.assistant_text,
+            set(self._tool_registry.keys()),
         )
-        tool_result = await self._tool_executor.execute(
-            tool_call,
-            is_terminal=True,
-        )
-        if event_callback is not None:
-            await event_callback(build_tool_call_event(step_index, tool_call))
-            await event_callback(build_tool_return_event(step_index, tool_result))
-        return tool_call, tool_result
+        if not parsed:
+            # No recognizable tool calls in the text.  Fall back to
+            # coercing the entire text as a send_message if available.
+            if "send_message" not in self._tool_registry:
+                return None
+            parsed = [_ParsedTextToolCall(
+                name="send_message",
+                arguments={"message": step_result.assistant_text.strip()},
+            )]
+
+        results: list[tuple[ToolCall, ToolExecutionResult]] = []
+        for i, ptc in enumerate(parsed):
+            if ptc.name not in self._tool_registry:
+                continue
+            tool_call = ToolCall(
+                id=f"synthetic-{ptc.name}-{step_index}-{i}",
+                name=ptc.name,
+                arguments=ptc.arguments,
+            )
+            # send_message is the only terminal tool in the cognitive loop.
+            is_terminal = ptc.name == "send_message"
+            tool_result = await self._tool_executor.execute(
+                tool_call,
+                is_terminal=is_terminal,
+            )
+            if event_callback is not None:
+                await event_callback(build_tool_call_event(step_index, tool_call))
+                await event_callback(build_tool_return_event(step_index, tool_result))
+            results.append((tool_call, tool_result))
+
+        return results if results else None
 
 
 def build_loop_runtime() -> AgentRuntime:
@@ -807,6 +857,116 @@ def build_loop_runtime() -> AgentRuntime:
         tool_executor=ToolExecutor(tools),
         max_steps=max(1, settings.agent_max_steps),
     )
+
+
+# Matches: tool_name("content") or tool_name('content') with optional triple-quotes.
+# Captures: group 'name' = tool name, groups 1-4 = content variants.
+_TEXT_TOOL_CALL_RE = re.compile(
+    r'^(?P<name>[a-z_][a-z0-9_]*)\(\s*(?:'
+    r'"((?:[^"\\]|\\.)*)"|'       # double-quoted content
+    r"'((?:[^'\\]|\\.)*)'|"       # single-quoted content
+    r'"""(.*?)"""|'               # triple-double-quoted
+    r"'''(.*?)'''"                # triple-single-quoted
+    r')\s*\)$',
+    re.DOTALL,
+)
+
+# Matches: tool_name {"key": "..."} or tool_name({"key": "..."})
+_TEXT_TOOL_CALL_JSON_RE = re.compile(
+    r'^(?P<name>[a-z_][a-z0-9_]*)\s*\(?\s*(?P<json>\{.*?\})\s*\)?$',
+    re.DOTALL,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _ParsedTextToolCall:
+    """A tool call parsed from plain text output."""
+    name: str
+    arguments: dict[str, object]
+
+
+def _parse_text_tool_calls(
+    text: str,
+    known_tool_names: set[str],
+) -> list[_ParsedTextToolCall]:
+    """Parse tool calls that models output as plain text instead of structured calls.
+
+    Recognizes patterns like:
+    - ``tool_name("string argument")``
+    - ``tool_name {"key": "value"}``
+    - ``tool_name({"key": "value"})``
+
+    Only matches tool names that exist in ``known_tool_names``.
+    Returns a list of parsed calls (may contain multiple if text has
+    consecutive calls separated by newlines).
+    """
+    results: list[_ParsedTextToolCall] = []
+    stripped = text.strip()
+
+    # Try single-call patterns first (most common case).
+    parsed = _try_parse_single_text_tool_call(stripped, known_tool_names)
+    if parsed is not None:
+        results.append(parsed)
+        return results
+
+    # Try line-by-line for consecutive tool calls (e.g. inner_thought then send_message).
+    for line in stripped.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        parsed = _try_parse_single_text_tool_call(line, known_tool_names)
+        if parsed is not None:
+            results.append(parsed)
+
+    return results
+
+
+def _try_parse_single_text_tool_call(
+    text: str,
+    known_tool_names: set[str],
+) -> _ParsedTextToolCall | None:
+    """Try to parse a single text tool call."""
+    # Pattern 1: tool_name("string")
+    match = _TEXT_TOOL_CALL_RE.match(text)
+    if match:
+        name = match.group("name")
+        if name not in known_tool_names:
+            return None
+        content = next(g for g in match.groups()[1:] if g is not None)
+        content = content.replace('\\"', '"').replace("\\'", "'")
+        # Infer the argument name from the tool's first parameter.
+        arg_name = _infer_first_arg_name(name)
+        return _ParsedTextToolCall(name=name, arguments={arg_name: content})
+
+    # Pattern 2: tool_name {"key": "value"} or tool_name({"key": "value"})
+    json_match = _TEXT_TOOL_CALL_JSON_RE.match(text)
+    if json_match:
+        name = json_match.group("name")
+        if name not in known_tool_names:
+            return None
+        try:
+            data = json.loads(json_match.group("json"))
+            if isinstance(data, dict):
+                return _ParsedTextToolCall(name=name, arguments=data)
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+# Map of known tool name -> first argument name for single-string-arg coercion.
+_FIRST_ARG_NAMES: dict[str, str] = {
+    "send_message": "message",
+    "inner_thought": "thought",
+    "continue_reasoning": "reasoning",
+    "note_to_self": "note",
+    "core_memory_append": "content",
+    "save_to_memory": "content",
+}
+
+
+def _infer_first_arg_name(tool_name: str) -> str:
+    return _FIRST_ARG_NAMES.get(tool_name, "input")
 
 
 def _default_response(stop_reason: StopReason) -> str:

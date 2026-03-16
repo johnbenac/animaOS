@@ -1,28 +1,25 @@
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import patch
-
 import pytest
 
-import anima_server.services.agent.vector_store as vs
 from anima_server.services.agent.vector_store import (
+    InMemoryVectorStore,
     delete_memory,
     get_collection,
     rebuild_user_index,
     reset_vector_store,
     search_similar,
     upsert_memory,
+    use_in_memory_store,
 )
 
 
 @pytest.fixture(autouse=True)
-def _isolate_store(managed_tmp_path: Path):
-    """Give each test a fresh vector store and isolated data dir."""
+def _isolate_store():
+    """Give each test a fresh in-memory vector store."""
     reset_vector_store()
-    with patch.object(vs, "settings") as mock_settings:
-        mock_settings.data_dir = managed_tmp_path
-        yield
+    use_in_memory_store()
+    yield
     reset_vector_store()
 
 
@@ -110,18 +107,3 @@ def test_empty_collection_search() -> None:
         limit=5,
     )
     assert results == []
-
-
-def test_legacy_persist_dir_is_removed_on_init(managed_tmp_path: Path) -> None:
-    legacy_dir = managed_tmp_path / "chroma"
-    legacy_dir.mkdir(parents=True, exist_ok=True)
-    (legacy_dir / "old-index.txt").write_text("legacy plaintext", encoding="utf-8")
-
-    # Force-reset so the next get_vector_store triggers cleanup path
-    vs._store = None
-    vs._legacy_cleanup_done = False
-    # Trigger actual store initialization (get_collection is lazy)
-    from anima_server.services.agent.vector_store import get_vector_store
-    get_vector_store()
-
-    assert not legacy_dir.exists()

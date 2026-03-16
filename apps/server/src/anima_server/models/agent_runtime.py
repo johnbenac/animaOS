@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -454,3 +455,22 @@ class MemoryDailyLog(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class MemoryVector(Base):
+    __tablename__ = "memory_vectors"
+
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("memory_items.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="fact")
+    importance: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

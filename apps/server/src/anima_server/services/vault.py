@@ -1,23 +1,14 @@
 from __future__ import annotations
-
-import base64
-import hashlib
-import json
-import logging
-import os
-import shutil
-from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
-from typing import Any
-from uuid import uuid4
-
-vault_logger = logging.getLogger(__name__)
-
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
-
-from anima_server.config import settings
+from anima_server.services.crypto import (
+    ARGON2_MEMORY_COST_KIB,
+    ARGON2_PARALLELISM,
+    ARGON2_TIME_COST,
+    AUTH_TAG_LENGTH,
+    IV_LENGTH,
+    KEY_LENGTH,
+    SALT_LENGTH,
+    derive_argon2id_key,
+)
 from anima_server.models import (
     AgentMessage,
     AgentRun,
@@ -33,16 +24,24 @@ from anima_server.models import (
     User,
     UserKey,
 )
-from anima_server.services.crypto import (
-    ARGON2_MEMORY_COST_KIB,
-    ARGON2_PARALLELISM,
-    ARGON2_TIME_COST,
-    AUTH_TAG_LENGTH,
-    IV_LENGTH,
-    KEY_LENGTH,
-    SALT_LENGTH,
-    derive_argon2id_key,
-)
+from anima_server.config import settings
+from sqlalchemy.orm import Session
+from sqlalchemy import select, text
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+import base64
+import hashlib
+import json
+import logging
+import os
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from typing import Any
+from uuid import uuid4
+
+vault_logger = logging.getLogger(__name__)
+
 
 VAULT_VERSION = 2
 
@@ -152,7 +151,7 @@ def import_vault(db: Session, vault: str, passphrase: str, *, user_id: int | Non
     restore_database_snapshot(db, database)
     write_data_snapshot(user_files, user_id=user_id)
 
-    # Rebuild ChromaDB vector index from imported embeddings
+    # Rebuild vector index from imported embeddings
     _rebuild_vector_indices(db, database)
 
     restored_memory_files = sum(
@@ -695,7 +694,7 @@ def read_data_snapshot(*, user_id: int | None = None) -> dict[str, str]:
         if relative_path.name in {"anima.db", "anima.db-shm", "anima.db-wal"}:
             continue
         if relative_path.parts and relative_path.parts[0] == "chroma":
-            continue
+            continue  # skip legacy chroma directory if present
         # Scope to user directory if user_id is set (files are stored under users/{id}/)
         if user_id is not None and relative_path.parts:
             if relative_path.parts[0] == "users" and len(relative_path.parts) > 1:
@@ -756,7 +755,8 @@ def write_data_snapshot(user_files: dict[str, Any], *, user_id: int | None = Non
                 continue
             if safe_path.parts[:2] != ("users", str(user_id)):
                 continue
-            local_relative = Path(*safe_path.parts[2:]) if len(safe_path.parts) > 2 else Path()
+            local_relative = Path(
+                *safe_path.parts[2:]) if len(safe_path.parts) > 2 else Path()
             if not local_relative.parts:
                 continue
             target = user_root / local_relative
@@ -1050,7 +1050,7 @@ def sync_agent_thread_sequence_counters(db: Session) -> None:
 
 
 def _rebuild_vector_indices(db: Session, snapshot: dict[str, Any]) -> None:
-    """Rebuild ChromaDB vector indices from imported embedding data."""
+    """Rebuild vector indices in per-user anima.db from imported embedding data."""
     try:
         from anima_server.services.agent.embeddings import sync_to_vector_store
 
