@@ -347,46 +347,62 @@ def complete_task(text: str) -> str:
 def recall_memory(query: str, category: str = "") -> str:
     """Search your memory for information about the user. Use this when the user asks
     what you remember, or when you need to look up something specific about them.
-    Returns matching memories ranked by relevance.
+    Returns matching memories ranked by relevance (semantic + keyword hybrid search).
     Optional category filter: fact, preference, goal, relationship (or empty for all).
     Examples:
     - "what do you remember about my sister?" -> query="sister"
     - "what are my goals?" -> query="goals", category="goal"
     """
+    import asyncio
     from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.services.agent.memory_store import get_memory_items
-    from anima_server.models import MemoryItem, MemoryEpisode
+    from anima_server.models import MemoryEpisode
     from sqlalchemy import select
 
     ctx = get_tool_context()
-    query_lower = query.lower().strip()
-
-    if not query_lower:
+    query_stripped = query.strip()
+    if not query_stripped:
         return "Please provide a search query."
 
     cat = category.strip().lower() if category else None
     if cat and cat not in ("fact", "preference", "goal", "relationship"):
         cat = None
 
-    # Search memory items by text match
-    items = get_memory_items(
-        ctx.db, user_id=ctx.user_id, category=cat, limit=100,
-    )
+    # Use hybrid search (semantic + keyword) via Phase 1 infrastructure
     scored: list[tuple[float, str, str]] = []
-    for item in items:
-        content_lower = item.content.lower()
-        # Exact substring match scores highest
-        if query_lower in content_lower:
-            scored.append(
-                (1.0, item.content, item.category))
-            continue
-        # Word overlap
-        query_words = set(query_lower.split())
-        content_words = set(content_lower.split())
-        if query_words and content_words:
-            overlap = len(query_words & content_words) / len(query_words)
-            if overlap >= 0.5:
-                scored.append((overlap, item.content, item.category))
+    hybrid_succeeded = False
+    try:
+        from anima_server.services.agent.embeddings import hybrid_search
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(hybrid_search(
+            ctx.db, user_id=ctx.user_id, query=query_stripped,
+            limit=20, similarity_threshold=0.2,
+        ))
+        for item, score in result.items:
+            if cat and item.category != cat:
+                continue
+            scored.append((score, item.content, item.category))
+        hybrid_succeeded = True
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Text-based fallback: used when hybrid fails OR returns no items
+    if not scored:
+        from anima_server.services.agent.memory_store import get_memory_items
+        query_lower = query_stripped.lower()
+        items = get_memory_items(
+            ctx.db, user_id=ctx.user_id, category=cat, limit=100,
+        )
+        for item in items:
+            content_lower = item.content.lower()
+            if query_lower in content_lower:
+                scored.append((1.0, item.content, item.category))
+                continue
+            query_words = set(query_lower.split())
+            content_words = set(content_lower.split())
+            if query_words and content_words:
+                overlap = len(query_words & content_words) / len(query_words)
+                if overlap >= 0.5:
+                    scored.append((overlap, item.content, item.category))
 
     # Also search episodes
     episodes = list(ctx.db.scalars(
@@ -395,6 +411,7 @@ def recall_memory(query: str, category: str = "") -> str:
         .order_by(MemoryEpisode.created_at.desc())
         .limit(50)
     ).all())
+    query_lower = query_stripped.lower()
     for ep in episodes:
         summary_lower = ep.summary.lower()
         if query_lower in summary_lower:
@@ -414,10 +431,61 @@ def recall_memory(query: str, category: str = "") -> str:
 
     scored.sort(key=lambda x: x[0], reverse=True)
     lines: list[str] = []
-    for score, content, cat_label in scored[:10]:
+    for _score, content, cat_label in scored[:10]:
         lines.append(f"- [{cat_label}] {content}")
 
     return f"Found {len(scored)} matching memories:\n" + "\n".join(lines)
+
+
+@tool
+def recall_conversation(query: str, role: str = "", start_date: str = "", end_date: str = "", limit: str = "10") -> str:
+    """Search past conversations for specific exchanges or topics.
+    Use this when the user asks about something discussed previously,
+    or when you need to recall a specific past conversation.
+
+    Args:
+        query: What to search for — described naturally.
+        role: Filter by message role: 'user', 'assistant', or empty for all.
+        start_date: Only return messages from this date onward (YYYY-MM-DD). Inclusive.
+        end_date: Only return messages up to this date (YYYY-MM-DD). Inclusive.
+        limit: Maximum results to return (default 10).
+
+    Examples:
+        - "what did we talk about yesterday?" -> query="yesterday's topics"
+        - "what did I say about my job?" -> query="job work career"
+        - "conversations from last week" -> query="", start_date="2026-03-09", end_date="2026-03-15"
+    """
+    import asyncio
+    from anima_server.services.agent.tool_context import get_tool_context
+    from anima_server.services.agent.conversation_search import search_conversation_history
+
+    ctx = get_tool_context()
+
+    max_results = 10
+    try:
+        max_results = max(1, min(20, int(limit)))
+    except (ValueError, TypeError):
+        pass
+
+    loop = asyncio.get_event_loop()
+    hits = loop.run_until_complete(search_conversation_history(
+        ctx.db,
+        user_id=ctx.user_id,
+        query=query.strip(),
+        role_filter=role.strip(),
+        start_date=start_date.strip(),
+        end_date=end_date.strip(),
+        limit=max_results,
+    ))
+
+    if not hits:
+        return f"No past conversations found matching: {query}" if query.strip() else "No conversations found in that date range."
+
+    lines: list[str] = []
+    for hit in hits:
+        lines.append(f"- [{hit.date}] {hit.role}: {hit.content}")
+
+    return f"Found {len(hits)} conversation matches:\n" + "\n".join(lines)
 
 
 @tool
@@ -474,7 +542,7 @@ def get_tools() -> list[Any]:
         note_to_self, dismiss_note, save_to_memory,
         set_intention, complete_goal,
         create_task, list_tasks, complete_task,
-        recall_memory, update_human_memory,
+        recall_memory, recall_conversation, update_human_memory,
     ]
 
 

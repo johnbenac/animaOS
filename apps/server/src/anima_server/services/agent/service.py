@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from threading import Lock
 
 from anima_server.config import settings
-from anima_server.services.agent.compaction import compact_thread_context
+from anima_server.services.agent.compaction import compact_thread_context, estimate_message_tokens
 from anima_server.services.agent.companion import (
     AnimaCompanion,
     get_companion,
@@ -406,7 +406,7 @@ async def _execute_agent_turn_locked(
         return result
 
     # Stage 3: Persist result
-    _persist_turn_result(
+    await _persist_turn_result(
         db, thread=thread, run=run, result=result,
         initial_sequence_id=initial_sequence_id,
     )
@@ -525,6 +525,12 @@ async def _prepare_turn_context(
     except Exception:  # noqa: BLE001
         pass
 
+    # Memory pressure warning: estimate total context usage and inject
+    # a warning block when approaching the context window limit.
+    memory_blocks = _inject_memory_pressure_warning(
+        memory_blocks, history, companion,
+    )
+
     # Append the user message to the companion's conversation window.
     companion.append_to_window(
         [StoredMessage(role="user", content=user_message)])
@@ -535,6 +541,59 @@ async def _prepare_turn_context(
         memory_blocks=memory_blocks,
     )
     return thread, run, user_msg, initial_sequence_id, turn_ctx
+
+
+_MEMORY_PRESSURE_WARNING = (
+    "[SYSTEM NOTE: Your conversation context is getting full. "
+    "Consider using save_to_memory to persist important facts, and "
+    "keep your responses concise. Older conversation will be "
+    "summarized automatically to free space.]"
+)
+
+# Warning fires at 80% of context window; compaction fires at the
+# configured trigger ratio (default 80% of max_tokens, applied to
+# conversation tokens only).  The warning here covers the FULL
+# context (blocks + history).
+_MEMORY_PRESSURE_RATIO = 0.80
+
+
+def _inject_memory_pressure_warning(
+    memory_blocks: tuple[MemoryBlock, ...],
+    history: list[StoredMessage],
+    companion: AnimaCompanion,
+) -> tuple[MemoryBlock, ...]:
+    """Add a memory pressure warning block when context usage is high.
+
+    Only alerts once per pressure window to avoid spamming the agent.
+    Resets when the conversation is compacted (history shrinks).
+    """
+    # Estimate total tokens: memory block chars + history chars, / 4
+    block_chars = sum(len(b.value) for b in memory_blocks)
+    history_chars = sum(len(m.content or "") for m in history)
+    estimated_tokens = (block_chars + history_chars) // 4
+
+    threshold = int(settings.agent_max_tokens * _MEMORY_PRESSURE_RATIO)
+
+    if estimated_tokens < threshold:
+        # Below pressure — reset the alert flag if it was set
+        if getattr(companion, "_memory_pressure_alerted", False):
+            # type: ignore[attr-defined]
+            companion._memory_pressure_alerted = False
+        return memory_blocks
+
+    # Already alerted this pressure window — don't repeat
+    if getattr(companion, "_memory_pressure_alerted", False):
+        return memory_blocks
+
+    companion._memory_pressure_alerted = True  # type: ignore[attr-defined]
+
+    warning_block = MemoryBlock(
+        label="memory_pressure_warning",
+        value=_MEMORY_PRESSURE_WARNING,
+        description="Context window pressure alert",
+        read_only=True,
+    )
+    return memory_blocks + (warning_block,)
 
 
 async def _invoke_turn_runtime(
@@ -696,7 +755,7 @@ def _persist_approval_checkpoint(
     return pending_tool_call
 
 
-def _persist_turn_result(
+async def _persist_turn_result(
     db: Session,
     *,
     thread: AgentThread,
@@ -704,7 +763,11 @@ def _persist_turn_result(
     result: AgentResult,
     initial_sequence_id: int,
 ) -> None:
-    """Stage 3: Write result to DB and compact if needed."""
+    """Stage 3: Write result to DB and compact if needed.
+
+    Attempts LLM-powered summarization first for richer summaries,
+    falling back to fast text-based compaction on failure.
+    """
     result_message_count = count_persisted_result_messages(result)
     persist_agent_result(
         db,
@@ -721,8 +784,8 @@ def _persist_turn_result(
             else None
         ),
     )
-    compact_thread_context(
-        db,
+
+    compaction_kwargs = dict(
         thread=thread,
         run_id=run.id,
         trigger_token_limit=max(
@@ -738,6 +801,19 @@ def _persist_turn_result(
             else 0
         ),
     )
+
+    # Try LLM-powered compaction first (best-effort)
+    llm_result = None
+    try:
+        from anima_server.services.agent.compaction import compact_thread_context_with_llm
+        llm_result = await compact_thread_context_with_llm(db, **compaction_kwargs)
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Fall back to fast text-based compaction if LLM didn't trigger
+    if llm_result is None:
+        compact_thread_context(db, **compaction_kwargs)
+
     db.commit()
 
 
