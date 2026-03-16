@@ -290,6 +290,8 @@ class ToolRulesSolver:
 def build_default_tool_rules(tool_names: Collection[str]) -> tuple[ToolRule, ...]:
     normalized_tools = _normalize_tool_names(tool_names)
     rules: list[ToolRule] = []
+    if "inner_thought" in normalized_tools:
+        rules.append(InitToolRule(tool_name="inner_thought"))
     if "send_message" in normalized_tools:
         rules.append(TerminalToolRule(tool_name="send_message"))
     return tuple(rules)

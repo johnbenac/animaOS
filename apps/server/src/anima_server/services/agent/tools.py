@@ -62,6 +62,22 @@ def _build_args_schema(func: Callable[..., Any]) -> _SimpleSchema:
 
 
 @tool
+def inner_thought(thought: str) -> str:
+    """Record your private reasoning before taking action. This is ALWAYS your
+    first step in every turn. The user never sees this — it is internal only.
+    Use it to:
+    - Interpret the user's intent and emotional tone
+    - Decide which tools to call (or whether to respond directly)
+    - Reflect on what you know and what you need to look up
+    - Plan multi-step actions before executing them
+    Keep thoughts concise (1-3 sentences). Example:
+    inner_thought("The user seems frustrated about their project deadline. I should
+    acknowledge the stress and ask what specific help they need.")
+    """
+    return "Thought recorded. Proceed with your next action or send_message."
+
+
+@tool
 def current_datetime() -> str:
     """Return the current date and time in ISO-8601 format (UTC)."""
     return datetime.now(timezone.utc).isoformat()
@@ -651,7 +667,7 @@ def continue_reasoning() -> str:
 def get_tools() -> list[Any]:
     """Return all tools available to the agent."""
     return [
-        current_datetime, send_message, continue_reasoning,
+        inner_thought, current_datetime, send_message, continue_reasoning,
         core_memory_append, core_memory_replace,
         note_to_self, dismiss_note, save_to_memory,
         set_intention, complete_goal,
