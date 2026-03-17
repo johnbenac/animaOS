@@ -59,8 +59,13 @@ a {
 
 /* Terminal cursor blink */
 @keyframes cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 .animate-cursor {
@@ -69,8 +74,12 @@ a {
 
 /* Subtle scan line for certain surfaces */
 @keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
 }
 
 /* Prose — sharp, monospace headers */

@@ -57,11 +57,14 @@ def _resolve_embedding_model() -> str:
 def _resolve_embedding_base_url() -> str:
     """Resolve the base URL for embeddings.
 
-    For ollama, the native /api/embed endpoint is used instead of the
-    OpenAI-compatible /v1/embeddings because ollama's /v1/embeddings
-    may not be available in older versions.
+    For openrouter we always use the canonical API URL regardless of any
+    local ``agent_base_url`` override (which is typically pointed at a
+    local Ollama instance for chat).  For other providers, delegate to
+    the shared ``resolve_base_url`` helper.
     """
     provider = settings.agent_provider
+    if provider == "openrouter":
+        return "https://openrouter.ai/api/v1"
     return resolve_base_url(provider)
 
 
@@ -130,6 +133,19 @@ async def generate_embedding(text: str) -> list[float] | None:
 
     if provider == "scaffold":
         return None
+
+    if provider == "openrouter":
+        try:
+            result = await _embed_ollama(text)
+        except Exception:
+            logger.debug(
+                "OpenRouter has no embeddings endpoint and local Ollama "
+                "fallback unavailable — skipping embedding generation")
+            return None
+        if result is not None:
+            key = _cache_key(text)
+            _cache_put(key, result)
+        return result
 
     # Check cache first
     key = _cache_key(text)
@@ -304,7 +320,8 @@ async def embed_memory_item(
     and the MemoryVector table (for fast search).
     Returns True if successful.
     """
-    plaintext = df(item.user_id, item.content, table="memory_items", field="content")
+    plaintext = df(item.user_id, item.content,
+                   table="memory_items", field="content")
     embedding = await generate_embedding(plaintext)
     if embedding is None:
         return False
@@ -351,7 +368,8 @@ async def backfill_embeddings(
     if not items:
         return 0
 
-    plaintexts = [df(user_id, item.content, table="memory_items", field="content") for item in items]
+    plaintexts = [df(user_id, item.content, table="memory_items",
+                     field="content") for item in items]
     embeddings = await generate_embeddings_batch(plaintexts)
 
     count = 0

@@ -35,6 +35,7 @@ class OpenAICompatibleChatClient:
         transport: httpx.AsyncBaseTransport | None = None,
         tools: Sequence[Any] = (),
         tool_choice: str | dict[str, object] | None = None,
+        max_tokens: int | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -44,6 +45,7 @@ class OpenAICompatibleChatClient:
         self._transport = transport
         self._tools = tuple(tools)
         self._tool_choice = tool_choice
+        self._max_tokens = max_tokens
         self._shared_client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -78,6 +80,7 @@ class OpenAICompatibleChatClient:
             transport=self._transport,
             tools=tools,
             tool_choice=resolved_tool_choice,
+            max_tokens=self._max_tokens,
         )
         # Share the underlying httpx client for connection reuse
         new_client._shared_client = self._shared_client
@@ -107,7 +110,8 @@ class OpenAICompatibleChatClient:
         return OpenAICompatibleResponse(
             content=_coerce_response_content(message.get("content")),
             tool_calls=tool_calls,
-            usage_metadata=body.get("usage") if isinstance(body.get("usage"), dict) else None,
+            usage_metadata=body.get("usage") if isinstance(
+                body.get("usage"), dict) else None,
         )
 
     async def astream(
@@ -126,7 +130,9 @@ class OpenAICompatibleChatClient:
             },
             json=payload,
         ) as response:
-            response.raise_for_status()
+            if response.status_code >= 400:
+                await response.aread()
+                response.raise_for_status()
 
             async for line in response.aiter_lines():
                 trimmed = line.strip()
@@ -149,7 +155,8 @@ class OpenAICompatibleChatClient:
                     delta = {}
 
                 yield OpenAICompatibleStreamChunk(
-                    content_delta=_coerce_response_content(delta.get("content")),
+                    content_delta=_coerce_response_content(
+                        delta.get("content")),
                     tool_call_deltas=_normalize_stream_tool_call_deltas(
                         delta.get("tool_calls")
                     ),
@@ -170,6 +177,8 @@ class OpenAICompatibleChatClient:
             "messages": [_serialize_message(message) for message in input],
             "stream": stream,
         }
+        if self._max_tokens is not None:
+            payload["max_tokens"] = self._max_tokens
         if self._tools:
             payload["tools"] = [_serialize_tool(tool) for tool in self._tools]
         if self._tool_choice is not None:
@@ -214,7 +223,8 @@ def _serialize_message(message: Any) -> dict[str, object]:
         "role": "assistant",
         "content": _serialize_content(getattr(message, "content", "")),
     }
-    tool_calls = _normalize_request_tool_calls(getattr(message, "tool_calls", ()))
+    tool_calls = _normalize_request_tool_calls(
+        getattr(message, "tool_calls", ()))
     if tool_calls:
         payload["tool_calls"] = tool_calls
     return payload
@@ -294,7 +304,8 @@ def _normalize_response_tool_calls(raw_tool_calls: object) -> tuple[dict[str, ob
         name = str(function.get("name", "")).strip()
         if not name:
             continue
-        arguments, parse_error, raw_arguments = _parse_tool_arguments(function.get("arguments"))
+        arguments, parse_error, raw_arguments = _parse_tool_arguments(
+            function.get("arguments"))
         payload: dict[str, object] = {
             "id": str(raw_tool_call.get("id") or f"tool-call-{index}"),
             "name": name,
@@ -375,7 +386,8 @@ def _serialize_tool_choice(
 def _serialize_tool(tool: Any) -> dict[str, object]:
     name = _tool_name(tool)
     if not name:
-        raise ValueError("Tool name is required for OpenAI-compatible serialization.")
+        raise ValueError(
+            "Tool name is required for OpenAI-compatible serialization.")
     description = _tool_description(tool)
     parameters = _tool_parameters(tool)
     function_payload: dict[str, object] = {
