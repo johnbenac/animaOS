@@ -579,7 +579,10 @@ def test_chat_compacts_thread_context_into_summary() -> None:
     summary_messages = [
         message for message in in_context_messages if message.role == "summary"]
     assert len(summary_messages) == 1
-    assert "Conversation summary:" in (summary_messages[0].content_text or "")
+    # Summary text is now encrypted at rest (fix #3). Verify a summary
+    # message exists and is non-empty; the plaintext content is verified by
+    # the unit-level compaction tests which run without encryption.
+    assert summary_messages[0].content_text
     assert thread.next_message_sequence == all_messages[-1].sequence_id + 1
     assert any(message.role == "user" for message in compacted_messages)
     assert any(message.role == "assistant" for message in compacted_messages)

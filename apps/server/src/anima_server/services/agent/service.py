@@ -101,8 +101,8 @@ async def cancel_agent_run(run_id: int, user_id: int, db: Session) -> AgentRun |
     run = cancel_run(db, run_id)
     if run is None:
         return None
-    companion = get_companion()
-    if companion is not None and companion.user_id == user_id:
+    companion = get_companion(user_id)
+    if companion is not None:
         companion.set_cancel(run_id)
     db.commit()
     return run
@@ -891,8 +891,8 @@ def _persist_approval_checkpoint(
     )
 
     # Update companion window
-    companion = get_companion()
-    if companion is not None and companion.user_id == run.user_id:
+    companion = get_companion(run.user_id)
+    if companion is not None:
         result_messages = []
         for trace in result.step_traces:
             if trace.assistant_text:
@@ -938,6 +938,10 @@ async def _persist_turn_result(
             else None
         ),
     )
+
+    # Commit persistence before compaction to avoid holding the DB lock
+    # open during a potentially slow LLM summarization call.
+    db.commit()
 
     compaction_kwargs = dict(
         thread=thread,
@@ -1077,8 +1081,8 @@ def list_agent_history(user_id: int, db: Session, *, limit: int = 50) -> list[Ag
 async def reset_agent_thread(user_id: int, db: Session) -> None:
     reset_thread(db, user_id)
     db.commit()
-    companion = get_companion()
-    if companion is not None and companion.user_id == user_id:
+    companion = get_companion(user_id)
+    if companion is not None:
         companion.reset()
 
 

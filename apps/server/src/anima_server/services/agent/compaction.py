@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentThread
 from anima_server.services.agent.sequencing import reserve_message_sequences
+from anima_server.services.data_crypto import ef, df
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def compact_thread_context(
         step_id=None,
         sequence_id=summary_sequence_id,
         role="summary",
-        content_text=summary_text,
+        content_text=ef(thread.user_id, summary_text),
         content_json={
             "compacted_message_count": len(compacted_rows),
             "source_sequence_end": compacted_rows[-1].sequence_id,
@@ -184,7 +185,7 @@ def render_summary_text(
     lines: list[str] = ["Conversation summary:"]
 
     for summary_row in summary_rows:
-        content = (summary_row.content_text or "").strip()
+        content = df(user_id, (summary_row.content_text or "")).strip()
         if not content:
             continue
         compact_content = _trim_summary_text(content)
@@ -212,7 +213,7 @@ def _summarize_row(row: AgentMessage, *, user_id: int = 0) -> str:
         role_label = f"Tool {row.tool_name}"
 
     content = _trim_summary_text(
-        row.content_text or "")
+        df(user_id, row.content_text or ""))
     if not content:
         return f"{role_label}: [empty]"
     return f"{role_label}: {content}"
@@ -448,20 +449,23 @@ async def compact_thread_context_with_llm(
     summary_sequence_id = reserve_message_sequences(
         db, thread_id=thread.id, count=1,
     )
+    # Track whether LLM was used before we potentially modify summary_text
+    used_llm = summary_text != render_summary_text(
+        existing_summary_rows, compacted_rows, user_id=thread.user_id
+    )
+
     summary_message = AgentMessage(
         thread_id=thread.id,
         run_id=run_id,
         step_id=None,
         sequence_id=summary_sequence_id,
         role="summary",
-        content_text=summary_text,
+        content_text=ef(thread.user_id, summary_text),
         content_json={
             "compacted_message_count": len(compacted_rows),
             "total_hidden_message_count": total_hidden,
             "source_sequence_end": compacted_rows[-1].sequence_id,
-            "llm_summarized": summary_text != render_summary_text(
-                existing_summary_rows, compacted_rows, user_id=thread.user_id
-            ),
+            "llm_summarized": used_llm,
         },
         is_in_context=True,
         token_estimate=estimate_message_tokens(

@@ -236,15 +236,17 @@ async def consolidate_turn_memory_with_llm(
     )
     llm_items = extraction.memories
 
+    from anima_server.db.session import SessionLocal
+
+    factory = db_factory or SessionLocal
+
     # Record any emotional signal extracted alongside memories
     emotion_data = extraction.emotion
     if emotion_data and emotion_data.get("emotion"):
         try:
             from anima_server.services.agent.emotional_intelligence import record_emotional_signal
-            from anima_server.db.session import SessionLocal as _SL
 
-            _ef = db_factory or _SL
-            with _ef() as _edb:
+            with factory() as _edb:
                 record_emotional_signal(
                     _edb,
                     user_id=user_id,
@@ -261,10 +263,6 @@ async def consolidate_turn_memory_with_llm(
 
     if not llm_items:
         return result
-
-    from anima_server.db.session import SessionLocal
-
-    factory = db_factory or SessionLocal
     regex_contents = {c.lower()
                       for c in result.facts_added + result.preferences_added}
 
@@ -606,8 +604,8 @@ async def run_background_memory_consolidation(
 
         # Invalidate companion memory cache so the next turn sees fresh data.
         from anima_server.services.agent.companion import get_companion
-        companion = get_companion()
-        if companion is not None and companion.user_id == user_id:
+        companion = get_companion(user_id)
+        if companion is not None:
             companion.invalidate_memory()
 
     except Exception:  # noqa: BLE001

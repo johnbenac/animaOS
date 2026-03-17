@@ -1099,7 +1099,7 @@ def test_executor_rejects_parse_error_args() -> None:
     from anima_server.services.agent.tools import current_datetime
 
     executor = ToolExecutor([current_datetime])
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         executor.execute(
             ToolCall(
                 id="tc-1",

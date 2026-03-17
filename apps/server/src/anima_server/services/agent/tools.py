@@ -115,7 +115,7 @@ def note_to_self(key: str, value: str, note_type: str = "observation") -> str:
     )
 
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -132,7 +132,7 @@ def dismiss_note(key: str) -> str:
     removed = remove_session_note(ctx.db, thread_id=ctx.thread_id, key=key)
     if removed:
         from anima_server.services.agent.companion import get_companion
-        companion = get_companion()
+        companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
         return f"Dismissed note: {key}"
@@ -181,7 +181,7 @@ def save_to_memory(key: str, category: str = "fact", importance: str = "3", tags
     )
     if item is not None:
         from anima_server.services.agent.companion import get_companion
-        companion = get_companion()
+        companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
         return f"Saved to long-term memory: {item.content}"
@@ -213,7 +213,7 @@ def set_intention(title: str, evidence: str = "", priority: str = "background", 
     )
 
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -230,7 +230,7 @@ def complete_goal(title: str) -> str:
     found = complete_intention(ctx.db, user_id=ctx.user_id, title=title)
     if found:
         from anima_server.services.agent.companion import get_companion
-        companion = get_companion()
+        companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
         return f"Marked as completed: {title}"
@@ -271,7 +271,7 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -357,7 +357,7 @@ def complete_task(text: str) -> str:
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -398,12 +398,20 @@ def recall_memory(query: str, category: str = "", tags: str = "") -> str:
     hybrid_succeeded = False
     try:
         from anima_server.services.agent.embeddings import hybrid_search
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(hybrid_search(
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        coro = hybrid_search(
             ctx.db, user_id=ctx.user_id, query=query_stripped,
             limit=20, similarity_threshold=0.2,
             tags=parsed_tags,
-        ))
+        )
+        if loop is not None:
+            result = asyncio.run_coroutine_threadsafe(coro, loop).result(timeout=30)
+        else:
+            result = asyncio.run(coro)
         for item, score in result.items:
             if cat and item.category != cat:
                 continue
@@ -494,16 +502,32 @@ def recall_conversation(query: str, role: str = "", start_date: str = "", end_da
     except (ValueError, TypeError):
         pass
 
-    loop = asyncio.get_event_loop()
-    hits = loop.run_until_complete(search_conversation_history(
-        ctx.db,
-        user_id=ctx.user_id,
-        query=query.strip(),
-        role_filter=role.strip(),
-        start_date=start_date.strip(),
-        end_date=end_date.strip(),
-        limit=max_results,
-    ))
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+
+    if loop is not None:
+        future = asyncio.run_coroutine_threadsafe(search_conversation_history(
+            ctx.db,
+            user_id=ctx.user_id,
+            query=query.strip(),
+            role_filter=role.strip(),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+            limit=max_results,
+        ), loop)
+        hits = future.result(timeout=30)
+    else:
+        hits = asyncio.run(search_conversation_history(
+            ctx.db,
+            user_id=ctx.user_id,
+            query=query.strip(),
+            role_filter=role.strip(),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+            limit=max_results,
+        ))
 
     if not hits:
         return f"No past conversations found matching: {query}" if query.strip() else "No conversations found in that date range."
@@ -555,7 +579,7 @@ def update_human_memory(content: str) -> str:
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -602,7 +626,7 @@ def core_memory_append(label: str, content: str) -> str:
 
     ctx.memory_modified = True
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 
@@ -647,7 +671,7 @@ def core_memory_replace(label: str, old_text: str, new_text: str) -> str:
 
     ctx.memory_modified = True
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
+    companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
 

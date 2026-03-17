@@ -138,8 +138,8 @@ async def run_reflection(
     # Invalidate companion memory cache so the next turn picks up changes
     # made by working-memory expiry, inner monologue, and sleep tasks.
     from anima_server.services.agent.companion import get_companion
-    companion = get_companion()
-    if companion is not None and companion.user_id == user_id:
+    companion = get_companion(user_id)
+    if companion is not None:
         companion.invalidate_memory()
 
 

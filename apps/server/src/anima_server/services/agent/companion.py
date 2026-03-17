@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 _companion_lock = Lock()
-_companion: AnimaCompanion | None = None
+_companions: dict[int, AnimaCompanion] = {}
 
 
 class AnimaCompanion:
@@ -140,7 +140,7 @@ class AnimaCompanion:
         """Replace the window (used at cold-start and after compaction)."""
         cap = self._keep_last_messages
         if len(history) > cap:
-            self._conversation_window = history[-cap:]
+            self._conversation_window = _trim_at_turn_boundary(history, cap)
         else:
             self._conversation_window = list(history)
 
@@ -148,7 +148,8 @@ class AnimaCompanion:
         self._conversation_window.extend(messages)
         cap = self._keep_last_messages
         if len(self._conversation_window) > cap:
-            self._conversation_window = self._conversation_window[-cap:]
+            self._conversation_window = _trim_at_turn_boundary(
+                self._conversation_window, cap)
 
     # -- emotional state ----------------------------------------------
 
@@ -276,30 +277,78 @@ class AnimaCompanion:
         return self._conversation_window
 
 
+def _trim_at_turn_boundary(
+    messages: list[StoredMessage], cap: int,
+) -> list[StoredMessage]:
+    """Trim a message list to approximately *cap* messages at a safe boundary.
+
+    Instead of a naive ``[-cap:]`` slice that can cut in the middle of an
+    assistant+tool_call+tool_result sequence, this finds the nearest safe
+    boundary near the target cut point.  A safe boundary is a message with
+    role ``user`` or ``assistant`` (not ``tool``), so tool result messages
+    always have their paired assistant message present in the window.
+    """
+    if len(messages) <= cap:
+        return list(messages)
+
+    # Target cut index (messages before this are dropped)
+    cut = len(messages) - cap
+
+    # If the cut point already lands on a safe boundary, use it.
+    if messages[cut].role in ("user", "assistant"):
+        return list(messages[cut:])
+
+    # Walk backward from cut to find a safe start (user or assistant).
+    # This keeps slightly more messages than cap but avoids orphaned
+    # tool results referencing a truncated assistant message.
+    for i in range(cut - 1, -1, -1):
+        if messages[i].role in ("user", "assistant"):
+            return list(messages[i:])
+
+    # Walk forward from cut to find the next safe start.
+    for i in range(cut + 1, len(messages)):
+        if messages[i].role in ("user", "assistant"):
+            return list(messages[i:])
+
+    return list(messages[-cap:])
+
+
 # ------------------------------------------------------------------
 # Module-level singleton management
 # ------------------------------------------------------------------
 
-def get_companion() -> AnimaCompanion | None:
-    """Return the current companion instance, or None if not yet created."""
-    return _companion
+def get_companion(user_id: int | None = None) -> AnimaCompanion | None:
+    """Return a companion instance by user_id, or None if not yet created.
+
+    When *user_id* is None (e.g. called from a tool without user context),
+    returns the companion only if there is exactly one active companion.
+    """
+    if user_id is not None:
+        return _companions.get(user_id)
+    if len(_companions) == 1:
+        return next(iter(_companions.values()))
+    return None
 
 
 def get_or_build_companion(runtime: AgentRuntime, user_id: int) -> AnimaCompanion:
-    """Return the companion singleton, creating it if needed."""
-    global _companion
-    if _companion is not None and _companion.user_id == user_id:
-        return _companion
+    """Return the companion for *user_id*, creating it if needed."""
+    existing = _companions.get(user_id)
+    if existing is not None:
+        return existing
 
     with _companion_lock:
-        if _companion is not None and _companion.user_id == user_id:
-            return _companion
-        _companion = AnimaCompanion(runtime=runtime, user_id=user_id)
-        return _companion
+        existing = _companions.get(user_id)
+        if existing is not None:
+            return existing
+        companion = AnimaCompanion(runtime=runtime, user_id=user_id)
+        _companions[user_id] = companion
+        return companion
 
 
-def invalidate_companion() -> None:
-    """Discard the companion singleton (e.g. on settings change)."""
-    global _companion
+def invalidate_companion(user_id: int | None = None) -> None:
+    """Discard companion(s). If *user_id* given, discard only that one."""
     with _companion_lock:
-        _companion = None
+        if user_id is not None:
+            _companions.pop(user_id, None)
+        else:
+            _companions.clear()
