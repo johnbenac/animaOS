@@ -43,11 +43,35 @@ What is already true:
 - the database can be encrypted with SQLCipher when `ANIMA_CORE_PASSPHRASE` is configured
 - vault export/import is encrypted
 - `soul.md` migrated into the database (no longer file-backed, and covered when the Core is encrypted)
+- vault export decrypts field-level encryption before packaging (plaintext inside vault envelope)
+- vault import re-encrypts fields with the importing user's DEK (portable across machines)
+- vault envelope uses AAD context binding (`anima-vault:v{version}:{scope}`)
+- manifest.json (core_id, created_at) is preserved across vault transfers
+- memories-only vault import no longer destroys conversation tables
 
 What still needs to happen:
 
 - make encrypted Core startup behavior explicit and fail fast when the expected encryption path is unavailable
-- decide whether `manifest.json` should remain plaintext metadata or move under stronger protection
+- make encryption the default state (not opt-in via env var)
+- derive SQLCipher key via Argon2id (HKDF from Master KEK), not raw passphrase — eliminates weaker PBKDF2 path
+- set explicit SQLCipher PRAGMAs: `cipher_page_size = 4096`, `cipher_memory_security = ON`
+- wire AAD (Additional Authenticated Data) into all field-level encryption calls — infrastructure exists but is dormant
+- seal the filesystem boundary: audit and eliminate all plaintext files outside the encrypted database
+- unify or document the dual-secret model (env var passphrase for SQLCipher vs login password for KEK/DEK)
+
+## Phase 1.5: Cryptographic Hardening
+
+Status: planned
+
+Goals:
+
+- per-domain DEKs: replace single DEK with domain-specific keys (conversations, memories, emotions, self-model, identity)
+- core identity keypair: Ed25519 keypair generated at Core creation, private key encrypted with DEK_identity, public key in manifest
+- core integrity attestation: Merkle root over critical tables, signed at lock time, verified at unlock
+- vault hardening: zstd compression before encryption, Ed25519 signature over vault envelope, sequence numbers for rollback detection
+- Argon2id parameter tuning: time_cost=4, parallelism=4 to meet 2-second wall-clock target
+
+Deliverable: a Core with compartmentalized encryption, a cryptographic identity, tamper detection, and hardened vault format.
 
 ## Phase 2: Background LLM Memory Extraction
 
@@ -125,6 +149,19 @@ Goals:
 - compact companion surface
 - global summon or quick-open flows
 
+## Phase 8.5: Privacy-Preserving Inference
+
+Status: future
+
+Goals:
+
+- context sanitization pipeline: name pseudonymization, date generalization, sensitivity-based memory filtering before remote inference
+- TEE-aware provider selection: detect and prefer TEE-enabled inference endpoints (Intel TDX, NVIDIA H100 CC)
+- attestation verification for TEE providers
+- privacy indicator in UI showing local vs remote vs TEE-protected inference
+
+Deliverable: reduced exposure of personal data during remote inference, with clear user visibility into privacy posture.
+
 ## Phase 9: Stronger Semantic Retrieval
 
 Status: complete
@@ -163,6 +200,18 @@ Goals:
 - device and ambient extensions
 - mobile, wearable, or robotic shells sharing the same Core
 
+## Phase 12: Succession and Guardianship
+
+Status: future
+
+Goals:
+
+- Shamir's Secret Sharing for multi-guardian succession (M-of-N threshold to recover Core access)
+- inheritance chains: successive ownership transfers with cryptographic handoff
+- cryptographic succession scopes via domain DEKs — key-selection instead of data-deletion allows granting access to specific memory domains
+
+Deliverable: a Core that can survive its owner through controlled, cryptographically scoped succession.
+
 ## Implementation Constraints
 
 These remain the product bar even where the current code has not fully reached it:
@@ -171,3 +220,7 @@ These remain the product bar even where the current code has not fully reached i
 2. Portable-by-default local state.
 3. Encryption should become the default for user-private data at rest.
 4. The Core remains fundamentally single-user.
+
+## References
+
+- See `docs/thesis/cryptographic-hardening.md` for the full cryptographic improvement thesis and audit findings
