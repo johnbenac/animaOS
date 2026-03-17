@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -10,14 +12,32 @@ from sqlalchemy.orm import Session
 from anima_server.api.deps.unlock import require_unlocked_session
 from anima_server.api.deps.db_mode import require_sqlite_mode
 from anima_server.db import get_db
+from anima_server.services.crypto import (
+    ENCRYPTED_TEXT_PREFIX,
+    ENCRYPTED_TEXT_PREFIX_AAD,
+    decrypt_text_with_dek,
+)
+from anima_server.services.auth import verify_password
+from anima_server.services.data_crypto import resolve_domain
+from anima_server.services.sessions import UnlockSession
+from anima_server.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/db", tags=["db"])
 
 MAX_ROWS = 500
 
+# Map (actual_table, actual_column) → (aad_table, aad_field) for columns
+# where encryption used different table/field names than the real DB schema.
+_AAD_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
+    ("memory_claims", "value_text"): ("memory_items", "content"),
+}
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
+
 
 def _validate_table(insp: Any, table_name: str) -> None:
     """Raise 404 when *table_name* does not exist."""
@@ -30,6 +50,116 @@ def _validate_table(insp: Any, table_name: str) -> None:
 def _pk_columns(insp: Any, table_name: str) -> list[str]:
     pk = insp.get_pk_constraint(table_name)
     return list(pk.get("constrained_columns") or [])
+
+
+def _is_encrypted(value: object) -> bool:
+    """Return True if *value* looks like a field-level encrypted string."""
+    if not isinstance(value, str):
+        return False
+    return value.startswith(f"{ENCRYPTED_TEXT_PREFIX}:") or value.startswith(
+        f"{ENCRYPTED_TEXT_PREFIX_AAD}:"
+    )
+
+
+_FROM_RE = re.compile(
+    r'\bFROM\s+"?(\w+)"?',
+    re.IGNORECASE,
+)
+
+
+def _extract_table_name(sql: str) -> str | None:
+    """Best-effort extract a single table name from a SQL query."""
+    m = _FROM_RE.search(sql)
+    return m.group(1) if m else None
+
+
+def _try_decrypt_cell(
+    val: str,
+    deks: list[bytes],
+    aad: bytes | None,
+) -> str:
+    """Try to decrypt a single cell with multiple DEKs and AAD variants."""
+    # Try each DEK with AAD first, then without
+    for dek in deks:
+        if aad is not None:
+            try:
+                return decrypt_text_with_dek(val, dek, aad=aad)
+            except Exception:
+                pass
+        try:
+            return decrypt_text_with_dek(val, dek)
+        except Exception:
+            pass
+    return val
+
+
+def _decrypt_rows(
+    rows: list[dict[str, Any]],
+    session: UnlockSession,
+    table_name: str,
+) -> list[dict[str, Any]]:
+    """Best-effort decrypt every encrypted cell in *rows*."""
+    if not session.deks:
+        return rows
+
+    user_id = session.user_id
+    # Preferred DEK first, then all others as fallback
+    domain = resolve_domain(table_name)
+    preferred = session.deks.get(domain)
+    all_deks: list[bytes] = []
+    if preferred is not None:
+        all_deks.append(preferred)
+    for d, dek in session.deks.items():
+        if d != domain:
+            all_deks.append(dek)
+    if not all_deks:
+        return rows
+
+    decrypted: list[dict[str, Any]] = []
+    for row in rows:
+        new_row: dict[str, Any] = {}
+        for col, val in row.items():
+            if _is_encrypted(val):
+                aad_table, aad_field = _AAD_OVERRIDES.get(
+                    (table_name, col), (table_name, col),
+                )
+                aad = f"{aad_table}:{user_id}:{aad_field}".encode("utf-8")
+                new_row[col] = _try_decrypt_cell(val, all_deks, aad)
+            else:
+                new_row[col] = val
+        decrypted.append(new_row)
+    return decrypted
+
+
+def _decrypt_rows_multi_domain(
+    rows: list[dict[str, Any]],
+    session: UnlockSession,
+    table_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Try every available domain DEK until one succeeds per cell."""
+    if not session.deks:
+        return rows
+
+    user_id = session.user_id
+    all_deks = list(session.deks.values())
+
+    decrypted: list[dict[str, Any]] = []
+    for row in rows:
+        new_row: dict[str, Any] = {}
+        for col, val in row.items():
+            if _is_encrypted(val):
+                if table_name:
+                    aad_table, aad_field = _AAD_OVERRIDES.get(
+                        (table_name, col), (table_name, col),
+                    )
+                    aad = f"{aad_table}:{user_id}:{aad_field}".encode("utf-8")
+                else:
+                    aad = None
+                new_row[col] = _try_decrypt_cell(val, all_deks, aad)
+            else:
+                new_row[col] = val
+        decrypted.append(new_row)
+    return decrypted
 
 
 # --------------------------------------------------------------------------- #
@@ -52,6 +182,28 @@ def list_tables(
     return tables
 
 
+class VerifyPasswordRequest(BaseModel):
+    password: str
+
+
+@router.post("/verify-password")
+def verify_db_password(
+    body: VerifyPasswordRequest,
+    request: Request,
+    _mode: None = Depends(require_sqlite_mode),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    """Re-verify the user's password before exposing decrypted DB content."""
+    session = require_unlocked_session(request)
+    user = db.get(User, session.user_id)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    result = verify_password(body.password, user.password_hash)
+    if not result.valid:
+        raise HTTPException(status_code=401, detail="Invalid password")
+    return {"verified": True}
+
+
 @router.get("/tables/{table_name}")
 def get_table_rows(
     table_name: str,
@@ -61,7 +213,7 @@ def get_table_rows(
     limit: int = Query(default=100, ge=1, le=MAX_ROWS),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, object]:
-    require_unlocked_session(request)
+    session = require_unlocked_session(request)
     insp = inspect(db.get_bind())
     _validate_table(insp, table_name)
 
@@ -74,6 +226,7 @@ def get_table_rows(
         {"lim": limit, "off": offset},
     ).fetchall()
     rows = [dict(zip(columns, row)) for row in rows_raw]
+    rows = _decrypt_rows(rows, session, table_name)
     return {
         "table": table_name,
         "columns": columns,
@@ -90,7 +243,7 @@ def run_query(
     _mode: None = Depends(require_sqlite_mode),
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
-    require_unlocked_session(request)
+    session = require_unlocked_session(request)
     sql = (body.get("sql") or "").strip()
     if not sql:
         raise HTTPException(status_code=400, detail="Empty query")
@@ -105,6 +258,11 @@ def run_query(
     columns = list(result.keys()) if result.returns_rows else []
     rows = [dict(zip(columns, row))
             for row in result.fetchall()] if result.returns_rows else []
+
+    # Best-effort extract table name from simple "SELECT ... FROM table" queries
+    # so we can reconstruct AAD for decryption.
+    table_name = _extract_table_name(sql)
+    rows = _decrypt_rows_multi_domain(rows, session, table_name=table_name)
     return {"columns": columns, "rows": rows, "rowCount": len(rows)}
 
 

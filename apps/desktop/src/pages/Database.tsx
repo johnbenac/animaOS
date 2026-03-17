@@ -9,6 +9,12 @@ import {
 type View = "tables" | "rows" | "query";
 
 export default function Database() {
+  // Password gate
+  const [unlocked, setUnlocked] = useState(false);
+  const [password, setPassword] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+
   const [view, setView] = useState<View>("tables");
   const [tables, setTables] = useState<DbTableInfo[]>([]);
   const [tableData, setTableData] = useState<DbTableData | null>(null);
@@ -26,9 +32,24 @@ export default function Database() {
 
   const PAGE_SIZE = 100;
 
+  async function handleVerify() {
+    if (!password) return;
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      await api.db.verifyPassword(password);
+      setUnlocked(true);
+      setPassword("");
+    } catch (e: unknown) {
+      setVerifyError(e instanceof Error ? e.message : "Verification failed");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   useEffect(() => {
-    loadTables();
-  }, []);
+    if (unlocked) loadTables();
+  }, [unlocked]);
 
   // Reset editing state when edit mode is toggled off
   useEffect(() => {
@@ -94,7 +115,9 @@ export default function Database() {
   // Row editing helpers
   // ---------------------------------------------------------------------------
 
-  function buildConditions(row: Record<string, unknown>): Record<string, unknown> {
+  function buildConditions(
+    row: Record<string, unknown>,
+  ): Record<string, unknown> {
     if (!tableData) return {};
     const pks = tableData.primaryKeys ?? [];
     if (pks.length === 0) return {};
@@ -272,9 +295,7 @@ export default function Database() {
                       ) : (
                         <span
                           className={
-                            row[col] === null
-                              ? "text-text-muted/40 italic"
-                              : ""
+                            row[col] === null ? "text-text-muted/40 italic" : ""
                           }
                         >
                           {renderCell(row[col])}
@@ -366,9 +387,7 @@ export default function Database() {
               onChange={(e) => setEditMode(e.target.checked)}
               className="w-3.5 h-3.5 accent-danger cursor-pointer"
             />
-            <span className="text-xs text-text-muted">
-              Enable editing
-            </span>
+            <span className="text-xs text-text-muted">Enable editing</span>
           </label>
           {editMode && (tableData?.primaryKeys?.length ?? 0) === 0 && (
             <span className="text-[11px] text-text-muted/60 italic">
@@ -458,6 +477,49 @@ export default function Database() {
   // ---------------------------------------------------------------------------
   // Main render
   // ---------------------------------------------------------------------------
+
+  if (!unlocked) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="w-full max-w-xs space-y-4">
+          <div className="text-center space-y-1">
+            <h1 className="text-base font-semibold tracking-tight">
+              Database Viewer
+            </h1>
+            <p className="text-xs text-text-muted">
+              Re-enter your password to view decrypted data
+            </p>
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleVerify();
+            }}
+            className="space-y-3"
+          >
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Password"
+              autoFocus
+              className="w-full bg-bg-input border border-border rounded-sm px-3 py-2 text-sm text-text placeholder:text-text-muted/50 outline-none focus:border-primary transition-colors"
+            />
+            {verifyError && (
+              <p className="text-xs text-danger">{verifyError}</p>
+            )}
+            <button
+              type="submit"
+              disabled={verifying || !password}
+              className="w-full px-4 py-2 border border-border rounded-sm text-xs uppercase tracking-wider hover:border-primary disabled:opacity-50 transition-colors"
+            >
+              {verifying ? "Verifying…" : "Unlock"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col overflow-hidden">

@@ -45,6 +45,28 @@ export interface VaultImportResponse {
 
 export type PersonaTemplate = "default" | "alice";
 
+export interface TraceEvent {
+  type: "tool_call" | "tool_return" | "usage" | "timing" | "done";
+  stepIndex?: number;
+  name?: string;
+  arguments?: string;
+  callId?: string;
+  output?: string;
+  isError?: boolean;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  stepDurationMs?: number;
+  llmDurationMs?: number;
+  ttftMs?: number;
+  status?: string;
+  stopReason?: string;
+  provider?: string;
+  model?: string;
+  toolsUsed?: string[];
+}
+
 export interface ChatMessage {
   id: number;
   userId: number;
@@ -54,6 +76,7 @@ export interface ChatMessage {
   provider?: string;
   createdAt?: string;
   reasoning?: string;
+  traceEvents?: TraceEvent[];
 }
 
 export interface AgentResponse {
@@ -342,27 +365,80 @@ export function createApiClient(options: ApiClientOptions) {
           continue;
         }
 
-        if (
-          event === "tool_return" &&
-          payload.isTerminal === true &&
-          typeof payload.output === "string" &&
-          payload.output
-        ) {
-          terminalToolOutput = payload.output;
+        if (event === "tool_call") {
+          const traceEvent: TraceEvent = {
+            type: "tool_call",
+            stepIndex: payload.stepIndex,
+            name: payload.name,
+            arguments: payload.arguments,
+            callId: payload.id,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+        }
+
+        if (event === "tool_return") {
+          const traceEvent: TraceEvent = {
+            type: "tool_return",
+            stepIndex: payload.stepIndex,
+            name: payload.name,
+            callId: payload.callId,
+            output: payload.output,
+            isError: payload.isError,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+
+          if (
+            payload.isTerminal === true &&
+            typeof payload.output === "string" &&
+            payload.output
+          ) {
+            terminalToolOutput = payload.output;
+          }
           continue;
         }
 
-        if (event === "done" && terminalToolOutput && !emittedTerminalToolOutput) {
-          emittedTerminalToolOutput = true;
-          if (!sawVisibleContent) {
-            // No chunks were streamed — emit the terminal tool output
-            // as the complete response.
-            yield terminalToolOutput;
-          } else {
-            // Chunks were streamed (model likely output tool calls as
-            // text). Emit a reset marker followed by the clean terminal
-            // output so the UI can replace the raw streamed content.
-            yield `\x00CONTENT_RESET\x00${terminalToolOutput}`;
+        if (event === "usage") {
+          const traceEvent: TraceEvent = {
+            type: "usage",
+            promptTokens: payload.promptTokens,
+            completionTokens: payload.completionTokens,
+            totalTokens: payload.totalTokens,
+            reasoningTokens: payload.reasoningTokens,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+          continue;
+        }
+
+        if (event === "timing") {
+          const traceEvent: TraceEvent = {
+            type: "timing",
+            stepIndex: payload.stepIndex,
+            stepDurationMs: payload.stepDurationMs,
+            llmDurationMs: payload.llmDurationMs,
+            ttftMs: payload.ttftMs,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+          continue;
+        }
+
+        if (event === "done") {
+          const traceEvent: TraceEvent = {
+            type: "done",
+            status: payload.status,
+            stopReason: payload.stopReason,
+            provider: payload.provider,
+            model: payload.model,
+            toolsUsed: payload.toolsUsed,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+
+          if (terminalToolOutput && !emittedTerminalToolOutput) {
+            emittedTerminalToolOutput = true;
+            if (!sawVisibleContent) {
+              yield terminalToolOutput;
+            } else {
+              yield `\x00CONTENT_RESET\x00${terminalToolOutput}`;
+            }
           }
         }
       }
@@ -607,6 +683,11 @@ export function createApiClient(options: ApiClientOptions) {
         }>("/health"),
     },
     db: {
+      verifyPassword: (password: string) =>
+        request<{ verified: boolean }>("/db/verify-password", {
+          method: "POST",
+          body: { password },
+        }),
       tables: () => request<DbTableInfo[]>("/db/tables"),
       tableRows: (tableName: string, limit = 100, offset = 0) =>
         request<DbTableData>(
@@ -642,6 +723,29 @@ type StreamEventPayload = {
   content?: string;
   output?: string;
   isTerminal?: boolean;
+  // tool_call fields
+  stepIndex?: number;
+  id?: string;
+  name?: string;
+  arguments?: string;
+  // tool_return fields
+  callId?: string;
+  isError?: boolean;
+  // usage fields
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  // timing fields
+  stepDurationMs?: number;
+  llmDurationMs?: number;
+  ttftMs?: number;
+  // done fields
+  status?: string;
+  stopReason?: string;
+  provider?: string;
+  model?: string;
+  toolsUsed?: string[];
 };
 
 function parseSseEvent(

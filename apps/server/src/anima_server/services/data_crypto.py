@@ -30,6 +30,7 @@ TABLE_DOMAIN_MAP: dict[str, str] = {
     "memory_items": DOMAIN_MEMORIES,
     "memory_episodes": DOMAIN_MEMORIES,
     "memory_daily_logs": DOMAIN_MEMORIES,
+    "memory_claims": DOMAIN_MEMORIES,
     "memory_claim_evidence": DOMAIN_MEMORIES,
     "emotional_signals": DOMAIN_EMOTIONS,
     "self_model_blocks": DOMAIN_SELFMODEL,

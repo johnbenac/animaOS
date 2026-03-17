@@ -101,5 +101,6 @@ export type {
   SelfModelData,
   SelfModelSection,
   TaskItem,
+  TraceEvent,
   User,
 };

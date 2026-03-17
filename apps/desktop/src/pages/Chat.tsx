@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { api, type ChatMessage } from "../lib/api";
+import { api, type ChatMessage, type TraceEvent } from "../lib/api";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github-dark.css";
@@ -47,6 +47,8 @@ export default function Chat() {
   const [translateLang, setTranslateLang] = useState(getDefaultLang);
   const [showLangSettings, setShowLangSettings] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [traceEvents, setTraceEvents] = useState<TraceEvent[]>([]);
+  const [showTrace, setShowTrace] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const historyHydratedRef = useRef(false);
@@ -156,17 +158,30 @@ export default function Chat() {
     setStreaming(true);
     setStreamBuffer("");
     setReasoningBuffer("");
+    setTraceEvents([]);
 
     const CONTENT_RESET = "\x00CONTENT_RESET\x00";
     const REASONING_PREFIX = "\x00REASONING\x00";
+    const TRACE_PREFIX = "\x00TRACE\x00";
 
     try {
       let fullResponse = "";
       let fullReasoning = "";
+      const collectedTraces: TraceEvent[] = [];
       for await (const chunk of api.chat.stream(userMsg, user.id)) {
         if (chunk.startsWith(REASONING_PREFIX)) {
           fullReasoning += chunk.slice(REASONING_PREFIX.length);
           setReasoningBuffer(fullReasoning);
+          continue;
+        }
+        if (chunk.startsWith(TRACE_PREFIX)) {
+          try {
+            const evt = JSON.parse(
+              chunk.slice(TRACE_PREFIX.length),
+            ) as TraceEvent;
+            collectedTraces.push(evt);
+            setTraceEvents([...collectedTraces]);
+          } catch {}
           continue;
         }
         if (chunk.startsWith(CONTENT_RESET)) {
@@ -184,6 +199,7 @@ export default function Chat() {
         role: "assistant",
         content: fullResponse || "[no response]",
         reasoning: fullReasoning || undefined,
+        traceEvents: collectedTraces.length > 0 ? collectedTraces : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamBuffer("");
@@ -277,6 +293,16 @@ export default function Chat() {
               )}
             </div>
             <button
+              onClick={() => setShowTrace((v) => !v)}
+              className={`font-mono text-[9px] tracking-wider transition-colors ${
+                showTrace
+                  ? "text-primary"
+                  : "text-text-muted/40 hover:text-text-muted"
+              }`}
+            >
+              TRACE
+            </button>
+            <button
               onClick={clearHistory}
               className="font-mono text-[9px] text-text-muted/40 hover:text-danger tracking-wider transition-colors"
             >
@@ -312,8 +338,21 @@ export default function Chat() {
               key={msg.id}
               message={msg}
               translateLang={translateLang}
+              showTrace={showTrace}
             />
           ))}
+
+          {/* Live trace panel during streaming */}
+          {streaming && showTrace && traceEvents.length > 0 && (
+            <div className="flex gap-3 animate-in fade-in duration-200">
+              <div className="font-mono text-[9px] text-yellow-500/50 pt-1.5 select-none shrink-0 w-10 text-right tracking-wider">
+                TRACE
+              </div>
+              <div className="max-w-[86%] md:max-w-[74%] xl:max-w-[64%] w-full bg-bg-card/60 border-l-2 border-yellow-500/30 px-3 py-2 md:px-4 md:py-2.5">
+                <TracePanel events={traceEvents} />
+              </div>
+            </div>
+          )}
 
           {/* Reasoning indicator */}
           {streaming && reasoningBuffer && (
@@ -416,15 +455,19 @@ export default function Chat() {
 function MessageBubble({
   message,
   translateLang,
+  showTrace,
 }: {
   message: ChatMessage;
   translateLang: string;
+  showTrace: boolean;
 }) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const [translation, setTranslation] = useState<string | null>(null);
   const [translating, setTranslating] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
+  const [showMsgTrace, setShowMsgTrace] = useState(false);
+  const hasTrace = message.traceEvents && message.traceEvents.length > 0;
 
   const handleTranslate = async () => {
     if (translating) return;
@@ -505,6 +548,13 @@ function MessageBubble({
           </div>
         )}
 
+        {/* Trace events */}
+        {(showTrace || showMsgTrace) && hasTrace && (
+          <div className="mt-1.5 w-full bg-bg-card/60 border-l-2 border-yellow-500/30 px-3 py-2 md:px-4 md:py-2.5 max-h-80 overflow-y-auto">
+            <TracePanel events={message.traceEvents!} />
+          </div>
+        )}
+
         {/* Actions — visible on hover */}
         <div className="flex items-center gap-3 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
           {!isUser && message.reasoning && (
@@ -513,6 +563,14 @@ function MessageBubble({
               className="font-mono text-[9px] text-primary/40 hover:text-primary tracking-wider transition-colors"
             >
               {showReasoning ? "HIDE" : "THINK"}
+            </button>
+          )}
+          {!isUser && hasTrace && (
+            <button
+              onClick={() => setShowMsgTrace((v) => !v)}
+              className="font-mono text-[9px] text-yellow-500/40 hover:text-yellow-500 tracking-wider transition-colors"
+            >
+              {showMsgTrace ? "HIDE" : "TRACE"}
             </button>
           )}
           <button
@@ -536,4 +594,125 @@ function MessageBubble({
       )}
     </div>
   );
+}
+
+function TracePanel({ events }: { events: TraceEvent[] }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="font-mono text-[9px] text-yellow-500/50 tracking-widest mb-1">
+        TRACE ({events.length})
+      </div>
+      {events.map((evt, i) => (
+        <TraceEntry key={i} event={evt} />
+      ))}
+    </div>
+  );
+}
+
+function TraceEntry({ event }: { event: TraceEvent }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (event.type === "tool_call") {
+    return (
+      <div className="font-mono text-[11px]">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-left w-full hover:bg-bg-input/30 px-1 py-0.5 -mx-1 transition-colors"
+        >
+          <span className="text-yellow-500/70 text-[9px]">CALL</span>
+          <span className="text-text-muted">{event.name}</span>
+          <span className="text-text-muted/30 text-[9px] ml-auto">
+            {expanded ? "▼" : "▶"}
+          </span>
+        </button>
+        {expanded && event.arguments && (
+          <pre className="text-[10px] text-text-muted/50 bg-bg-input/20 px-2 py-1.5 mt-0.5 overflow-x-auto max-h-40 whitespace-pre-wrap break-words">
+            {formatJson(event.arguments)}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  if (event.type === "tool_return") {
+    return (
+      <div className="font-mono text-[11px]">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1.5 text-left w-full hover:bg-bg-input/30 px-1 py-0.5 -mx-1 transition-colors"
+        >
+          <span
+            className={`text-[9px] ${event.isError ? "text-danger" : "text-emerald-500/70"}`}
+          >
+            {event.isError ? "ERR" : "RET"}
+          </span>
+          <span className="text-text-muted">{event.name}</span>
+          <span className="text-text-muted/30 text-[9px] ml-auto">
+            {expanded ? "▼" : "▶"}
+          </span>
+        </button>
+        {expanded && event.output && (
+          <pre className="text-[10px] text-text-muted/50 bg-bg-input/20 px-2 py-1.5 mt-0.5 overflow-x-auto max-h-40 whitespace-pre-wrap break-words">
+            {event.output}
+          </pre>
+        )}
+      </div>
+    );
+  }
+
+  if (event.type === "usage") {
+    return (
+      <div className="font-mono text-[10px] text-text-muted/40 flex items-center gap-2 px-1 py-0.5">
+        <span className="text-blue-400/60 text-[9px]">TOKENS</span>
+        <span>{event.promptTokens ?? 0}in</span>
+        <span>{event.completionTokens ?? 0}out</span>
+        {event.reasoningTokens ? (
+          <span>{event.reasoningTokens}reason</span>
+        ) : null}
+        <span className="text-text-muted/25">= {event.totalTokens ?? 0}</span>
+      </div>
+    );
+  }
+
+  if (event.type === "timing") {
+    return (
+      <div className="font-mono text-[10px] text-text-muted/40 flex items-center gap-2 px-1 py-0.5">
+        <span className="text-blue-400/60 text-[9px]">TIME</span>
+        {event.ttftMs != null && <span>ttft:{event.ttftMs}ms</span>}
+        {event.llmDurationMs != null && (
+          <span>llm:{event.llmDurationMs}ms</span>
+        )}
+        {event.stepDurationMs != null && (
+          <span>step:{event.stepDurationMs}ms</span>
+        )}
+      </div>
+    );
+  }
+
+  if (event.type === "done") {
+    return (
+      <div className="font-mono text-[10px] text-text-muted/40 flex items-center gap-2 px-1 py-0.5">
+        <span className="text-emerald-500/60 text-[9px]">DONE</span>
+        {event.provider && <span>{event.provider}</span>}
+        {event.model && (
+          <span className="text-text-muted/25">{event.model}</span>
+        )}
+        {event.toolsUsed && event.toolsUsed.length > 0 && (
+          <span className="text-yellow-500/40">
+            tools:[{event.toolsUsed.join(",")}]
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+}
+
+function formatJson(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2);
+  } catch {
+    return str;
+  }
 }
