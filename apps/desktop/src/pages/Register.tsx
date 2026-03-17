@@ -79,29 +79,23 @@ export default function Register() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-bg">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-24 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute bottom-0 left-0 h-64 w-64 rounded-full bg-text-muted/10 blur-3xl" />
-        <div className="absolute right-0 top-1/3 h-52 w-52 rounded-full bg-primary-hover/10 blur-3xl" />
-      </div>
-
       <div className="relative mx-auto flex min-h-screen w-full max-w-[980px] items-center px-6 py-10">
         <div className="mx-auto w-full max-w-[460px]">
           <form
             onSubmit={handleSubmit}
-            className="rounded-2xl border border-border bg-bg-card p-7 shadow-[0_24px_70px_rgba(0,0,0,0.35)]"
+            className="border border-border bg-bg-card p-7"
           >
             {/* Progress bar */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] tracking-wide text-text-muted">
-                <span>Step {isAccountStep ? "1" : "2"} of 2</span>
+              <div className="flex items-center justify-between font-mono text-[9px] tracking-wider text-text-muted/50">
+                <span>STEP {isAccountStep ? "1" : "2"}/2</span>
                 <span>
-                  {isAccountStep ? "Account details" : "Name your AI"}
+                  {isAccountStep ? "ACCOUNT" : "NAME YOUR AI"}
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-bg-input">
+              <div className="h-px bg-border">
                 <div
-                  className={`h-full rounded-full bg-text transition-all duration-300 ${
+                  className={`h-full bg-primary transition-all duration-300 ${
                     isAccountStep ? "w-1/2" : "w-full"
                   }`}
                 />
@@ -110,18 +104,18 @@ export default function Register() {
 
             {/* Header */}
             <div className="mt-6 mb-5">
-              <h2 className="font-mono text-sm tracking-[0.14em] uppercase text-text">
-                {isAccountStep ? "Create Your Local Vault" : "Name Your AI"}
+              <h2 className="font-mono text-sm tracking-wider text-text">
+                {isAccountStep ? "CREATE LOCAL VAULT" : "NAME YOUR AI"}
               </h2>
-              <p className="mt-1 text-xs text-text-muted">
+              <p className="mt-1 font-mono text-[10px] text-text-muted/40 tracking-wider">
                 {isAccountStep
-                  ? "These credentials unlock your encrypted local data."
-                  : "This becomes its permanent identity — choose wisely."}
+                  ? "THESE CREDENTIALS UNLOCK YOUR ENCRYPTED LOCAL DATA."
+                  : "THIS BECOMES ITS PERMANENT IDENTITY."}
               </p>
             </div>
 
             {error && (
-              <div className="mb-5 rounded-md border border-danger/25 bg-danger/8 px-3.5 py-2.5 text-xs text-danger">
+              <div className="mb-5 border-l-2 border-danger bg-danger/5 px-3.5 py-2.5 font-mono text-[10px] text-danger tracking-wider">
                 {error}
               </div>
             )}
@@ -185,17 +179,17 @@ export default function Register() {
                     setError("");
                     setStep("account");
                   }}
-                  className="rounded-md border border-border px-4 py-2.5 text-sm text-text transition-colors cursor-pointer hover:border-text-muted/45"
+                  className="border border-border px-4 py-2.5 font-mono text-[10px] tracking-wider text-text-muted transition-colors cursor-pointer hover:text-text hover:border-text-muted/30"
                 >
-                  Back
+                  BACK
                 </button>
               )}
               <button
                 type="submit"
-                className="flex-1 rounded-md bg-text py-2.5 text-sm font-medium tracking-wide text-bg transition-colors cursor-pointer hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 py-2.5 font-mono text-[10px] tracking-wider bg-primary/[0.08] text-primary border border-primary/30 transition-colors cursor-pointer hover:bg-primary/[0.12] disabled:cursor-not-allowed disabled:opacity-30"
                 disabled={loading}
               >
-                {isAccountStep ? "Continue" : loading ? "Creating…" : "Create"}
+                {isAccountStep ? "CONTINUE" : loading ? "CREATING..." : "CREATE"}
               </button>
             </div>
           </form>

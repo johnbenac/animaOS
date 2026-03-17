@@ -2,10 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api, type TaskItem } from "../lib/api";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function formatDueDate(iso: string): string {
   const due = new Date(iso);
   if (Number.isNaN(due.getTime())) return "";
@@ -49,21 +45,17 @@ function isOverdue(iso: string): boolean {
 }
 
 const PRIORITY_LABELS: Record<number, string> = {
-  0: "Normal",
-  1: "High",
-  2: "Urgent",
+  0: "NORMAL",
+  1: "HIGH",
+  2: "URGENT",
 };
 const PRIORITY_DOTS: Record<number, string> = {
   0: "",
-  1: "bg-amber-400",
-  2: "bg-red-500",
+  1: "bg-warning",
+  2: "bg-danger",
 };
 
 type ViewFilter = "open" | "done" | "all";
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export default function Tasks() {
   const { user } = useAuth();
@@ -71,22 +63,16 @@ export default function Tasks() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ViewFilter>("open");
 
-  // Create form
   const [newText, setNewText] = useState("");
   const [newPriority, setNewPriority] = useState(0);
   const [showCreate, setShowCreate] = useState(false);
   const createInputRef = useRef<HTMLInputElement>(null);
 
-  // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState("");
   const [editPriority, setEditPriority] = useState(0);
   const [editDueDate, setEditDueDate] = useState("");
   const editInputRef = useRef<HTMLInputElement>(null);
-
-  // -------------------------------------------------------------------------
-  // Data fetching
-  // -------------------------------------------------------------------------
 
   useEffect(() => {
     if (user?.id == null) return;
@@ -98,10 +84,6 @@ export default function Tasks() {
       .finally(() => setLoading(false));
   }, [user?.id]);
 
-  // -------------------------------------------------------------------------
-  // Actions
-  // -------------------------------------------------------------------------
-
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newText.trim() || user?.id == null) return;
@@ -110,7 +92,7 @@ export default function Tasks() {
       newText.trim(),
       newPriority || undefined,
       undefined,
-      newText.trim(), // dueDateRaw — server parses NLP time expressions
+      newText.trim(),
     );
     setTasks((prev) => [created, ...prev]);
     setNewText("");
@@ -180,10 +162,6 @@ export default function Tasks() {
     if (e.key === "Escape") cancelEdit();
   };
 
-  // -------------------------------------------------------------------------
-  // Filtering & sorting
-  // -------------------------------------------------------------------------
-
   const filtered = tasks
     .filter((t) => {
       if (filter === "open") return !t.done;
@@ -191,7 +169,6 @@ export default function Tasks() {
       return true;
     })
     .sort((a, b) => {
-      // Open tasks: sort by priority desc, then due date asc, then created
       if (!a.done && !b.done) {
         if (b.priority !== a.priority) return b.priority - a.priority;
         if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
@@ -199,7 +176,6 @@ export default function Tasks() {
         if (b.dueDate) return 1;
         return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
       }
-      // Done tasks: most recently completed first
       if (a.done && b.done)
         return (b.completedAt ?? "").localeCompare(a.completedAt ?? "");
       return a.done ? 1 : -1;
@@ -211,26 +187,22 @@ export default function Tasks() {
     (t) => !t.done && t.dueDate && isOverdue(t.dueDate),
   ).length;
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
-
   return (
     <div className="h-full overflow-y-auto">
       <div className="max-w-2xl mx-auto px-6 py-10 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-medium text-text">Tasks</h1>
-            <p className="text-xs text-text-muted/50 mt-0.5">
-              {openCount} open
+            <h1 className="font-mono text-sm tracking-wider text-text">TASKS</h1>
+            <p className="font-mono text-[9px] text-text-muted/40 mt-0.5 tracking-wider">
+              {openCount} OPEN
               {overdueCount > 0 && (
-                <span className="text-red-400 ml-1.5">
-                  · {overdueCount} overdue
+                <span className="text-danger ml-1.5">
+                  | {overdueCount} OVERDUE
                 </span>
               )}
               {doneCount > 0 && (
-                <span className="ml-1.5">· {doneCount} done</span>
+                <span className="ml-1.5">| {doneCount} DONE</span>
               )}
             </p>
           </div>
@@ -240,9 +212,9 @@ export default function Tasks() {
               if (!showCreate)
                 setTimeout(() => createInputRef.current?.focus(), 50);
             }}
-            className="px-3 py-1.5 rounded-lg text-xs bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            className="font-mono px-3 py-1.5 text-[9px] tracking-wider border border-border text-text-muted hover:text-primary hover:border-primary/30 transition-colors"
           >
-            {showCreate ? "Cancel" : "+ New task"}
+            {showCreate ? "CANCEL" : "+ NEW"}
           </button>
         </div>
 
@@ -250,34 +222,34 @@ export default function Tasks() {
         {showCreate && (
           <form
             onSubmit={handleCreate}
-            className="bg-bg-card border border-border rounded-xl p-4 space-y-3"
+            className="bg-bg-card border border-border p-4 space-y-3"
           >
             <input
               ref={createInputRef}
               type="text"
               value={newText}
               onChange={(e) => setNewText(e.target.value)}
-              placeholder='E.g. "Buy groceries tomorrow at 5pm" — time is parsed automatically'
-              className="w-full bg-transparent border border-border rounded-lg px-3 py-2 text-sm text-text placeholder:text-text-muted/25 outline-none focus:border-text-muted/30 transition-colors"
+              placeholder='E.g. "Buy groceries tomorrow at 5pm"'
+              className="w-full bg-transparent border border-border px-3 py-2 text-sm text-text placeholder:text-text-muted/20 outline-none focus:border-text-muted/30 transition-colors"
             />
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] text-text-muted/50">
-                  Priority:
+                <span className="font-mono text-[9px] text-text-muted/40 tracking-wider">
+                  PRI:
                 </span>
                 {[0, 1, 2].map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => setNewPriority(p)}
-                    className={`px-2 py-0.5 rounded text-[11px] transition-colors ${
+                    className={`font-mono px-2 py-0.5 text-[9px] tracking-wider transition-colors ${
                       newPriority === p
                         ? p === 2
-                          ? "bg-red-500/20 text-red-400"
+                          ? "bg-danger/10 text-danger border border-danger/30"
                           : p === 1
-                            ? "bg-amber-400/20 text-amber-400"
-                            : "bg-bg-input text-text"
-                        : "text-text-muted/40 hover:text-text-muted"
+                            ? "bg-warning/10 text-warning border border-warning/30"
+                            : "bg-bg-input text-text border border-border"
+                        : "text-text-muted/30 hover:text-text-muted/60 border border-transparent"
                     }`}
                   >
                     {PRIORITY_LABELS[p]}
@@ -288,31 +260,30 @@ export default function Tasks() {
               <button
                 type="submit"
                 disabled={!newText.trim()}
-                className="px-4 py-1.5 rounded-lg text-xs bg-primary text-white hover:opacity-90 transition-opacity disabled:opacity-30"
+                className="font-mono px-4 py-1.5 text-[9px] tracking-wider bg-primary/[0.08] text-primary border border-primary/30 hover:bg-primary/[0.12] transition-colors disabled:opacity-20"
               >
-                Add task
+                ADD TASK
               </button>
             </div>
-            <p className="text-[10px] text-text-muted/30">
-              Tip: Include time like "in 30 min", "at 3pm", "next Monday" —
-              reminders are set automatically.
+            <p className="font-mono text-[8px] text-text-muted/20 tracking-wider">
+              TIP: INCLUDE TIME LIKE "IN 30 MIN", "AT 3PM", "NEXT MONDAY" — REMINDERS AUTO-SET
             </p>
           </form>
         )}
 
         {/* Filter tabs */}
-        <div className="flex gap-1 border-b border-border pb-px">
+        <div className="flex gap-px border-b border-border pb-px">
           {(["open", "done", "all"] as ViewFilter[]).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 text-xs capitalize transition-colors border-b-2 -mb-px ${
+              className={`font-mono px-3 py-1.5 text-[9px] tracking-wider transition-colors border-b-2 -mb-px ${
                 filter === f
                   ? "border-primary text-text"
-                  : "border-transparent text-text-muted/50 hover:text-text-muted"
+                  : "border-transparent text-text-muted/30 hover:text-text-muted/60"
               }`}
             >
-              {f}
+              {f.toUpperCase()}
               {f === "open" && ` (${openCount})`}
               {f === "done" && ` (${doneCount})`}
             </button>
@@ -322,26 +293,26 @@ export default function Tasks() {
         {/* Task list */}
         {loading ? (
           <div className="flex justify-center py-12">
-            <span className="text-xs text-text-muted/40 animate-pulse">
-              Loading tasks...
+            <span className="font-mono text-[10px] text-text-muted/30 animate-pulse tracking-wider">
+              LOADING...
             </span>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-12">
-            <p className="text-sm text-text-muted/40">
+            <p className="font-mono text-[10px] text-text-muted/30 tracking-wider">
               {filter === "open"
-                ? "No open tasks. Nice!"
+                ? "NO OPEN TASKS"
                 : filter === "done"
-                  ? "No completed tasks yet."
-                  : "No tasks yet."}
+                  ? "NO COMPLETED TASKS"
+                  : "NO TASKS"}
             </p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-px">
             {filtered.map((task) => (
               <div
                 key={task.id}
-                className={`group flex items-start gap-3 px-4 py-3 rounded-lg hover:bg-bg-card/60 transition-colors ${
+                className={`group flex items-start gap-3 px-4 py-3 hover:bg-bg-card/60 transition-colors ${
                   editingId === task.id
                     ? "bg-bg-card border border-border"
                     : ""
@@ -350,14 +321,14 @@ export default function Tasks() {
                 {/* Checkbox */}
                 <button
                   onClick={() => toggleDone(task)}
-                  className={`w-[18px] h-[18px] rounded-full border shrink-0 mt-0.5 flex items-center justify-center transition-colors cursor-pointer ${
+                  className={`w-3.5 h-3.5 border shrink-0 mt-0.5 flex items-center justify-center transition-colors cursor-pointer ${
                     task.done
                       ? "bg-success/20 border-success/30 hover:bg-success/30"
-                      : "border-border hover:border-primary/60 hover:bg-primary/10"
+                      : "border-border hover:border-primary/40 hover:bg-primary/[0.06]"
                   }`}
                 >
                   {task.done && (
-                    <span className="w-2 h-2 rounded-full bg-success/60" />
+                    <span className="w-1.5 h-1.5 bg-success/60" />
                   )}
                 </button>
 
@@ -370,26 +341,26 @@ export default function Tasks() {
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
                       onKeyDown={handleEditKeyDown}
-                      className="w-full bg-transparent border border-border rounded-lg px-3 py-1.5 text-sm text-text outline-none focus:border-text-muted/30"
+                      className="w-full bg-transparent border border-border px-3 py-1.5 text-sm text-text outline-none focus:border-text-muted/30"
                     />
                     <div className="flex items-center gap-3 flex-wrap">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-text-muted/40">
-                          Priority:
+                        <span className="font-mono text-[8px] text-text-muted/30 tracking-wider">
+                          PRI:
                         </span>
                         {[0, 1, 2].map((p) => (
                           <button
                             key={p}
                             type="button"
                             onClick={() => setEditPriority(p)}
-                            className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                            className={`font-mono px-1.5 py-0.5 text-[8px] tracking-wider transition-colors ${
                               editPriority === p
                                 ? p === 2
-                                  ? "bg-red-500/20 text-red-400"
+                                  ? "bg-danger/10 text-danger"
                                   : p === 1
-                                    ? "bg-amber-400/20 text-amber-400"
+                                    ? "bg-warning/10 text-warning"
                                     : "bg-bg-input text-text"
-                                : "text-text-muted/30 hover:text-text-muted/60"
+                                : "text-text-muted/20 hover:text-text-muted/40"
                             }`}
                           >
                             {PRIORITY_LABELS[p]}
@@ -397,8 +368,8 @@ export default function Tasks() {
                         ))}
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[10px] text-text-muted/40">
-                          Due:
+                        <span className="font-mono text-[8px] text-text-muted/30 tracking-wider">
+                          DUE:
                         </span>
                         <input
                           type="text"
@@ -406,29 +377,29 @@ export default function Tasks() {
                           onChange={(e) => setEditDueDate(e.target.value)}
                           onKeyDown={handleEditKeyDown}
                           placeholder="e.g. tomorrow at 3pm"
-                          className="bg-transparent border border-border rounded px-2 py-0.5 text-[11px] text-text placeholder:text-text-muted/25 outline-none w-44 focus:border-text-muted/30"
+                          className="bg-transparent border border-border px-2 py-0.5 font-mono text-[10px] text-text placeholder:text-text-muted/20 outline-none w-44 focus:border-text-muted/30"
                         />
                       </div>
                     </div>
                     <div className="flex gap-2 pt-1">
                       <button
                         onClick={saveEdit}
-                        className="px-3 py-1 rounded text-[11px] bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                        className="font-mono px-3 py-1 text-[9px] tracking-wider bg-primary/[0.08] text-primary border border-primary/30 hover:bg-primary/[0.12] transition-colors"
                       >
-                        Save
+                        SAVE
                       </button>
                       <button
                         onClick={cancelEdit}
-                        className="px-3 py-1 rounded text-[11px] text-text-muted/50 hover:text-text-muted transition-colors"
+                        className="font-mono px-3 py-1 text-[9px] tracking-wider text-text-muted/40 hover:text-text-muted transition-colors"
                       >
-                        Cancel
+                        CANCEL
                       </button>
                       {editDueDate && (
                         <button
                           onClick={() => setEditDueDate("")}
-                          className="px-2 py-1 rounded text-[10px] text-text-muted/30 hover:text-red-400 transition-colors"
+                          className="font-mono px-2 py-1 text-[8px] tracking-wider text-text-muted/20 hover:text-danger transition-colors"
                         >
-                          Clear due date
+                          CLEAR DUE
                         </button>
                       )}
                     </div>
@@ -438,24 +409,24 @@ export default function Tasks() {
                     <div className="flex items-center gap-1.5">
                       {task.priority > 0 && (
                         <span
-                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${PRIORITY_DOTS[task.priority]}`}
+                          className={`w-1 h-1 shrink-0 ${PRIORITY_DOTS[task.priority]}`}
                           title={PRIORITY_LABELS[task.priority]}
                         />
                       )}
                       <span
-                        className={`text-sm ${task.done ? "line-through text-text-muted/40" : "text-text/80"}`}
+                        className={`text-sm ${task.done ? "line-through text-text-muted/30" : "text-text/80"}`}
                       >
                         {task.text}
                       </span>
                     </div>
                     {task.dueDate && (
                       <p
-                        className={`text-[11px] mt-0.5 ${
+                        className={`font-mono text-[9px] mt-0.5 tracking-wider ${
                           task.done
-                            ? "text-text-muted/30"
+                            ? "text-text-muted/20"
                             : isOverdue(task.dueDate)
-                              ? "text-red-400/80"
-                              : "text-text-muted/40"
+                              ? "text-danger/70"
+                              : "text-text-muted/30"
                         }`}
                       >
                         {task.done
@@ -469,8 +440,8 @@ export default function Tasks() {
                       </p>
                     )}
                     {task.done && task.completedAt && (
-                      <p className="text-[10px] text-text-muted/25 mt-0.5">
-                        Completed{" "}
+                      <p className="font-mono text-[8px] text-text-muted/15 mt-0.5 tracking-wider">
+                        COMPLETED{" "}
                         {new Date(task.completedAt).toLocaleDateString(
                           "en-US",
                           { month: "short", day: "numeric" },
@@ -480,24 +451,24 @@ export default function Tasks() {
                   </div>
                 )}
 
-                {/* Actions (visible on hover, hidden during edit) */}
+                {/* Actions */}
                 {editingId !== task.id && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
                     {!task.done && (
                       <button
                         onClick={() => startEdit(task)}
-                        className="px-1.5 py-0.5 rounded text-[10px] text-text-muted/40 hover:text-text-muted hover:bg-bg-card transition-colors"
+                        className="font-mono px-1.5 py-0.5 text-[8px] tracking-wider text-text-muted/30 hover:text-text-muted transition-colors"
                         title="Edit"
                       >
-                        ✎
+                        EDIT
                       </button>
                     )}
                     <button
                       onClick={() => handleDelete(task.id)}
-                      className="px-1.5 py-0.5 rounded text-[10px] text-text-muted/40 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                      className="font-mono px-1.5 py-0.5 text-[8px] tracking-wider text-text-muted/30 hover:text-danger transition-colors"
                       title="Delete"
                     >
-                      ×
+                      DEL
                     </button>
                   </div>
                 )}

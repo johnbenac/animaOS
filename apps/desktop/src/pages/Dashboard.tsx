@@ -32,7 +32,6 @@ export default function Dashboard() {
         if (active) setBrief(g);
       })
       .catch(() => {
-        // Fall back to static brief if greeting fails
         api.chat.brief(user.id).then((b) => {
           if (active) setBrief({ message: b.message, llmGenerated: false, context: { ...b.context, overdueTasks: 0, upcomingDeadlines: [] } });
         }).catch(() => {});
@@ -75,7 +74,6 @@ export default function Dashboard() {
   const handleAddTask = async (e: FormEvent) => {
     e.preventDefault();
     if (!newTask.trim() || user?.id == null) return;
-    // Send the full input as both text and dueDateRaw — server extracts the date.
     const created = await api.tasks.create(
       user.id,
       newTask.trim(),
@@ -140,21 +138,21 @@ export default function Dashboard() {
 
         {/* Stats */}
         {home && (
-          <div className="grid grid-cols-3 gap-3">
-            <div className="bg-bg-card border border-border rounded-xl px-4 py-3 text-center">
-              <p className="text-lg text-text font-medium">{home.messageCount}</p>
-              <p className="text-[10px] text-text-muted/50 uppercase tracking-wider mt-0.5">Messages</p>
+          <div className="grid grid-cols-3 gap-px bg-border">
+            <div className="bg-bg-card px-4 py-3 text-center">
+              <p className="font-mono text-lg text-text">{home.messageCount}</p>
+              <p className="font-mono text-[9px] text-text-muted/40 tracking-wider mt-0.5">MSG</p>
             </div>
-            <div className="bg-bg-card border border-border rounded-xl px-4 py-3 text-center">
-              <p className="text-lg text-text font-medium">{home.memoryCount}</p>
-              <p className="text-[10px] text-text-muted/50 uppercase tracking-wider mt-0.5">Memories</p>
+            <div className="bg-bg-card px-4 py-3 text-center">
+              <p className="font-mono text-lg text-text">{home.memoryCount}</p>
+              <p className="font-mono text-[9px] text-text-muted/40 tracking-wider mt-0.5">MEM</p>
             </div>
-            <div className="bg-bg-card border border-border rounded-xl px-4 py-3 text-center">
-              <p className="text-lg text-text font-medium">
+            <div className="bg-bg-card px-4 py-3 text-center">
+              <p className="font-mono text-lg text-text">
                 {home.journalStreak > 0 ? home.journalStreak : home.journalTotal}
               </p>
-              <p className="text-[10px] text-text-muted/50 uppercase tracking-wider mt-0.5">
-                {home.journalStreak > 0 ? `Day streak` : "Journal days"}
+              <p className="font-mono text-[9px] text-text-muted/40 tracking-wider mt-0.5">
+                {home.journalStreak > 0 ? "STREAK" : "JOURNAL"}
               </p>
             </div>
           </div>

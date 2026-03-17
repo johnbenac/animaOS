@@ -30,18 +30,23 @@ export default function Login() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen p-8">
+    <div className="flex items-center justify-center min-h-screen p-8 bg-bg">
       <div className="w-full max-w-[380px]">
         <div className="text-center mb-12">
-          <div className="text-4xl text-text-muted/10 mb-4 select-none">◈</div>
-          <h1 className="font-mono text-lg font-medium tracking-[0.3em] uppercase text-text">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <div className="w-2 h-2 bg-primary" />
+          </div>
+          <h1 className="font-mono text-lg font-medium tracking-[0.3em] text-text">
             ANIMA
           </h1>
+          <p className="font-mono text-[9px] text-text-muted/30 tracking-wider mt-1">
+            RUNTIME ACCESS
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           {error && (
-            <div className="bg-danger/8 border border-danger/20 text-danger px-3.5 py-2.5 rounded-md text-xs">
+            <div className="bg-danger/5 border-l-2 border-danger text-danger px-3.5 py-2.5 font-mono text-[10px] tracking-wider">
               {error}
             </div>
           )}
@@ -69,10 +74,10 @@ export default function Login() {
 
           <button
             type="submit"
-            className="w-full py-2.5 bg-text text-bg rounded-md text-sm font-medium tracking-wide cursor-pointer transition-colors hover:bg-primary-hover disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full py-2.5 bg-primary/[0.08] text-primary border border-primary/30 font-mono text-[10px] tracking-wider cursor-pointer transition-colors hover:bg-primary/[0.12] disabled:opacity-30 disabled:cursor-not-allowed"
             disabled={loading}
           >
-            {loading ? "Unlocking..." : "Unlock"}
+            {loading ? "UNLOCKING..." : "UNLOCK"}
           </button>
         </form>
       </div>

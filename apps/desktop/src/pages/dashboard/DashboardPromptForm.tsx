@@ -15,22 +15,27 @@ export function DashboardPromptForm({
 }: DashboardPromptFormProps) {
   return (
     <form onSubmit={onSubmit} className="relative">
-      <input
-        ref={inputRef}
-        type="text"
-        value={input}
-        onChange={(e) => onInputChange(e.target.value)}
-        placeholder="Talk to ANIMA..."
-        className="w-full bg-bg-card border border-border rounded-xl px-5 py-3.5 text-sm text-text placeholder:text-text-muted/25 outline-none focus:border-text-muted/30 transition-all"
-      />
-      {input.trim() && (
-        <button
-          type="submit"
-          className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-primary hover:text-text transition-colors"
-        >
-          &rarr;
-        </button>
-      )}
+      <div className="flex items-center border border-border bg-bg-card px-4 py-3">
+        <span className="font-mono text-[10px] text-primary/30 mr-3 select-none">
+          &gt;
+        </span>
+        <input
+          ref={inputRef}
+          type="text"
+          value={input}
+          onChange={(e) => onInputChange(e.target.value)}
+          placeholder="Talk to ANIMA..."
+          className="flex-1 bg-transparent text-sm text-text placeholder:text-text-muted/20 outline-none"
+        />
+        {input.trim() && (
+          <button
+            type="submit"
+            className="font-mono text-[9px] text-text-muted/40 hover:text-primary transition-colors tracking-wider ml-3"
+          >
+            SEND
+          </button>
+        )}
+      </div>
     </form>
   );
 }

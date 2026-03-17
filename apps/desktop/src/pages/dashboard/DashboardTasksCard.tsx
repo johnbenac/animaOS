@@ -24,11 +24,11 @@ export function DashboardTasksCard({
   onDeleteTask,
 }: DashboardTasksCardProps) {
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-5 space-y-4">
+    <div className="bg-bg-card border border-border p-5 space-y-4">
       {home?.currentFocus && (
         <div>
-          <p className="text-[10px] uppercase tracking-wider text-text-muted/50 mb-1.5">
-            Focusing on
+          <p className="font-mono text-[9px] tracking-wider text-text-muted/40 mb-1.5">
+            FOCUS
           </p>
           <p className="text-sm text-text">{home.currentFocus}</p>
         </div>
@@ -45,30 +45,30 @@ export function DashboardTasksCard({
             value={newTask}
             onChange={(e) => onNewTaskChange(e.target.value)}
             placeholder="Add a task..."
-            className="flex-1 bg-transparent border border-border rounded-lg px-3 py-1.5 text-sm text-text placeholder:text-text-muted/25 outline-none focus:border-text-muted/30 transition-colors"
+            className="flex-1 bg-transparent border border-border px-3 py-1.5 text-sm text-text placeholder:text-text-muted/20 outline-none focus:border-text-muted/30 transition-colors"
           />
           {newTask.trim() && (
             <button
               type="submit"
-              className="text-xs text-primary hover:text-text px-2 transition-colors"
+              className="font-mono text-[9px] text-primary/50 hover:text-primary px-2 transition-colors tracking-wider"
             >
-              +
+              ADD
             </button>
           )}
         </form>
 
-        <div className="space-y-1.5">
+        <div className="space-y-1">
           {openTasks.map((task) => (
             <div key={task.id} className="flex items-start gap-2.5 group">
               <button
                 onClick={() => onToggleTask(task)}
-                className="w-4 h-4 rounded-full border border-border shrink-0 mt-0.5 hover:border-primary/60 hover:bg-primary/10 transition-colors cursor-pointer"
+                className="w-3.5 h-3.5 border border-border shrink-0 mt-1 hover:border-primary/50 hover:bg-primary/[0.06] transition-colors cursor-pointer"
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
                   {task.priority > 0 && (
                     <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${PRIORITY_INDICATOR[task.priority]?.dot}`}
+                      className={`w-1 h-1 shrink-0 ${PRIORITY_INDICATOR[task.priority]?.dot}`}
                       title={PRIORITY_INDICATOR[task.priority]?.label}
                     />
                   )}
@@ -76,10 +76,10 @@ export function DashboardTasksCard({
                 </div>
                 {task.dueDate && (
                   <p
-                    className={`text-[10px] mt-0.5 ${
+                    className={`font-mono text-[9px] mt-0.5 tracking-wider ${
                       new Date(task.dueDate).getTime() < Date.now()
-                        ? "text-red-400/80"
-                        : "text-text-muted/40"
+                        ? "text-danger/70"
+                        : "text-text-muted/30"
                     }`}
                   >
                     {formatDueDate(task.dueDate)}
@@ -88,32 +88,32 @@ export function DashboardTasksCard({
               </div>
               <button
                 onClick={() => onDeleteTask(task.id)}
-                className="text-[10px] text-text-muted/0 group-hover:text-text-muted/40 hover:!text-text-muted transition-colors"
+                className="font-mono text-[9px] text-transparent group-hover:text-text-muted/30 hover:!text-text-muted transition-colors tracking-wider"
               >
-                ×
+                DEL
               </button>
             </div>
           ))}
           {doneTasks.slice(0, 3).map((task) => (
-            <div key={task.id} className="flex items-start gap-2.5 opacity-40 group">
+            <div key={task.id} className="flex items-start gap-2.5 opacity-30 group">
               <button
                 onClick={() => onToggleTask(task)}
-                className="w-4 h-4 rounded-full bg-success/20 border border-success/30 shrink-0 mt-0.5 flex items-center justify-center cursor-pointer hover:bg-success/30 transition-colors"
+                className="w-3.5 h-3.5 bg-success/20 border border-success/30 shrink-0 mt-1 flex items-center justify-center cursor-pointer hover:bg-success/30 transition-colors"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-success/60" />
+                <span className="w-1 h-1 bg-success/60" />
               </button>
               <span className="text-sm line-through flex-1 truncate">{task.text}</span>
               <button
                 onClick={() => onDeleteTask(task.id)}
-                className="text-[10px] text-text-muted/0 group-hover:text-text-muted/40 hover:!text-text-muted transition-colors"
+                className="font-mono text-[9px] text-transparent group-hover:text-text-muted/30 hover:!text-text-muted transition-colors tracking-wider"
               >
-                ×
+                DEL
               </button>
             </div>
           ))}
           {doneTasks.length > 3 && (
-            <p className="text-[10px] text-text-muted/30 pl-6.5">
-              +{doneTasks.length - 3} completed
+            <p className="font-mono text-[9px] text-text-muted/20 pl-6 tracking-wider">
+              +{doneTasks.length - 3} COMPLETED
             </p>
           )}
         </div>

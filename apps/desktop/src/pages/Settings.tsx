@@ -4,22 +4,22 @@ const SETTINGS_SECTIONS = [
   {
     to: "/settings/ai",
     label: "AI",
-    description: "Provider, model, keys, and system prompt.",
+    description: "Provider, model, keys, system prompt.",
   },
   {
     to: "/settings/security",
-    label: "Security",
-    description: "Master password and session unlock controls.",
+    label: "SECURITY",
+    description: "Master password, session unlock.",
   },
   {
     to: "/settings/vault",
-    label: "Vault",
-    description: "Encrypted backup export and import.",
+    label: "VAULT",
+    description: "Encrypted backup export/import.",
   },
   {
     to: "/settings/advanced",
-    label: "Advanced",
-    description: "Debug tools and developer options.",
+    label: "ADVANCED",
+    description: "Debug tools, developer options.",
   },
 ];
 
@@ -28,29 +28,28 @@ export default function Settings() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-3xl mx-auto px-8 py-8 space-y-8">
         <header className="space-y-2">
-          <h1 className="text-sm tracking-widest uppercase">Settings</h1>
-          <p className="text-sm text-text-muted">
-            Runtime configuration, vault operations, and authentication controls live
-            in separate sections now.
+          <h1 className="font-mono text-sm tracking-wider">CONFIG</h1>
+          <p className="font-mono text-[10px] text-text-muted/40 tracking-wider">
+            RUNTIME CONFIGURATION, VAULT, AND AUTH CONTROLS
           </p>
         </header>
 
-        <nav className="grid gap-2 md:grid-cols-4">
+        <nav className="grid gap-px md:grid-cols-4 bg-border">
           {SETTINGS_SECTIONS.map((section) => (
             <NavLink
               key={section.to}
               to={section.to}
               end
               className={({ isActive }) =>
-                `rounded-sm border p-4 transition-colors ${
+                `p-4 transition-colors ${
                   isActive
-                    ? "border-primary bg-bg-card text-text"
-                    : "border-border text-text-muted hover:border-text-muted hover:text-text"
+                    ? "bg-primary/[0.06] border-l-2 border-primary text-text"
+                    : "bg-bg-card text-text-muted hover:text-text border-l-2 border-transparent"
                 }`
               }
             >
-              <div className="text-[11px] uppercase tracking-[0.2em]">{section.label}</div>
-              <div className="mt-2 text-xs leading-5">{section.description}</div>
+              <div className="font-mono text-[10px] tracking-wider">{section.label}</div>
+              <div className="mt-1.5 text-[11px] text-text-muted/50 leading-relaxed">{section.description}</div>
             </NavLink>
           ))}
         </nav>

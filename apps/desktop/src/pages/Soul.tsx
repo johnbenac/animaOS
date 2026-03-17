@@ -62,43 +62,45 @@ export default function Soul() {
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-5 py-2.5 border-b border-border">
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-border bg-bg-card/40">
         <div className="flex items-center gap-3">
-          <span className="text-[11px] text-text-muted uppercase tracking-wider">
-            User Directive
+          <span className="font-mono text-[10px] text-text-muted tracking-wider">
+            DIRECTIVE
           </span>
           {hasChanges && (
-            <span className="text-[10px] text-text-muted/60 uppercase tracking-wider">
-              · unsaved
-            </span>
+            <>
+              <div className="w-px h-3 bg-border" />
+              <span className="font-mono text-[9px] text-warning/60 tracking-wider">
+                UNSAVED
+              </span>
+            </>
           )}
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={handleReset}
             disabled={!hasChanges || saving}
-            className="text-[10px] text-text-muted hover:text-text disabled:opacity-20 uppercase tracking-wider transition-colors"
+            className="font-mono text-[9px] text-text-muted/40 hover:text-text disabled:opacity-15 tracking-wider transition-colors"
           >
-            Reset
+            RESET
           </button>
           <button
             onClick={handleSave}
             disabled={!hasChanges || saving}
-            className="px-3 py-1 bg-bg-card border border-primary text-text text-[10px] uppercase tracking-wider rounded-sm hover:bg-bg-input disabled:opacity-30 transition-colors"
+            className="font-mono px-3 py-1 text-[9px] tracking-wider bg-primary/[0.08] text-primary border border-primary/30 hover:bg-primary/[0.12] disabled:opacity-20 transition-colors"
           >
-            {saving ? "Saving..." : "Save"}
+            {saving ? "SAVING..." : "SAVE"}
           </button>
         </div>
       </div>
 
       {/* Description */}
-      <div className="px-5 py-3 border-b border-border/50">
-        <p className="text-xs text-text-muted leading-relaxed max-w-lg">
-          Your instructions to ANIMA — how you want it to behave with you.
-          Changes take effect on the next conversation.
+      <div className="px-5 py-2 border-b border-border/50">
+        <p className="font-mono text-[10px] text-text-muted/40 leading-relaxed max-w-lg tracking-wider">
+          YOUR INSTRUCTIONS TO ANIMA. CHANGES TAKE EFFECT NEXT CONVERSATION.
         </p>
-        <p className="text-[10px] text-text-muted/40 mt-0.5">
-          Cmd+S to save
+        <p className="font-mono text-[8px] text-text-muted/20 mt-0.5 tracking-wider">
+          CMD+S SAVE
         </p>
       </div>
 
@@ -106,8 +108,8 @@ export default function Soul() {
       <div className="flex-1 p-4 min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <span className="text-xs text-text-muted animate-pulse uppercase tracking-wider">
-              Loading...
+            <span className="font-mono text-[10px] text-text-muted/30 animate-pulse tracking-wider">
+              LOADING...
             </span>
           </div>
         ) : (
@@ -117,7 +119,7 @@ export default function Soul() {
             onChange={(e) => setContent(e.target.value)}
             onKeyDown={handleKeyDown}
             spellCheck={false}
-            className="w-full h-full bg-bg-input border border-border rounded-sm px-5 py-4 text-sm text-text outline-none focus:border-primary transition-colors resize-none leading-relaxed"
+            className="w-full h-full bg-bg-input border border-border px-5 py-4 text-sm text-text outline-none focus:border-primary/30 transition-colors resize-none leading-relaxed font-mono"
           />
         )}
       </div>
@@ -125,17 +127,17 @@ export default function Soul() {
       {/* Status bar */}
       <div className="px-5 py-2 border-t border-border flex items-center gap-4">
         {saved && (
-          <span className="text-[10px] text-primary tracking-wider uppercase">
-            Saved — takes effect next conversation
+          <span className="font-mono text-[9px] text-primary tracking-wider">
+            SAVED
           </span>
         )}
         {error && (
-          <span className="text-[10px] text-danger tracking-wider">
+          <span className="font-mono text-[9px] text-danger tracking-wider">
             {error}
           </span>
         )}
-        <span className="ml-auto text-[10px] text-text-muted/30">
-          {content.length} chars · {content.split("\n").length} lines
+        <span className="ml-auto font-mono text-[8px] text-text-muted/20 tracking-wider">
+          {content.length} CHARS | {content.split("\n").length} LINES
         </span>
       </div>
     </div>

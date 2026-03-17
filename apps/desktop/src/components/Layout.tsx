@@ -1,22 +1,35 @@
-import { useState, useEffect, useCallback } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { getDbViewerEnabled } from "../pages/settings/AdvancedSettings";
 
 const STATIC_NAV_ITEMS = [
-  { to: "/", label: "Home" },
-  { to: "/tasks", label: "Tasks" },
-  { to: "/chat", label: "Chat" },
-  { to: "/memory", label: "Memory" },
-  { to: "/soul", label: "Directive" },
-  { to: "/consciousness", label: "Mind" },
-  { to: "/settings", label: "Settings" },
+  { to: "/", label: "HOME", icon: "\u2302" },
+  { to: "/tasks", label: "TASKS", icon: "\u2610" },
+  { to: "/chat", label: "CHAT", icon: "\u25B9" },
+  { to: "/memory", label: "MEM", icon: "\u25C7" },
+  { to: "/soul", label: "DIR", icon: "\u2261" },
+  { to: "/consciousness", label: "MIND", icon: "\u25CE" },
+  { to: "/settings", label: "CFG", icon: "\u2699" },
 ];
+
+const DOCK_HIDE_DELAY = 1200;
+const DOCK_STORAGE_KEY = "anima-dock-pinned";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [dbEnabled, setDbEnabled] = useState(getDbViewerEnabled);
+  const [dockVisible, setDockVisible] = useState(true);
+  const [pinned, setPinned] = useState(() => {
+    try { return localStorage.getItem(DOCK_STORAGE_KEY) === "true"; }
+    catch { return false; }
+  });
+  const [showUser, setShowUser] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const syncSetting = useCallback(() => {
     setDbEnabled(getDbViewerEnabled());
@@ -28,65 +41,168 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       window.removeEventListener("anima-settings-changed", syncSetting);
   }, [syncSetting]);
 
+  // Keyboard toggle: Ctrl+/ or Cmd+/
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "/") {
+        e.preventDefault();
+        setPinned((p) => {
+          const next = !p;
+          localStorage.setItem(DOCK_STORAGE_KEY, String(next));
+          if (next) setDockVisible(true);
+          return next;
+        });
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  const showDock = useCallback(() => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    setDockVisible(true);
+  }, []);
+
+  const scheduleDockHide = useCallback(() => {
+    if (pinned) return;
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => setDockVisible(false), DOCK_HIDE_DELAY);
+  }, [pinned]);
+
+  // Auto-hide on route change (unless pinned)
+  useEffect(() => {
+    if (!pinned) {
+      showDock();
+      scheduleDockHide();
+    }
+  }, [location.pathname]);
+
   const navItems = dbEnabled
-    ? [...STATIC_NAV_ITEMS, { to: "/database", label: "DB" }]
+    ? [...STATIC_NAV_ITEMS, { to: "/database", label: "DB", icon: "\u25A4" }]
     : STATIC_NAV_ITEMS;
 
   return (
-    <div className="flex h-screen bg-bg text-text">
-      {/* Sidebar */}
-      <aside className="w-[140px] border-r border-border flex flex-col shrink-0">
-        {/* Logo */}
-        <div className="px-4 py-5">
-          <span className="font-mono text-xs font-semibold tracking-[0.25em] uppercase text-text/70">
-            ANIMA
-          </span>
-        </div>
+    <div className="relative h-screen bg-bg text-text overflow-hidden">
+      {/* Main — full width */}
+      <main className="h-full overflow-hidden">{children}</main>
 
-        {/* Nav */}
-        <nav className="flex-1 flex flex-col gap-0.5 px-2">
+      {/* Bottom trigger zone — invisible, activates dock on hover */}
+      <div
+        ref={triggerRef}
+        onMouseEnter={showDock}
+        className="fixed bottom-0 left-0 right-0 h-4 z-40"
+      />
+
+      {/* Dock */}
+      <div
+        ref={dockRef}
+        onMouseEnter={showDock}
+        onMouseLeave={scheduleDockHide}
+        className={`fixed bottom-3 left-1/2 -translate-x-1/2 z-50 transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          dockVisible
+            ? "translate-y-0 opacity-100"
+            : "translate-y-[calc(100%+20px)] opacity-0 pointer-events-none"
+        }`}
+      >
+        <div className="flex items-center gap-px bg-bg-card/90 backdrop-blur-md border border-border p-1">
+          {/* Status dot */}
+          <div className="px-2 flex items-center">
+            <div className="w-1 h-1 bg-success" />
+          </div>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* Nav items */}
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === "/"}
               className={({ isActive }) =>
-                `relative px-3 py-2 rounded-md text-[13px] transition-all duration-150 ${
+                `group relative flex flex-col items-center justify-center w-10 h-9 font-mono transition-all duration-100 ${
                   isActive
-                    ? "bg-bg-card text-text font-medium before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[3px] before:h-4 before:rounded-r-full before:bg-primary"
-                    : "text-text-muted hover:text-text hover:bg-bg-card/50"
+                    ? "text-primary bg-primary/[0.08]"
+                    : "text-text-muted/50 hover:text-text hover:bg-bg-input/50"
                 }`
               }
             >
-              {item.label}
+              {({ isActive }) => (
+                <>
+                  <span className="text-[13px] leading-none">{item.icon}</span>
+                  <span className="text-[7px] tracking-wider mt-0.5 leading-none">
+                    {item.label}
+                  </span>
+                  {/* Active indicator bar */}
+                  {isActive && (
+                    <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-4 h-px bg-primary" />
+                  )}
+                  {/* Tooltip on hover (for items with short labels) */}
+                </>
+              )}
             </NavLink>
           ))}
-        </nav>
 
-        {/* Bottom */}
-        <div className="px-2 py-4 border-t border-border space-y-1">
-          <button
-            onClick={() => navigate("/profile")}
-            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] text-text-muted hover:text-text hover:bg-bg-card/50 transition-colors"
-          >
-            <span className="w-5 h-5 rounded-full bg-bg-input border border-border flex items-center justify-center text-[9px] uppercase shrink-0">
-              {user?.name?.charAt(0) || "?"}
-            </span>
-            <span className="truncate">{user?.name}</span>
-          </button>
+          <div className="w-px h-5 bg-border" />
+
+          {/* User section */}
+          <div className="relative">
+            <button
+              onClick={() => setShowUser((v) => !v)}
+              className="flex items-center justify-center w-9 h-9 font-mono text-[9px] text-text-muted/50 hover:text-text transition-colors"
+            >
+              <span className="w-5 h-5 bg-bg-input border border-border flex items-center justify-center text-[8px] uppercase">
+                {user?.name?.charAt(0) || "?"}
+              </span>
+            </button>
+
+            {/* User dropdown */}
+            {showUser && (
+              <div
+                className="absolute bottom-full right-0 mb-2 bg-bg-card border border-border p-1 min-w-[120px]"
+                onMouseLeave={() => setShowUser(false)}
+              >
+                <button
+                  onClick={() => { navigate("/profile"); setShowUser(false); }}
+                  className="w-full text-left px-3 py-1.5 font-mono text-[9px] text-text-muted hover:text-text hover:bg-bg-input/50 tracking-wider transition-colors"
+                >
+                  PROFILE
+                </button>
+                <button
+                  onClick={() => {
+                    setShowUser(false);
+                    void logout().then(() => navigate("/login"));
+                  }}
+                  className="w-full text-left px-3 py-1.5 font-mono text-[9px] text-text-muted/40 hover:text-danger tracking-wider transition-colors"
+                >
+                  LOGOUT
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="w-px h-5 bg-border" />
+
+          {/* Pin toggle */}
           <button
             onClick={() => {
-              void logout().then(() => navigate("/login"));
+              setPinned((p) => {
+                const next = !p;
+                localStorage.setItem(DOCK_STORAGE_KEY, String(next));
+                if (next) setDockVisible(true);
+                return next;
+              });
             }}
-            className="w-full px-3 py-1.5 rounded-md text-[12px] text-text-muted/50 hover:text-danger text-left transition-colors"
+            title={pinned ? "Unpin dock (Ctrl+/)" : "Pin dock (Ctrl+/)"}
+            className={`flex items-center justify-center w-7 h-9 font-mono text-[10px] transition-colors ${
+              pinned
+                ? "text-primary/60 hover:text-primary"
+                : "text-text-muted/20 hover:text-text-muted/50"
+            }`}
           >
-            Log out
+            {pinned ? "\u25A0" : "\u25A1"}
           </button>
         </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="flex-1 overflow-hidden">{children}</main>
+      </div>
     </div>
   );
 }

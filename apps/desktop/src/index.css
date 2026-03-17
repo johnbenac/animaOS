@@ -3,17 +3,20 @@
 @plugin "@tailwindcss/typography";
 
 @theme {
-  --color-bg: #09090b;
-  --color-bg-card: #0f0f12;
-  --color-bg-input: #131316;
-  --color-border: #1e1e24;
-  --color-text: #dcdce0;
-  --color-text-muted: #5a5a6e;
-  --color-primary: #a8a8c0;
-  --color-primary-hover: #8888a0;
-  --color-danger: #e85454;
-  --color-success: #6ec87a;
-  --color-warning: #d4a054;
+  --color-bg: #08090e;
+  --color-bg-card: #0c0d14;
+  --color-bg-input: #10111a;
+  --color-bg-surface: #13141e;
+  --color-border: #1a1c2a;
+  --color-border-active: #282a3c;
+  --color-text: #c8c8d4;
+  --color-text-muted: #42425c;
+  --color-primary: #5ea0ab;
+  --color-primary-hover: #4a8892;
+  --color-danger: #d04848;
+  --color-success: #48a060;
+  --color-warning: #c89848;
+  --color-accent: #5ea0ab;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   --font-sans:
     "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -23,15 +26,14 @@ body {
   @apply bg-bg text-text font-sans antialiased min-h-screen leading-relaxed;
 }
 
-/* Selection */
 ::selection {
-  background: rgba(168, 168, 192, 0.18);
+  background: rgba(94, 160, 171, 0.18);
 }
 
-/* Scrollbar */
+/* Scrollbar — thin, industrial */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 
 ::-webkit-scrollbar-track {
@@ -39,23 +41,39 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(90, 90, 110, 0.25);
-  border-radius: 3px;
+  background: rgba(74, 74, 90, 0.3);
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(90, 90, 110, 0.4);
+  background: rgba(74, 74, 90, 0.5);
 }
 
-/* Smooth transitions for all interactive elements */
+/* Transitions */
 input,
 textarea,
 button,
 a {
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Custom typography styles */
+/* Terminal cursor blink */
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.animate-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}
+
+/* Subtle scan line for certain surfaces */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+/* Prose — sharp, monospace headers */
 .prose {
   --tw-prose-body: var(--color-text);
   --tw-prose-headings: var(--color-text);
@@ -66,22 +84,24 @@ a {
   --tw-prose-bullets: var(--color-text-muted);
   --tw-prose-hr: var(--color-border);
   --tw-prose-quotes: var(--color-text);
-  --tw-prose-quote-borders: var(--color-border);
+  --tw-prose-quote-borders: var(--color-primary);
   --tw-prose-captions: var(--color-text-muted);
   --tw-prose-code: var(--color-primary);
   --tw-prose-pre-code: var(--color-text);
-  --tw-prose-pre-bg: var(--color-bg-card);
+  --tw-prose-pre-bg: var(--color-bg);
   --tw-prose-th-borders: var(--color-border);
   --tw-prose-td-borders: var(--color-border);
 }
 
 .prose :where(code):not(:where([class~="not-prose"] *)) {
-  @apply bg-bg-card border border-border px-1.5 py-0.5 rounded text-xs;
+  @apply bg-bg border border-border px-1.5 py-0.5 text-xs;
+  border-radius: 2px;
   font-family: var(--font-mono);
 }
 
 .prose :where(pre):not(:where([class~="not-prose"] *)) {
-  @apply bg-bg-card border border-border rounded-md my-3;
+  @apply bg-bg border border-border my-3;
+  border-radius: 2px;
 }
 
 .prose :where(pre code):not(:where([class~="not-prose"] *)) {
@@ -93,7 +113,7 @@ a {
 }
 
 .prose :where(blockquote):not(:where([class~="not-prose"] *)) {
-  @apply border-l-2 border-border pl-4 italic text-text-muted;
+  @apply border-l-2 border-primary/40 pl-4 italic text-text-muted;
 }
 
 .prose :where(ul, ol):not(:where([class~="not-prose"] *)) {
@@ -105,7 +125,7 @@ a {
 }
 
 .prose :where(h1, h2, h3, h4, h5, h6):not(:where([class~="not-prose"] *)) {
-  @apply font-mono tracking-wider uppercase mt-4 mb-2;
+  @apply font-mono tracking-wider uppercase mt-4 mb-2 text-text;
 }
 
 .prose :where(table):not(:where([class~="not-prose"] *)) {
