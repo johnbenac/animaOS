@@ -499,7 +499,7 @@ async def _prepare_turn_context(
         query_embedding = search_result.query_embedding
         if search_result.items:
             filtered = adaptive_filter(search_result.items)
-            semantic_results = [(item.id, df(user_id, item.content), score)
+            semantic_results = [(item.id, df(user_id, item.content, table="memory_items", field="content"), score)
                                 for item, score in filtered]
     except Exception:  # noqa: BLE001
         pass

@@ -112,12 +112,12 @@ def _decrypt_field_value(value: str | None, dek: bytes | None) -> str | None:
 
 
 def _re_encrypt_field_value(
-    value: str | None, user_id: int,
+    value: str | None, user_id: int, *, table: str = "", field: str = "",
 ) -> str | None:
     """Re-encrypt a plaintext value with the importing user's active DEK."""
     if value is None:
         return value
-    return encrypt_field_for_user(user_id, value)
+    return encrypt_field_for_user(user_id, value, table=table, field=field)
 
 
 def export_vault(db: Session, passphrase: str, *, user_id: int | None = None, scope: str = "full") -> dict[str, Any]:
@@ -785,6 +785,11 @@ def read_data_snapshot(*, user_id: int | None = None) -> dict[str, str]:
 
 
 def write_data_snapshot(user_files: dict[str, Any], *, user_id: int | None = None) -> None:
+    # NOTE: This restores legacy file-based user data from older vault exports.
+    # All personal data now lives inside the encrypted SQLite database.
+    # These files are written for backwards compatibility only — no runtime code
+    # reads them.  A future version should stop writing them entirely and
+    # document the filesystem boundary as sealed (see portable-core thesis §5.3).
     root = settings.data_dir
     if user_id is None:
         root.parent.mkdir(parents=True, exist_ok=True)
@@ -1194,40 +1199,40 @@ def _re_encrypt_snapshot_fields(
 
     for item in snapshot.get("memoryItems", []):
         if isinstance(item, dict) and item.get("content"):
-            item["content"] = _re_encrypt_field_value(item["content"], user_id)
+            item["content"] = _re_encrypt_field_value(item["content"], user_id, table="memory_items", field="content")
 
     for ep in snapshot.get("memoryEpisodes", []):
         if isinstance(ep, dict):
             if ep.get("summary"):
-                ep["summary"] = _re_encrypt_field_value(ep["summary"], user_id)
+                ep["summary"] = _re_encrypt_field_value(ep["summary"], user_id, table="memory_episodes", field="summary")
             if ep.get("emotional_arc"):
-                ep["emotional_arc"] = _re_encrypt_field_value(ep["emotional_arc"], user_id)
+                ep["emotional_arc"] = _re_encrypt_field_value(ep["emotional_arc"], user_id, table="memory_episodes", field="emotional_arc")
 
     for log in snapshot.get("memoryDailyLogs", []):
         if isinstance(log, dict):
             if log.get("user_message"):
-                log["user_message"] = _re_encrypt_field_value(log["user_message"], user_id)
+                log["user_message"] = _re_encrypt_field_value(log["user_message"], user_id, table="memory_daily_logs", field="user_message")
             if log.get("assistant_response"):
-                log["assistant_response"] = _re_encrypt_field_value(log["assistant_response"], user_id)
+                log["assistant_response"] = _re_encrypt_field_value(log["assistant_response"], user_id, table="memory_daily_logs", field="assistant_response")
 
     for note in snapshot.get("sessionNotes", []):
         if isinstance(note, dict) and note.get("value"):
-            note["value"] = _re_encrypt_field_value(note["value"], user_id)
+            note["value"] = _re_encrypt_field_value(note["value"], user_id, table="session_notes", field="value")
 
     for block in snapshot.get("selfModelBlocks", []):
         if isinstance(block, dict) and block.get("content"):
-            block["content"] = _re_encrypt_field_value(block["content"], user_id)
+            block["content"] = _re_encrypt_field_value(block["content"], user_id, table="self_model_blocks", field="content")
 
     for signal in snapshot.get("emotionalSignals", []):
         if isinstance(signal, dict):
             if signal.get("evidence"):
-                signal["evidence"] = _re_encrypt_field_value(signal["evidence"], user_id)
+                signal["evidence"] = _re_encrypt_field_value(signal["evidence"], user_id, table="emotional_signals", field="evidence")
             if signal.get("topic"):
-                signal["topic"] = _re_encrypt_field_value(signal["topic"], user_id)
+                signal["topic"] = _re_encrypt_field_value(signal["topic"], user_id, table="emotional_signals", field="topic")
 
     for msg in snapshot.get("agentMessages", []):
         if isinstance(msg, dict) and msg.get("content_text"):
-            msg["content_text"] = _re_encrypt_field_value(msg["content_text"], user_id)
+            msg["content_text"] = _re_encrypt_field_value(msg["content_text"], user_id, table="agent_messages", field="content_text")
 
 
 def random_bytes(length: int) -> bytes:

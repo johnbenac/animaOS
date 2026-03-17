@@ -80,6 +80,13 @@ def _make_engine(database_url: str | None = None) -> Engine:
 
             return eng
 
+        from anima_server.services.core import get_sqlcipher_kdf_salt
+        from anima_server.services.crypto import derive_sqlcipher_key
+
+        sqlcipher_salt = get_sqlcipher_kdf_salt()
+        raw_key = derive_sqlcipher_key(passphrase, sqlcipher_salt)
+        hex_key = raw_key.hex()
+
         eng = create_engine(
             url,
             echo=settings.database_echo,
@@ -92,13 +99,14 @@ def _make_engine(database_url: str | None = None) -> Engine:
         def _set_sqlcipher_key(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
             del connection_record
             cursor = dbapi_connection.cursor()
-            escaped = passphrase.replace("'", "''")
-            cursor.execute(f"PRAGMA key = '{escaped}'")
+            cursor.execute(f"""PRAGMA key = "x'{hex_key}'" """)
+            cursor.execute("PRAGMA cipher_page_size = 4096")
+            cursor.execute("PRAGMA cipher_memory_security = ON")
             cursor.execute("PRAGMA journal_mode = WAL")
             cursor.execute("PRAGMA busy_timeout = 5000")
             cursor.close()
 
-        logger.info("Database encryption enabled (SQLCipher).")
+        logger.info("Database encryption enabled (SQLCipher, Argon2id-derived raw key).")
         return eng
 
     if require_encryption:

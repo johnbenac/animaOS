@@ -47,7 +47,7 @@ def load_thread_history(db: Session, thread_id: int, *, user_id: int | None = No
 
     history: list[StoredMessage] = []
     for row in rows:
-        content = df(uid, row.content_text or "")
+        content = df(uid, row.content_text or "", table="agent_messages", field="content_text")
         history.append(
             StoredMessage(
                 role=row.role,
@@ -375,7 +375,7 @@ def append_message(
         step_id=step_id,
         sequence_id=sequence_id,
         role=role,
-        content_text=ef(uid, content_text),
+        content_text=ef(uid, content_text, table="agent_messages", field="content_text"),
         content_json=content_json,
         tool_name=tool_name,
         tool_call_id=tool_call_id,

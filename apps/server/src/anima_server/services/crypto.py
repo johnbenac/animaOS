@@ -6,6 +6,8 @@ import os
 
 from argon2.low_level import Type, hash_secret_raw
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
 
 ARGON2_TIME_COST = 3
 ARGON2_MEMORY_COST_KIB = 64 * 1024
@@ -16,6 +18,9 @@ IV_LENGTH = 12
 AUTH_TAG_LENGTH = 16
 ENCRYPTED_TEXT_PREFIX = "enc1"
 ENCRYPTED_TEXT_PREFIX_AAD = "enc2"
+
+# Domain separator for HKDF-based SQLCipher key derivation
+SQLCIPHER_HKDF_INFO = b"anima-sqlcipher-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +53,24 @@ def derive_argon2id_key(
         hash_len=key_length,
         type=Type.ID,
     )
+
+
+def derive_sqlcipher_key(passphrase: str, salt: bytes) -> bytes:
+    """Derive a 32-byte raw key for SQLCipher from the passphrase.
+
+    Uses Argon2id for the memory-hard derivation, then HKDF-SHA256 with a
+    domain separator to produce a key independent of the field-level KEK.
+    The returned key should be passed to SQLCipher in raw hex format via
+    ``PRAGMA key = "x'<hex>'"`` — this bypasses SQLCipher's weaker internal
+    PBKDF2, giving us full control of the KDF chain.
+    """
+    master = derive_argon2id_key(passphrase, salt)
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=KEY_LENGTH,
+        salt=None,  # salt already consumed by Argon2id
+        info=SQLCIPHER_HKDF_INFO,
+    ).derive(master)
 
 
 def create_wrapped_dek(passphrase: str) -> tuple[bytes, WrappedDekRecord]:

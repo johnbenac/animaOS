@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 def _item_to_response(item: MemoryItem, user_id: int = 0) -> MemoryItemResponse:
     return MemoryItemResponse(
         id=item.id,
-        content=df(user_id, item.content),
+        content=df(user_id, item.content, table="memory_items", field="content"),
         category=item.category,
         importance=item.importance,
         source=item.source,
@@ -228,7 +228,7 @@ async def search_memory(
                 {
                     "type": "item",
                     "id": item.id,
-                    "content": df(user_id, item.content),
+                    "content": df(user_id, item.content, table="memory_items", field="content"),
                     "category": item.category,
                     "importance": item.importance,
                     "similarity": round(score, 3),
@@ -253,7 +253,7 @@ async def search_memory(
     )
     items = [
         item for item in all_items
-        if q_lower in df(user_id, item.content).lower()
+        if q_lower in df(user_id, item.content, table="memory_items", field="content").lower()
     ][:20]
 
     all_episodes = list(
@@ -265,14 +265,14 @@ async def search_memory(
     )
     episodes = [
         ep for ep in all_episodes
-        if q_lower in df(user_id, ep.summary).lower()
+        if q_lower in df(user_id, ep.summary, table="memory_episodes", field="summary").lower()
     ][:10]
 
     keyword_results: list[dict[str, object]] = [
         {
             "type": "item",
             "id": item.id,
-            "content": df(user_id, item.content),
+            "content": df(user_id, item.content, table="memory_items", field="content"),
             "category": item.category,
             "importance": item.importance,
         }
@@ -281,7 +281,7 @@ async def search_memory(
         {
             "type": "episode",
             "id": ep.id,
-            "content": df(user_id, ep.summary),
+            "content": df(user_id, ep.summary, table="memory_episodes", field="summary"),
             "category": "episode",
             "importance": ep.significance_score,
         }
@@ -323,10 +323,10 @@ async def list_episodes(
             id=ep.id,
             date=ep.date,
             time=ep.time,
-            summary=df(user_id, ep.summary),
+            summary=df(user_id, ep.summary, table="memory_episodes", field="summary"),
             topics=ep.topics_json or [],
             emotionalArc=df(
-                user_id, ep.emotional_arc) if ep.emotional_arc else None,
+                user_id, ep.emotional_arc, table="memory_episodes", field="emotional_arc") if ep.emotional_arc else None,
             significanceScore=ep.significance_score,
             turnCount=ep.turn_count,
             createdAt=ep.created_at,

@@ -304,7 +304,7 @@ async def embed_memory_item(
     and the MemoryVector table (for fast search).
     Returns True if successful.
     """
-    plaintext = df(item.user_id, item.content)
+    plaintext = df(item.user_id, item.content, table="memory_items", field="content")
     embedding = await generate_embedding(plaintext)
     if embedding is None:
         return False
@@ -351,7 +351,7 @@ async def backfill_embeddings(
     if not items:
         return 0
 
-    plaintexts = [df(user_id, item.content) for item in items]
+    plaintexts = [df(user_id, item.content, table="memory_items", field="content") for item in items]
     embeddings = await generate_embeddings_batch(plaintexts)
 
     count = 0
@@ -403,7 +403,7 @@ def sync_to_vector_store(
         from anima_server.services.agent.vector_store import rebuild_user_index
 
         index_data = [
-            (item.id, df(user_id, item.content),
+            (item.id, df(user_id, item.content, table="memory_items", field="content"),
              item.embedding_json, item.category, item.importance)
             for item in items
             if isinstance(item.embedding_json, list) and item.embedding_json

@@ -94,11 +94,11 @@ def upsert_claim(
 
     if existing is not None:
         # Same value — just add evidence if new
-        if df(user_id, existing.value_text).strip().lower() == content.strip().lower():
+        if df(user_id, existing.value_text, table="memory_items", field="content").strip().lower() == content.strip().lower():
             if evidence_text:
                 db.add(MemoryClaimEvidence(
                     claim_id=existing.id,
-                    source_text=ef(user_id, evidence_text),
+                    source_text=ef(user_id, evidence_text, table="memory_claim_evidence", field="source_text"),
                     source_kind=source_kind,
                 ))
                 db.flush()
@@ -113,7 +113,7 @@ def upsert_claim(
         subject_type="user",
         namespace=namespace,
         slot=slot,
-        value_text=ef(user_id, content.strip()),
+        value_text=ef(user_id, content.strip(), table="memory_items", field="content"),
         polarity=polarity,
         confidence=min(1.0, importance / 5.0),
         status="active",
@@ -134,7 +134,7 @@ def upsert_claim(
     if evidence_text:
         db.add(MemoryClaimEvidence(
             claim_id=new_claim.id,
-            source_text=ef(user_id, evidence_text),
+            source_text=ef(user_id, evidence_text, table="memory_claim_evidence", field="source_text"),
             source_kind=source_kind,
         ))
         db.flush()

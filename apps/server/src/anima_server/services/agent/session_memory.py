@@ -63,7 +63,7 @@ def write_session_note(
     )
 
     if existing is not None:
-        existing.value = ef(user_id, value)
+        existing.value = ef(user_id, value, table="session_notes", field="value")
         existing.note_type = note_type
         existing.updated_at = datetime.now(UTC)
         db.flush()
@@ -78,7 +78,7 @@ def write_session_note(
         thread_id=thread_id,
         user_id=user_id,
         key=key,
-        value=ef(user_id, value),
+        value=ef(user_id, value, table="session_notes", field="value"),
         note_type=note_type,
     )
     db.add(note)
@@ -134,7 +134,7 @@ def promote_session_note(
     item = add_memory_item(
         db,
         user_id=user_id,
-        content=df(user_id, note.value),
+        content=df(user_id, note.value, table="session_notes", field="value"),
         category=category,
         importance=importance,
         source="session",
@@ -172,7 +172,7 @@ def render_session_memory_text(notes: list[SessionNote], *, user_id: int = 0) ->
     total_len = 0
 
     for note in notes:
-        note_value = df(user_id, note.value)
+        note_value = df(user_id, note.value, table="session_notes", field="value")
         line = f"[{note.note_type}] {note.key}: {note_value}"
         if total_len + len(line) > settings.agent_session_memory_budget_chars:
             break

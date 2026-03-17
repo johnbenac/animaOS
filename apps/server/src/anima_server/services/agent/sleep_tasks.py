@@ -158,8 +158,8 @@ async def scan_contradictions(
             for i, newer_item in enumerate(items):
                 for older_item in items[i + 1:]:
                     sim = _similarity(
-                        df(user_id, older_item.content),
-                        df(user_id, newer_item.content),
+                        df(user_id, older_item.content, table="memory_items", field="content"),
+                        df(user_id, newer_item.content, table="memory_items", field="content"),
                     )
                     if 0.3 < sim < 0.95:  # Similar but not duplicate
                         pairs.append((older_item, newer_item))
@@ -167,8 +167,8 @@ async def scan_contradictions(
             for item_a, item_b in pairs[:10]:  # Cap per category
                 found += 1
                 resolution = await _check_contradiction(
-                    df(user_id, item_a.content),
-                    df(user_id, item_b.content),
+                    df(user_id, item_a.content, table="memory_items", field="content"),
+                    df(user_id, item_b.content, table="memory_items", field="content"),
                 )
                 if resolution is None:
                     continue
@@ -184,7 +184,7 @@ async def scan_contradictions(
                     supersede_memory_item(
                         db,
                         old_item_id=item_a.id,
-                        new_content=df(user_id, item_b.content),
+                        new_content=df(user_id, item_b.content, table="memory_items", field="content"),
                         importance=max(item_a.importance, item_b.importance),
                     )
                     resolved += 1
@@ -192,7 +192,7 @@ async def scan_contradictions(
                     supersede_memory_item(
                         db,
                         old_item_id=item_b.id,
-                        new_content=df(user_id, item_a.content),
+                        new_content=df(user_id, item_a.content, table="memory_items", field="content"),
                         importance=max(item_a.importance, item_b.importance),
                     )
                     resolved += 1
@@ -328,7 +328,7 @@ async def _call_profile_synthesis(facts: list[MemoryItem], *, user_id: int = 0) 
         from anima_server.services.agent.consolidation import _parse_json_array
 
         facts_text = "\n".join(
-            f"[id={f.id}] {df(user_id, f.content)}" for f in facts)
+            f"[id={f.id}] {df(user_id, f.content, table='memory_items', field='content')}" for f in facts)
         prompt = PROFILE_SYNTHESIS_PROMPT.format(facts=facts_text)
 
         llm = create_llm()

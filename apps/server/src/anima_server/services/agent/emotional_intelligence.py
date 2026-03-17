@@ -84,10 +84,10 @@ def record_emotional_signal(
         emotion=emotion,
         confidence=confidence,
         evidence_type=evidence_type,
-        evidence=ef(user_id, evidence),
+        evidence=ef(user_id, evidence, table="emotional_signals", field="evidence"),
         trajectory=trajectory,
         previous_emotion=previous_emotion,
-        topic=ef(user_id, topic),
+        topic=ef(user_id, topic, table="emotional_signals", field="topic"),
     )
     db.add(signal)
     db.flush()
@@ -157,10 +157,10 @@ def synthesize_emotional_context(
             f"{', ' + signal.trajectory if signal.trajectory != 'stable' else ''}"
             f")"
         )
-        topic_text = df(user_id, signal.topic)
+        topic_text = df(user_id, signal.topic, table="emotional_signals", field="topic")
         if topic_text:
             line += f" re: {topic_text}"
-        evidence_text = df(user_id, signal.evidence)
+        evidence_text = df(user_id, signal.evidence, table="emotional_signals", field="evidence")
         if evidence_text and len(evidence_text) < 80:
             line += f" — {evidence_text}"
 

@@ -340,7 +340,7 @@ async def consolidate_turn_memory_with_llm(
 
             if write_result.action == "similar" and write_result.similar_items:
                 resolution = await resolve_conflict(
-                    existing_content=df(user_id, write_result.similar_items[0].content),
+                    existing_content=df(user_id, write_result.similar_items[0].content, table="memory_items", field="content"),
                     new_content=content,
                 )
                 if resolution == "UPDATE":
@@ -352,7 +352,7 @@ async def consolidate_turn_memory_with_llm(
                     )
                     if updated_item is not None:
                         result.conflicts_resolved.append(
-                            f"{df(user_id, write_result.similar_items[0].content)} -> {content}"
+                            f"{df(user_id, write_result.similar_items[0].content, table='memory_items', field='content')} -> {content}"
                         )
                         result.llm_items_added.append(content)
                         try:

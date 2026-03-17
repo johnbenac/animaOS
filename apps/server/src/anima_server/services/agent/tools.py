@@ -185,7 +185,7 @@ def save_to_memory(key: str, category: str = "fact", importance: str = "3", tags
         companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
-        return f"Saved to long-term memory: {df(ctx.user_id, item.content)}"
+        return f"Saved to long-term memory: {df(ctx.user_id, item.content, table='memory_items', field='content')}"
     return f"Could not promote note '{key}' — not found or duplicate"
 
 
@@ -416,7 +416,7 @@ def recall_memory(query: str, category: str = "", tags: str = "") -> str:
         for item, score in result.items:
             if cat and item.category != cat:
                 continue
-            scored.append((score, df(ctx.user_id, item.content), item.category))
+            scored.append((score, df(ctx.user_id, item.content, table="memory_items", field="content"), item.category))
         hybrid_succeeded = True
     except Exception:  # noqa: BLE001
         pass
@@ -429,7 +429,7 @@ def recall_memory(query: str, category: str = "", tags: str = "") -> str:
             ctx.db, user_id=ctx.user_id, category=cat, limit=100,
         )
         for item in items:
-            plaintext = df(ctx.user_id, item.content)
+            plaintext = df(ctx.user_id, item.content, table="memory_items", field="content")
             content_lower = plaintext.lower()
             if query_lower in content_lower:
                 scored.append((1.0, plaintext, item.category))
@@ -450,7 +450,7 @@ def recall_memory(query: str, category: str = "", tags: str = "") -> str:
     ).all())
     query_lower = query_stripped.lower()
     for ep in episodes:
-        ep_plaintext = df(ctx.user_id, ep.summary)
+        ep_plaintext = df(ctx.user_id, ep.summary, table="memory_episodes", field="summary")
         summary_lower = ep_plaintext.lower()
         if query_lower in summary_lower:
             scored.append(
@@ -571,12 +571,12 @@ def update_human_memory(content: str) -> str:
         ctx.db.add(SelfModelBlock(
             user_id=ctx.user_id,
             section="human",
-            content=ef(ctx.user_id, content.strip()),
+            content=ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content"),
             version=1,
             updated_by="agent_tool",
         ))
     else:
-        block.content = ef(ctx.user_id, content.strip())
+        block.content = ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content")
         block.version += 1
         block.updated_by = "agent_tool"
     ctx.db.flush()
@@ -617,13 +617,13 @@ def core_memory_append(label: str, content: str) -> str:
         ctx.db.add(SelfModelBlock(
             user_id=ctx.user_id,
             section=label,
-            content=ef(ctx.user_id, content.strip()),
+            content=ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content"),
             version=1,
             updated_by="core_memory_tool",
         ))
     else:
-        existing_text = df(ctx.user_id, block.content)
-        block.content = ef(ctx.user_id, (existing_text.rstrip() + "\n" + content.strip()).strip())
+        existing_text = df(ctx.user_id, block.content, table="self_model_blocks", field="content")
+        block.content = ef(ctx.user_id, (existing_text.rstrip() + "\n" + content.strip()).strip(), table="self_model_blocks", field="content")
         block.version += 1
         block.updated_by = "core_memory_tool"
     ctx.db.flush()
@@ -665,11 +665,11 @@ def core_memory_replace(label: str, old_text: str, new_text: str) -> str:
     if block is None:
         return f"No {label} memory block exists yet. Use core_memory_append to create one."
 
-    existing_text = df(ctx.user_id, block.content)
+    existing_text = df(ctx.user_id, block.content, table="self_model_blocks", field="content")
     if old_text not in existing_text:
         return f"Could not find the exact text to replace in {label} memory."
 
-    block.content = ef(ctx.user_id, existing_text.replace(old_text, new_text, 1))
+    block.content = ef(ctx.user_id, existing_text.replace(old_text, new_text, 1), table="self_model_blocks", field="content")
     block.version += 1
     block.updated_by = "core_memory_tool"
     ctx.db.flush()

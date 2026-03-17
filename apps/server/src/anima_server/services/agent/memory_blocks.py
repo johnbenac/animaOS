@@ -149,7 +149,7 @@ def build_facts_memory_block(
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content)}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -171,7 +171,7 @@ def build_preferences_memory_block(
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content)}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -193,7 +193,7 @@ def build_goals_memory_block(
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content)}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -264,7 +264,7 @@ def build_relationships_memory_block(
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content)}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -314,7 +314,7 @@ def build_thread_summary_block(
         thread = db.get(AgentThread, thread_id)
         uid = thread.user_id if thread else 0
 
-    summary_text = df(uid, summary_row.content_text).strip() if summary_row.content_text else ""
+    summary_text = df(uid, summary_row.content_text, table="agent_messages", field="content_text").strip() if summary_row.content_text else ""
     if not summary_text:
         return None
 
@@ -342,7 +342,7 @@ def build_episodes_memory_block(
     for ep in reversed(episodes):
         topics = ", ".join(ep.topics_json or [])
         lines.append(
-            f"- {ep.date}: {df(user_id, ep.summary)} (Topics: {topics})")
+            f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (Topics: {topics})")
     return MemoryBlock(
         label="recent_episodes",
         description="Recent conversation experiences with the user.",
@@ -391,7 +391,7 @@ def build_soul_biography_block(
             SelfModelBlock.section == "soul",
         )
     )
-    value = df(user_id, block.content).strip() if block is not None else ""
+    value = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
 
     return MemoryBlock(
         label="soul",
@@ -417,7 +417,7 @@ def build_persona_block(
             SelfModelBlock.section == "persona",
         )
     )
-    plaintext = df(user_id, block.content).strip() if block is not None else ""
+    plaintext = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
     if not plaintext:
         return None
 
@@ -463,7 +463,7 @@ def build_human_core_block(
             SelfModelBlock.section == "human",
         )
     )
-    agent_understanding = df(user_id, block.content).strip() if block is not None else ""
+    agent_understanding = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
 
     parts: list[str] = []
     if profile_lines:
@@ -496,7 +496,7 @@ def build_user_directive_memory_block(
             SelfModelBlock.section == "user_directive",
         )
     )
-    plaintext = df(user_id, block.content).strip() if block is not None else ""
+    plaintext = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
     if not plaintext:
         return None
 

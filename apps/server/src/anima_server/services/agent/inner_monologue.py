@@ -211,7 +211,7 @@ async def run_quick_reflection(
                 .limit(3)
             ).all()
             episodes_text = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary)}" for ep in reversed(episodes)
+                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}" for ep in reversed(episodes)
             ) or "No recent episodes."
 
             # If no conversation text, try to get from recent messages
@@ -222,8 +222,8 @@ async def run_quick_reflection(
                 return result
 
             prompt = QUICK_REFLECTION_PROMPT.format(
-                inner_state=df(user_id, inner_state_block.content) if inner_state_block else "No state yet.",
-                working_memory=df(user_id, working_memory_block.content) if working_memory_block else "Empty.",
+                inner_state=df(user_id, inner_state_block.content, table="self_model_blocks", field="content") if inner_state_block else "No state yet.",
+                working_memory=df(user_id, working_memory_block.content, table="self_model_blocks", field="content") if working_memory_block else "Empty.",
                 recent_episodes=episodes_text,
                 conversation=conversation_text[:3000],
             )
@@ -250,7 +250,7 @@ async def run_quick_reflection(
             # Update working memory
             wm_updates = parsed.get("working_memory_updates", [])
             if wm_updates and isinstance(wm_updates, list):
-                current_wm = df(user_id, working_memory_block.content) if working_memory_block else "# Things I'm Holding in Mind\n"
+                current_wm = df(user_id, working_memory_block.content, table="self_model_blocks", field="content") if working_memory_block else "# Things I'm Holding in Mind\n"
                 for update in wm_updates:
                     if not isinstance(update, dict):
                         continue
@@ -336,19 +336,19 @@ async def run_deep_monologue(
                 .limit(10)
             ).all()
             episodes_text = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary)} (topics: {', '.join(ep.topics_json or [])})"
+                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (topics: {', '.join(ep.topics_json or [])})"
                 for ep in reversed(episodes)
             ) or "No episodes yet."
 
             facts = get_memory_items(
                 db, user_id=user_id, category="fact", limit=30)
             facts_text = "\n".join(
-                f"- {df(user_id, f.content)}" for f in facts) or "No facts yet."
+                f"- {df(user_id, f.content, table='memory_items', field='content')}" for f in facts) or "No facts yet."
 
             signals = get_recent_signals(db, user_id=user_id, limit=10)
             signals_text = "\n".join(
                 f"- {s.emotion} (confidence: {s.confidence:.1f}, {s.trajectory})"
-                + (f" — {df(user_id, s.evidence)[:80]}" if s.evidence else "")
+                + (f" — {df(user_id, s.evidence, table='emotional_signals', field='evidence')[:80]}" if s.evidence else "")
                 for s in signals
             ) or "No emotional signals yet."
 
@@ -364,18 +364,18 @@ async def run_deep_monologue(
                     SelfModelBlock.section == "persona",
                 )
             )
-            persona_text = df(user_id, persona_block.content) if persona_block else "Default persona — not yet customized."
+            persona_text = df(user_id, persona_block.content, table="self_model_blocks", field="content") if persona_block else "Default persona — not yet customized."
 
             prompt = DEEP_MONOLOGUE_PROMPT.format(
                 identity_version=identity_version,
-                identity=df(user_id, identity_block.content) if identity_block else "Not yet created.",
+                identity=df(user_id, identity_block.content, table="self_model_blocks", field="content") if identity_block else "Not yet created.",
                 persona=persona_text[:1000],
-                inner_state=df(user_id, blocks["inner_state"].content) if "inner_state" in blocks else "No state.",
-                working_memory=df(user_id, blocks["working_memory"].content) if "working_memory" in blocks else "Empty.",
+                inner_state=df(user_id, blocks["inner_state"].content, table="self_model_blocks", field="content") if "inner_state" in blocks else "No state.",
+                working_memory=df(user_id, blocks["working_memory"].content, table="self_model_blocks", field="content") if "working_memory" in blocks else "Empty.",
                 growth_log=_last_n_entries(
-                    df(user_id, blocks["growth_log"].content) if "growth_log" in blocks else "", 5
+                    df(user_id, blocks["growth_log"].content, table="self_model_blocks", field="content") if "growth_log" in blocks else "", 5
                 ),
-                intentions=df(user_id, blocks["intentions"].content) if "intentions" in blocks else "None.",
+                intentions=df(user_id, blocks["intentions"].content, table="self_model_blocks", field="content") if "intentions" in blocks else "None.",
                 user_facts=facts_text[:2000],
                 recent_episodes=episodes_text[:2000],
                 emotional_signals=signals_text[:1000],
@@ -405,14 +405,14 @@ async def run_deep_monologue(
             if parsed.get("persona_update"):
                 # Evolve the persona block — the agent's living style/approach
                 if persona_block is not None:
-                    persona_block.content = ef(user_id, parsed["persona_update"])
+                    persona_block.content = ef(user_id, parsed["persona_update"], table="self_model_blocks", field="content")
                     persona_block.version += 1
                     persona_block.updated_by = "sleep_time"
                 else:
                     db.add(SelfModelBlock(
                         user_id=user_id,
                         section="persona",
-                        content=ef(user_id, parsed["persona_update"]),
+                        content=ef(user_id, parsed["persona_update"], table="self_model_blocks", field="content"),
                         version=1,
                         updated_by="sleep_time",
                     ))
@@ -525,7 +525,7 @@ async def _get_recent_conversation(
     lines = []
     for msg in reversed(messages):
         role = "User" if msg.role == "user" else "SAM"
-        text = df(user_id, msg.content_text or "").strip()
+        text = df(user_id, msg.content_text or "", table="agent_messages", field="content_text").strip()
         if text:
             lines.append(f"{role}: {text}")
 

@@ -138,7 +138,7 @@ def compact_thread_context(
         step_id=None,
         sequence_id=summary_sequence_id,
         role="summary",
-        content_text=ef(thread.user_id, summary_text),
+        content_text=ef(thread.user_id, summary_text, table="agent_messages", field="content_text"),
         content_json={
             "compacted_message_count": len(compacted_rows),
             "source_sequence_end": compacted_rows[-1].sequence_id,
@@ -185,7 +185,7 @@ def render_summary_text(
     lines: list[str] = ["Conversation summary:"]
 
     for summary_row in summary_rows:
-        content = df(user_id, (summary_row.content_text or "")).strip()
+        content = df(user_id, (summary_row.content_text or ""), table="agent_messages", field="content_text").strip()
         if not content:
             continue
         compact_content = _trim_summary_text(content)
@@ -213,7 +213,7 @@ def _summarize_row(row: AgentMessage, *, user_id: int = 0) -> str:
         role_label = f"Tool {row.tool_name}"
 
     content = _trim_summary_text(
-        df(user_id, row.content_text or ""))
+        df(user_id, row.content_text or "", table="agent_messages", field="content_text"))
     if not content:
         return f"{role_label}: [empty]"
     return f"{role_label}: {content}"
@@ -460,7 +460,7 @@ async def compact_thread_context_with_llm(
         step_id=None,
         sequence_id=summary_sequence_id,
         role="summary",
-        content_text=ef(thread.user_id, summary_text),
+        content_text=ef(thread.user_id, summary_text, table="agent_messages", field="content_text"),
         content_json={
             "compacted_message_count": len(compacted_rows),
             "total_hidden_message_count": total_hidden,

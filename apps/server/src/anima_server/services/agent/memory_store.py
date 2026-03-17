@@ -83,12 +83,12 @@ def add_memory_item(
 
     existing = get_memory_items(db, user_id=user_id, category=category)
     for item in existing:
-        if _classify_memory_relation(df(user_id, item.content), content, category) == "duplicate":
+        if _classify_memory_relation(df(user_id, item.content, table="memory_items", field="content"), content, category) == "duplicate":
             return None
 
     memory_item = MemoryItem(
         user_id=user_id,
-        content=ef(user_id, content),
+        content=ef(user_id, content, table="memory_items", field="content"),
         category=category,
         importance=importance,
         source=source,
@@ -120,7 +120,7 @@ def analyze_memory_item(
     similar_items: list[MemoryItem] = []
 
     for item in existing:
-        item_plaintext = df(user_id, item.content)
+        item_plaintext = df(user_id, item.content, table="memory_items", field="content")
         relation = _classify_memory_relation(item_plaintext, content, category)
         if relation == "duplicate":
             return MemoryWriteAnalysis(
@@ -208,7 +208,7 @@ def store_memory_item(
 
     item = MemoryItem(
         user_id=user_id,
-        content=ef(user_id, cleaned_content),
+        content=ef(user_id, cleaned_content, table="memory_items", field="content"),
         category=category,
         importance=importance,
         source=source,
@@ -362,7 +362,7 @@ def supersede_memory_item(
 
     new_item = MemoryItem(
         user_id=old_item.user_id,
-        content=ef(old_item.user_id, new_content),
+        content=ef(old_item.user_id, new_content, table="memory_items", field="content"),
         category=old_item.category,
         importance=importance if importance is not None else old_item.importance,
         source=old_item.source,
@@ -396,8 +396,8 @@ def add_daily_log(
     log = MemoryDailyLog(
         user_id=user_id,
         date=datetime.now(UTC).date().isoformat(),
-        user_message=ef(user_id, user_message),
-        assistant_response=ef(user_id, assistant_response),
+        user_message=ef(user_id, user_message, table="memory_daily_logs", field="user_message"),
+        assistant_response=ef(user_id, assistant_response, table="memory_daily_logs", field="assistant_response"),
     )
     db.add(log)
     db.flush()
@@ -417,7 +417,7 @@ def get_current_focus(db: Session, *, user_id: int) -> str | None:
     )
     if item is None:
         return None
-    return df(user_id, item.content)
+    return df(user_id, item.content, table="memory_items", field="content")
 
 
 def set_current_focus(
@@ -439,7 +439,7 @@ def set_current_focus(
     )
     if existing is not None:
         relation = _classify_memory_relation(
-            df(user_id, existing.content), focus, "focus")
+            df(user_id, existing.content, table="memory_items", field="content"), focus, "focus")
         if relation == "duplicate":
             return existing
         return supersede_memory_item(
@@ -450,7 +450,7 @@ def set_current_focus(
 
     item = MemoryItem(
         user_id=user_id,
-        content=ef(user_id, focus),
+        content=ef(user_id, focus, table="memory_items", field="content"),
         category="focus",
         importance=4,
         source="user",
@@ -471,8 +471,8 @@ def find_similar_items(
     existing = get_memory_items(db, user_id=user_id, category=category)
     return [
         item for item in existing
-        if _similarity(df(user_id, item.content), content) > threshold
-        and _classify_memory_relation(df(user_id, item.content), content, category) != "duplicate"
+        if _similarity(df(user_id, item.content, table="memory_items", field="content"), content) > threshold
+        and _classify_memory_relation(df(user_id, item.content, table="memory_items", field="content"), content, category) != "duplicate"
     ]
 
 

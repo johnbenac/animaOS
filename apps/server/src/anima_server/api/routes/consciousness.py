@@ -61,7 +61,7 @@ async def get_full_self_model(
     sections = {}
     for section_name, block in blocks.items():
         sections[section_name] = {
-            "content": df(user_id, block.content),
+            "content": df(user_id, block.content, table="self_model_blocks", field="content"),
             "version": block.version,
             "updatedBy": block.updated_by,
             "updatedAt": block.updated_at.isoformat() if block.updated_at else None,
@@ -96,7 +96,7 @@ async def get_self_model_section(
 
     return SelfModelSectionResponse(
         section=block.section,
-        content=df(user_id, block.content),
+        content=df(user_id, block.content, table="self_model_blocks", field="content"),
         version=block.version,
         updatedBy=block.updated_by,
         updatedAt=block.updated_at.isoformat() if block.updated_at else None,
@@ -148,7 +148,7 @@ async def update_self_model_section(
 
     return SelfModelSectionResponse(
         section=block.section,
-        content=df(user_id, block.content),
+        content=df(user_id, block.content, table="self_model_blocks", field="content"),
         version=block.version,
         updatedBy=block.updated_by,
         updatedAt=block.updated_at.isoformat() if block.updated_at else None,
@@ -194,8 +194,8 @@ async def get_emotional_state(
                 confidence=s.confidence,
                 trajectory=s.trajectory,
                 evidenceType=s.evidence_type,
-                evidence=df(user_id, s.evidence),
-                topic=df(user_id, s.topic),
+                evidence=df(user_id, s.evidence, table="emotional_signals", field="evidence"),
+                topic=df(user_id, s.topic, table="emotional_signals", field="topic"),
                 createdAt=s.created_at.isoformat() if s.created_at else None,
             )
             for s in signals

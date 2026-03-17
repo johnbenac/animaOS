@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import base64
 import json
 import logging
 import os
@@ -41,6 +42,26 @@ def ensure_core_manifest() -> dict[str, object]:
         manifest["encryption_version"] = 1
         _write_manifest(manifest)
         return manifest
+
+
+def get_sqlcipher_kdf_salt() -> bytes:
+    """Return the salt used for SQLCipher key derivation via Argon2id.
+
+    The salt is stored in the manifest as base64.  On first call (no salt
+    present) a fresh 16-byte random salt is generated and persisted.
+    """
+    from anima_server.services.crypto import SALT_LENGTH
+
+    with _manifest_lock:
+        manifest = _load_manifest(now=datetime.now(UTC).isoformat())
+        encoded = manifest.get("sqlcipher_kdf_salt")
+        if encoded:
+            return base64.b64decode(encoded)
+
+        salt = os.urandom(SALT_LENGTH)
+        manifest["sqlcipher_kdf_salt"] = base64.b64encode(salt).decode("ascii")
+        _write_manifest(manifest)
+        return salt
 
 
 def _detect_encryption_mode() -> str:

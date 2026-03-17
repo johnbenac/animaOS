@@ -219,9 +219,9 @@ def _search_daily_logs(
         # Score user_message and assistant_response separately
         entries = []
         if role_filter != "assistant":
-            entries.append(("user", df(user_id, row.user_message)))
+            entries.append(("user", df(user_id, row.user_message, table="memory_daily_logs", field="user_message")))
         if role_filter != "user":
-            entries.append(("assistant", df(user_id, row.assistant_response)))
+            entries.append(("assistant", df(user_id, row.assistant_response, table="memory_daily_logs", field="assistant_response")))
 
         for role, text in entries:
             text_stripped = (text or "").strip()

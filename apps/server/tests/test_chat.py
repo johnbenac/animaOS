@@ -242,9 +242,9 @@ def test_chat_persists_runtime_rows() -> None:
             assert thread.next_message_sequence == 4
             assert [message.role for message in messages] == [
                 "user", "assistant", "tool"]
-            assert df(user_id, messages[0].content_text) == "hello"
-            assert "turn 1" in df(user_id, messages[1].content_text)
-            assert "turn 1" in df(user_id, messages[2].content_text)
+            assert df(user_id, messages[0].content_text, table="agent_messages", field="content_text") == "hello"
+            assert "turn 1" in df(user_id, messages[1].content_text, table="agent_messages", field="content_text")
+            assert "turn 1" in df(user_id, messages[2].content_text, table="agent_messages", field="content_text")
 
 
 def test_chat_stream_returns_sse_events() -> None:

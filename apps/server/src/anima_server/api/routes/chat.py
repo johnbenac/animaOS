@@ -114,7 +114,7 @@ async def get_chat_history(
             id=row.id,
             userId=userId,
             role="assistant" if row.role == "tool" else row.role,
-            content=df(userId, row.content_text),
+            content=df(userId, row.content_text, table="agent_messages", field="content_text"),
             createdAt=row.created_at,
         )
         for row in rows
