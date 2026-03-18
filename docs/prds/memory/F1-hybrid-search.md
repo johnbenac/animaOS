@@ -169,7 +169,8 @@ def bm25_search(
 - `companion.py` caches static blocks; it is not the per-turn caller of `hybrid_search()`.
 - Index lifecycle: BM25 indices live in process memory (like the current `InMemoryVectorStore`). They rebuild lazily on first search after invalidation.
 - Corpus coverage assumption: The BM25 corpus is built from the currently search-indexed memory text, not necessarily every logical memory row at write time.
-- Corpus coverage risk: Fresh or unembedded memories may be temporarily invisible to the BM25 leg until embedding sync or index rebuild completes.
+- Corpus coverage risk: Fresh memories that have not yet entered the search-indexed corpus remain invisible to the BM25 leg until they are added to that corpus and the BM25 index is rebuilt.
+- Corpus coverage risk: For already-indexed content, an index rebuild can restore BM25 visibility after invalidation or content changes.
 - Token budget: No impact. This changes ranking quality, not what goes into the prompt.
 - `_RRF_K = 60` remains the existing RRF default.
 
