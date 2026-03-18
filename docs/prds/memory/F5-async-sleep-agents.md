@@ -19,9 +19,9 @@ version: "1.0"
 
 ## 1. Overview
 
-Refactor the background memory processing pipeline from two suboptimal trigger modes (every-turn consolidation + 5-minute inactivity reflection) into a unified, frequency-gated, heat-threshold-aware async orchestrator. Inspired by Letta's `SleeptimeMultiAgentV4`, this feature introduces turn counting, configurable frequency, heat-based gating for expensive operations, parallel execution of independent tasks, and tracked task runs for debugging.
+Refactor the background memory processing pipeline from two suboptimal trigger modes (every-turn consolidation + 5-minute inactivity reflection) into a unified, frequency-gated, heat-threshold-aware async orchestrator. F5 adopts the useful orchestration patterns visible in Letta's `SleeptimeMultiAgentV4` such as turn counting, configurable frequency, tracked task runs, and last-processed restart cursors, but it does **not** adopt Letta's open-ended background-agent model.
 
-The user's foreground response is never blocked. Background work runs asynchronously and fires only when it's actually useful.
+AnimaOS intentionally uses structured background tasks instead of general-purpose background agents with their own evolving memory. This is a deliberate reliability tradeoff: the system gives up some flexibility in exchange for more predictable and auditable background behavior. The user's foreground response is never blocked, and last-processed tracking remains a required part of restart safety rather than an optional optimization.
 
 ---
 
@@ -54,6 +54,10 @@ The user's foreground response is never blocked. Background work runs asynchrono
 | Letta | `_sleeptime_agent_frequency` counter — only fires if `turn_count % frequency == 0` |
 | Letta | `get_last_processed_message_id_and_update_async()` — restart safety |
 | Letta | `finally` block ensures state is saved even if tasks fail |
+
+### Design Boundary
+
+The competitor audit supports borrowing Letta's orchestration mechanics while rejecting its background-agent autonomy. AnimaOS should keep background maintenance as named, structured tasks with explicit inputs and outputs, not as free-form LLM workers that decide their own memory edits. That narrower model is less flexible than Letta's full sleeptime agents, but it is more predictable to operate, easier to inspect, and better aligned with a local-first personal system.
 
 ---
 
@@ -179,6 +183,10 @@ async def run_sleeptime_agents(
 ) -> list[str]:
     """Orchestrate all background tasks.
 
+    This orchestrator issues structured background tasks, not autonomous
+    background agents. Task selection and ordering remain explicit in code so
+    runs are predictable and auditable.
+
     Parallel group (always run):
     1. Memory consolidation (predict-calibrate from F3)
     2. Knowledge graph ingestion (F4)
@@ -193,6 +201,12 @@ async def run_sleeptime_agents(
     7. Deep monologue (only once per 24 hours)
 
     When force=True (inactivity timer): bypass frequency and heat gates.
+
+    Context scope guidance:
+    - Use transcript-wide context for synthesis-oriented tasks such as profile
+      updates or graph maintenance when message-local inputs are insufficient.
+    - Keep extraction and bookkeeping tasks narrow and deterministic when
+      possible by preferring the current turn or explicit deltas.
 
     Returns list of task run IDs for tracking.
     """
@@ -287,7 +301,7 @@ async def _should_run_expensive(db: Session, user_id: int) -> bool:
 | F5.1 | In-memory per-user turn counter with `bump_turn_counter()` | Must |
 | F5.2 | `should_run_sleeptime()` checking `turn_count % frequency == 0` | Must |
 | F5.3 | `SLEEPTIME_FREQUENCY` config (default: 3) | Must |
-| F5.4 | `run_sleeptime_agents()` orchestrating parallel + sequential tasks | Must |
+| F5.4 | `run_sleeptime_agents()` orchestrating parallel + sequential structured background tasks with explicit task ordering and tracking | Must |
 | F5.5 | Parallel execution of independent tasks via `asyncio.gather()` | Must |
 | F5.6 | Heat-threshold gating for expensive tasks (contradiction scan, profile synthesis) | Must |
 | F5.7 | `HEAT_THRESHOLD_CONSOLIDATION` config (default: 5.0) | Must |
@@ -297,7 +311,7 @@ async def _should_run_expensive(db: Session, user_id: int) -> bool:
 | F5.11 | `force=True` mode bypassing frequency + heat gates (for inactivity timer) | Must |
 | F5.12 | `schedule_background_memory_consolidation()` routes through the frequency-gated orchestrator | Must |
 | F5.13 | `schedule_reflection()` calls `run_sleeptime_agents(force=True)` | Must |
-| F5.14 | `last_processed_message_id` tracking for restart safety | Should |
+| F5.14 | `last_processed_message_id` tracking is required for restart safety | Must |
 | F5.15 | `return_exceptions=True` in `asyncio.gather()` so one failure doesn't cancel others | Must |
 | F5.16 | Each task opens its own DB session via `db_factory()` | Must |
 | F5.17 | Vault export/import support for `background_task_runs` | Could |
@@ -356,7 +370,7 @@ async def _should_run_expensive(db: Session, user_id: int) -> bool:
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
-| **Lost work on crash** | Low | `BackgroundTaskRun` records what started. All operations are idempotent — re-running is safe. |
+| **Lost work on crash** | Low | `BackgroundTaskRun` records what started, and `last_processed_message_id` bounds replay after restart. All operations are designed to be idempotent, so limited re-running is safe. |
 | **Race conditions** | Medium | Each task opens own DB session via `db_factory()`. SQLite WAL mode handles concurrent reads. No shared mutable state between tasks. |
 | **Turn counter lost on restart** | Low | Worst case: one extra background run or one skipped run. `last_processed_message_id` prevents reprocessing of old data. |
 | **Frequency tuning** | Low | `SLEEPTIME_FREQUENCY` is a module-level constant. Start with 3, adjust based on observation. |
