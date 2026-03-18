@@ -1,26 +1,2 @@
-node_modules
-dist
-*.db
-.turbo
-.nx/
-.env
-.env.*
-!.env.example
-/memory/
-.anima/
-.venv/
-__pycache__/
-.pytest_cache/
-.ruff_cache/
-.tmp-tests/
-*.pyc
-.local-docs/
-.claude/settings.local.json
-.anima-cli-session
-
-# External reference repos (not part of this project)
-letta/
-mem0/
-nemori/
-MemOS/
-MemoryOS/
+node_modules dist *.db .turbo .nx/ .env .env.* !.env.example /memory/ .anima/ .venv/ __pycache__/ .pytest_cache/ .ruff_cache/ .tmp-tests/ *.pyc .local-docs/ .claude/settings.local.json .anima-cli-session  # External reference repos (not part of this project) letta/ mem0/ nemori/ MemOS/ MemoryOS/ 
+.worktrees/
