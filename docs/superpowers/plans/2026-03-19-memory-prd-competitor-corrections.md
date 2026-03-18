@@ -336,9 +336,15 @@ Create `docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md`
 
 - [ ] **Step 2: Verify all touched docs align with the spec**
 
-Run: `git diff --check`
+Run:
 
-Expected: No whitespace or merge-marker errors.
+```powershell
+git add docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md
+$base = (Get-Content "$env:TEMP\memory-prd-correction-base.txt").Trim()
+git diff --check $base -- docs/prds/memory/F1-hybrid-search.md docs/prds/memory/F4-knowledge-graph.md docs/prds/memory/F5-async-sleep-agents.md docs/prds/memory/F7-intentional-forgetting.md docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md
+```
+
+Expected: No whitespace or merge-marker errors anywhere in the full pass from the recorded baseline, including the newly created summary file.
 
 Run: `rg -n "single highest-impact|no rollback risk|validated configuration" "docs/prds/memory/F1-hybrid-search.md" "docs/prds/memory/F4-knowledge-graph.md" "docs/prds/memory/F5-async-sleep-agents.md" "docs/prds/memory/F7-intentional-forgetting.md"`
 
