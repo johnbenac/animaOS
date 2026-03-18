@@ -79,7 +79,7 @@ These are independent strings with no relational structure. There is no way to:
 
 ### Non-Goals
 
-- **Neo4j, Kuzu, Memgraph, or any external graph platform** — competitor backends inform lifecycle patterns only; AnimaOS remains SQLite-backed inside the Core
+- **Neo4j, Kuzu, Memgraph, and similar graph backends/platform abstractions** — competitor implementations inform lifecycle patterns only; AnimaOS remains SQLite-backed inside the Core
 - **Deep graph traversal** (depth > 2) — unnecessary for personal-scale graphs
 - **Automatic entity resolution against external knowledge bases** — no Wikipedia, Wikidata, etc.
 - **Graph visualization UI** — backend only in this PRD
@@ -312,9 +312,9 @@ The graph is **not append-only**. F4 adopts a bounded lifecycle that keeps the g
 1. During `ingest_conversation_graph()`, extract entities and relations from the current turn.
 2. Upsert entities first, then load only existing relations that touch the entities mentioned in the new turn.
 3. Run `prune_stale_relations()` against that bounded candidate set before finalizing the turn's graph state.
-4. Delete only relations the pruning step classifies as outdated, contradicted, or clearly superseded by the new facts.
+4. Delete only relations the pruning step classifies as outdated or contradicted by evidence in the new turn.
 
-This means stale-relation pruning happens **during ingestion**, not as a separate external graph-maintenance system and not as an unbounded whole-graph sweep. Sleep-time tasks may later add a capped maintenance pass for low-mention or long-stale relations, but that is not required for F4 and must remain bounded if added. Competitor systems using Neo4j, Kuzu, or Memgraph are relevant here only as evidence that append-only graphs drift; they do not change AnimaOS's storage architecture.
+This means stale-relation pruning happens **during ingestion only**, against relations touching the current turn's entities. F4 does not include a sleep-time pruning pass, a whole-graph cleanup sweep, or any separate graph-maintenance subsystem. Competitor systems using Neo4j, Kuzu, or Memgraph are relevant here only as evidence that append-only graphs drift; they do not change AnimaOS's storage architecture.
 
 ### 4.7 Graph Retrieval and Reranking Policy
 
