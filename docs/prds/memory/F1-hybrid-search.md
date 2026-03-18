@@ -232,7 +232,7 @@ This is the only new pip dependency across all 7 memory features (F1-F7). We exp
 | AC4 | Target: memory overhead stays small enough for roughly 10,000 memories at about 50 tokens each; verify with measurement data | Measure in test |
 | AC5 | All 602 existing tests pass without modification | CI |
 | AC6 | `hybrid_search()` returns blended results from both BM25 and vector legs | Integration test: create memories findable by keyword only and by embedding only, verify both appear |
-| AC7 | Index invalidation: after upserting a new memory, the next BM25 search includes it | Integration test |
+| AC7 | Index invalidation: after `OrmVecStore.upsert()` upserts search-indexed `MemoryVector.content`, the next BM25 search includes that indexed content | Integration test |
 | AC8 | Index invalidation: after deleting a memory, the next BM25 search excludes it | Integration test |
 
 ---
