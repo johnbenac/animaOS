@@ -29,6 +29,19 @@
 - `docs/architecture/memory/memory-system.md`
   Responsibility: architecture constraint reference for implementation-facing wording; use as a source, do not edit in this pass.
 
+## Baseline Capture
+
+Before editing any PRD, record the starting commit so the full editorial pass can be reviewed across multiple commits later.
+
+Run:
+
+```powershell
+$base = git rev-parse HEAD
+Write-Output $base
+```
+
+Expected: a 40-character commit hash copied into the worker's notes for reuse in Task 5, Step 3.
+
 ## Task 1: Tighten F1 Hybrid Search PRD
 
 **Files:**
@@ -180,12 +193,12 @@ Expected: Locate where the PRD references Letta and whether it clearly distingui
 
 - [ ] **Step 2: Tighten the overview and problem framing**
 
-Revise the overview so it says F5 adopts orchestration patterns from Letta without adopting Letta's open-ended background-agent model.
+Revise the overview so it says F5 adopts orchestration patterns from Letta without adopting Letta's open-ended background-agent model, and explicitly preserve last-processed tracking as a required part of restart safety.
 
 Use wording like:
 
 ```md
-F5 adopts proven orchestration patterns such as frequency gating, restart safety, and task-run observability, while preserving structured background tasks instead of free-form background LLM agents.
+F5 adopts proven orchestration patterns such as frequency gating, explicit last-processed tracking for restart safety, and task-run observability, while preserving structured background tasks instead of free-form background LLM agents.
 ```
 
 - [ ] **Step 3: Add transcript-context guidance**
@@ -210,9 +223,9 @@ This design is less flexible than Letta's general sleeptime-agent model, but mor
 
 - [ ] **Step 5: Verify the edited F5 document**
 
-Run: `rg -n "structured background tasks|transcript-wide context|predictable|auditable|Letta" "docs/prds/memory/F5-async-sleep-agents.md"`
+Run: `rg -n "structured background tasks|transcript-wide context|predictable|auditable|Letta|last-processed" "docs/prds/memory/F5-async-sleep-agents.md"`
 
-Expected: The revised document clearly states the orchestration borrowings, transcript guidance, and reliability tradeoff.
+Expected: The revised document clearly states the orchestration borrowings, transcript guidance, last-processed tracking, and reliability tradeoff.
 
 - [ ] **Step 6: Commit the F5 changes**
 
@@ -295,7 +308,10 @@ Create `docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md`
 - F7 (changed or skipped)
 
 ## What Changed
-- Short bullet list per PRD
+- `F1`: change summary + audit finding addressed
+- `F4`: change summary + audit finding addressed
+- `F5`: change summary + audit finding addressed
+- `F7`: change summary or skip reason + audit finding addressed if changed
 
 ## What We Explicitly Rejected
 - External graph backends
@@ -319,9 +335,9 @@ Expected: No stale overclaim language remains in the revised docs.
 
 - [ ] **Step 3: Review the final patch as one coherent editorial pass**
 
-Run: `git diff -- docs/prds/memory/F1-hybrid-search.md docs/prds/memory/F4-knowledge-graph.md docs/prds/memory/F5-async-sleep-agents.md docs/prds/memory/F7-intentional-forgetting.md docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md`
+Run: `git diff --word-diff=plain $base -- docs/prds/memory/F1-hybrid-search.md docs/prds/memory/F4-knowledge-graph.md docs/prds/memory/F5-async-sleep-agents.md docs/prds/memory/F7-intentional-forgetting.md docs/prds/memory/competitor-audit-prd-corrections-summary-2026-03-19.md`
 
-Expected: The diff shows a coherent competitor-informed correction pass with no unrelated rewrites.
+Expected: The diff from the pre-edit baseline shows the full competitor-informed correction pass across all touched files, even if earlier tasks were committed individually.
 
 - [ ] **Step 4: Commit the summary and final verification state**
 
