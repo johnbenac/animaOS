@@ -117,30 +117,28 @@ async def run_reflection(
     except Exception:  # noqa: BLE001
         logger.exception("Quick reflection failed for user %s", user_id)
 
-    # 2. Sleep-time maintenance tasks
+    # 2. Full sleep-time maintenance via the orchestrator (force=True
+    #    bypasses frequency + heat gates since this is the inactivity timer).
     try:
-        from anima_server.services.agent.sleep_tasks import run_sleep_tasks
+        from anima_server.services.agent.sleep_agent import run_sleeptime_agents
 
-        result = await run_sleep_tasks(user_id=user_id, db_factory=db_factory)
-        if result.contradictions_resolved or result.items_merged or result.episodes_generated:
+        run_ids = await run_sleeptime_agents(
+            user_id=user_id,
+            user_message="",
+            assistant_response="",
+            thread_id=thread_id,
+            db_factory=db_factory,
+            force=True,
+        )
+        if run_ids:
             logger.info(
-                "Sleep tasks for user %s: %d contradictions resolved, %d items merged, "
-                "%d episodes generated, %d embeddings backfilled",
-                user_id,
-                result.contradictions_resolved,
-                result.items_merged,
-                result.episodes_generated,
-                result.embeddings_backfilled,
+                "Sleep-time agents for user %s completed: %s",
+                user_id, run_ids,
             )
     except Exception:  # noqa: BLE001
         logger.exception("Reflection failed for user %s", user_id)
 
-    # Invalidate companion memory cache so the next turn picks up changes
-    # made by working-memory expiry, inner monologue, and sleep tasks.
-    from anima_server.services.agent.companion import get_companion
-    companion = get_companion(user_id)
-    if companion is not None:
-        companion.invalidate_memory()
+    # Companion cache invalidation is handled inside run_sleeptime_agents.
 
 
 async def cancel_pending_reflection(*, user_id: int | None = None) -> None:

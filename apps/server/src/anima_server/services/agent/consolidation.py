@@ -697,6 +697,7 @@ def schedule_background_memory_consolidation(
     user_id: int,
     user_message: str,
     assistant_response: str,
+    thread_id: int | None = None,
     db_factory: Callable[..., object] | None = None,
 ) -> None:
     if not settings.agent_background_memory_enabled:
@@ -707,11 +708,22 @@ def schedule_background_memory_consolidation(
     except RuntimeError:
         return
 
+    from anima_server.services.agent.sleep_agent import (
+        bump_turn_counter,
+        run_sleeptime_agents,
+        should_run_sleeptime,
+    )
+
+    bump_turn_counter(user_id)
+    if not should_run_sleeptime(user_id):
+        return
+
     task = loop.create_task(
-        run_background_memory_consolidation(
+        run_sleeptime_agents(
             user_id=user_id,
             user_message=user_message,
             assistant_response=assistant_response,
+            thread_id=thread_id,
             db_factory=db_factory,
         )
     )

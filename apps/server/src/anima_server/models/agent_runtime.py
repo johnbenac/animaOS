@@ -270,6 +270,13 @@ class MemoryEpisode(Base):
         Integer, nullable=False, default=3,
     )  # 1-5
     turn_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    message_indices_json: Mapped[list[int] | None] = mapped_column(
+        JSON, nullable=True,
+    )  # 1-based indices of included logs (batch segmentation)
+    segmentation_method: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="sequential",
+        server_default=text("'sequential'"),
+    )  # "sequential" or "batch_llm"
     needs_regeneration: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("0"),
     )
@@ -522,6 +529,37 @@ class ForgetAuditLog(Base):
     )
     derived_refs_affected: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0,
+    )
+
+
+class BackgroundTaskRun(Base):
+    """Tracked background task execution for debugging and monitoring."""
+
+    __tablename__ = "background_task_runs"
+    __table_args__ = (
+        Index("ix_bg_task_runs_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+    )
+    task_type: Mapped[str] = mapped_column(
+        String(50), nullable=False,
+    )  # consolidation, graph_ingestion, heat_decay, episode_gen, etc.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'pending'"),
+    )  # pending, running, completed, failed
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
     )
 
 

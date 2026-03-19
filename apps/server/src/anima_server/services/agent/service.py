@@ -1011,6 +1011,7 @@ def _run_post_turn_hooks(
         user_id=user_id,
         user_message=user_message,
         assistant_response=enriched_response,
+        thread_id=thread_id,
         db_factory=db_factory,
     )
     schedule_reflection(

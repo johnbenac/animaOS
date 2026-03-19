@@ -1,0 +1,503 @@
+"""F5 — Async sleep-time agent orchestrator.
+
+Replaces per-turn consolidation + 5-minute inactivity reflection with a
+unified, frequency-gated, heat-threshold-aware async orchestrator.
+
+Background tasks are structured and explicit — not autonomous agents.
+Each task opens its own DB session via ``db_factory()``.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+from anima_server.config import settings
+
+logger = logging.getLogger(__name__)
+
+# ── Configuration ────────────────────────────────────────────────────
+
+SLEEPTIME_FREQUENCY: int = 3  # Run every N turns
+HEAT_THRESHOLD_CONSOLIDATION: float = 5.0  # Min heat for expensive ops
+
+# ── In-memory state (no persistence needed) ──────────────────────────
+
+_turn_counters: dict[int, int] = {}  # user_id -> turn_count
+
+
+# ── Turn counting ────────────────────────────────────────────────────
+
+def bump_turn_counter(user_id: int) -> int:
+    """Increment and return the turn counter for a user."""
+    _turn_counters[user_id] = _turn_counters.get(user_id, 0) + 1
+    return _turn_counters[user_id]
+
+
+def should_run_sleeptime(user_id: int) -> bool:
+    """True if turn_count % SLEEPTIME_FREQUENCY == 0."""
+    count = _turn_counters.get(user_id, 0)
+    return count > 0 and count % SLEEPTIME_FREQUENCY == 0
+
+
+# ── Heat gating ──────────────────────────────────────────────────────
+
+def _should_run_expensive(
+    db: Any,
+    user_id: int,
+) -> bool:
+    """Check if accumulated heat justifies running expensive tasks."""
+    from anima_server.services.agent.heat_scoring import get_hottest_items
+
+    hottest = get_hottest_items(db, user_id=user_id, limit=1)
+    if not hottest:
+        return False
+    item = hottest[0]
+    heat = getattr(item, "heat", None)
+    if heat is None:
+        return False
+    return heat >= HEAT_THRESHOLD_CONSOLIDATION
+
+
+# ── Task tracking ────────────────────────────────────────────────────
+
+async def _issue_background_task(
+    *,
+    user_id: int,
+    task_type: str,
+    task_fn: Callable[..., Any],
+    db_factory: Callable[..., object] | None = None,
+    **kwargs: Any,
+) -> str:
+    """Fire a tracked background task.
+
+    1. Create BackgroundTaskRun with status='pending'
+    2. Update to 'running' with started_at
+    3. Execute task_fn
+    4. Update to 'completed' or 'failed' with result/error
+    Uses finally-block to ensure state is always saved.
+    """
+    from anima_server.db.session import SessionLocal
+    from anima_server.models import BackgroundTaskRun
+
+    factory = db_factory or SessionLocal
+
+    # Create the task run record
+    with factory() as db:
+        run = BackgroundTaskRun(
+            user_id=user_id,
+            task_type=task_type,
+            status="pending",
+        )
+        db.add(run)
+        db.commit()
+        run_id = run.id
+
+    # Execute
+    status = "running"
+    result_json: dict | None = None
+    error_message: str | None = None
+
+    with factory() as db:
+        try:
+            # Mark running
+            run = db.get(BackgroundTaskRun, run_id)
+            if run is not None:
+                run.status = "running"
+                run.started_at = datetime.now(UTC)
+                db.commit()
+
+            # Execute the task function
+            result = await task_fn(
+                user_id=user_id,
+                db_factory=db_factory,
+                **kwargs,
+            )
+            status = "completed"
+            if isinstance(result, dict):
+                result_json = result
+        except Exception as exc:
+            status = "failed"
+            error_message = str(exc)
+            logger.exception(
+                "Background task %s (run %d) failed for user %s",
+                task_type, run_id, user_id,
+            )
+        finally:
+            # Always update final status
+            try:
+                with factory() as db2:
+                    run = db2.get(BackgroundTaskRun, run_id)
+                    if run is not None:
+                        run.status = status
+                        run.completed_at = datetime.now(UTC)
+                        if result_json is not None:
+                            run.result_json = result_json
+                        if error_message is not None:
+                            run.error_message = error_message
+                        db2.commit()
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Failed to update task run %d status", run_id)
+
+    return f"{task_type}:{run_id}"
+
+
+# ── Orchestrator ─────────────────────────────────────────────────────
+
+async def run_sleeptime_agents(
+    *,
+    user_id: int,
+    user_message: str,
+    assistant_response: str,
+    thread_id: int | None = None,
+    db_factory: Callable[..., object] | None = None,
+    force: bool = False,
+) -> list[str]:
+    """Orchestrate all background tasks.
+
+    Parallel group (always run):
+    1. Memory consolidation (predict-calibrate from F3)
+    2. Knowledge graph ingestion (F4)
+    3. Heat decay (F2)
+    4. Episode generation check
+
+    Sequential group (heat-gated, skipped if heat < threshold):
+    5. Contradiction scan
+    6. Profile synthesis
+
+    Time-gated:
+    7. Deep monologue (only once per 24h)
+
+    When force=True (inactivity timer): bypass heat gates.
+    Returns list of task run IDs for tracking.
+    """
+    run_ids: list[str] = []
+
+    # ── Parallel group (always run) ──────────────────────────────
+
+    parallel_results = await asyncio.gather(
+        _issue_background_task(
+            user_id=user_id,
+            task_type="consolidation",
+            task_fn=_task_consolidation,
+            db_factory=db_factory,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            thread_id=thread_id,
+        ),
+        _issue_background_task(
+            user_id=user_id,
+            task_type="graph_ingestion",
+            task_fn=_task_graph_ingestion,
+            db_factory=db_factory,
+            user_message=user_message,
+            assistant_response=assistant_response,
+        ),
+        _issue_background_task(
+            user_id=user_id,
+            task_type="heat_decay",
+            task_fn=_task_heat_decay,
+            db_factory=db_factory,
+        ),
+        _issue_background_task(
+            user_id=user_id,
+            task_type="episode_gen",
+            task_fn=_task_episode_gen,
+            db_factory=db_factory,
+        ),
+        return_exceptions=True,
+    )
+
+    for r in parallel_results:
+        if isinstance(r, str):
+            run_ids.append(r)
+        elif isinstance(r, BaseException):
+            logger.error("Parallel task failed: %s", r)
+
+    # ── Sequential group (heat-gated) ────────────────────────────
+
+    run_expensive = force
+    if not run_expensive:
+        try:
+            from anima_server.db.session import SessionLocal
+            factory = db_factory or SessionLocal
+            with factory() as db:
+                run_expensive = _should_run_expensive(db, user_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("Heat check failed, skipping expensive tasks")
+
+    if run_expensive:
+        try:
+            rid = await _issue_background_task(
+                user_id=user_id,
+                task_type="contradiction_scan",
+                task_fn=_task_contradiction_scan,
+                db_factory=db_factory,
+            )
+            run_ids.append(rid)
+        except Exception:  # noqa: BLE001
+            logger.exception("Contradiction scan task failed")
+
+        try:
+            rid = await _issue_background_task(
+                user_id=user_id,
+                task_type="profile_synthesis",
+                task_fn=_task_profile_synthesis,
+                db_factory=db_factory,
+            )
+            run_ids.append(rid)
+        except Exception:  # noqa: BLE001
+            logger.exception("Profile synthesis task failed")
+
+    # ── Time-gated: deep monologue ───────────────────────────────
+
+    try:
+        from anima_server.services.agent.sleep_tasks import _should_run_deep_monologue
+
+        if force or _should_run_deep_monologue(user_id, db_factory=db_factory):
+            rid = await _issue_background_task(
+                user_id=user_id,
+                task_type="deep_monologue",
+                task_fn=_task_deep_monologue,
+                db_factory=db_factory,
+            )
+            run_ids.append(rid)
+    except Exception:  # noqa: BLE001
+        logger.exception("Deep monologue task failed")
+
+    # Invalidate companion memory cache so the next turn sees fresh data.
+    try:
+        from anima_server.services.agent.companion import get_companion
+        companion = get_companion(user_id)
+        if companion is not None:
+            companion.invalidate_memory()
+    except Exception:  # noqa: BLE001
+        logger.debug("Companion cache invalidation failed for user %s", user_id)
+
+    return run_ids
+
+
+# ── Task implementations (thin wrappers) ─────────────────────────────
+
+async def _task_consolidation(
+    *,
+    user_id: int,
+    user_message: str = "",
+    assistant_response: str = "",
+    thread_id: int | None = None,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Run memory consolidation and return restart cursor payload."""
+    # Skip consolidation when there is no actual message to process
+    # (e.g., the force=True path from the inactivity timer).
+    if not user_message and not assistant_response:
+        return {
+            "thread_id": thread_id,
+            "last_processed_message_id": None,
+            "messages_processed": 0,
+        }
+
+    from anima_server.services.agent.consolidation import (
+        consolidate_turn_memory,
+        consolidate_turn_memory_with_llm,
+        _backfill_user_embeddings,
+    )
+
+    if settings.agent_provider != "scaffold":
+        await consolidate_turn_memory_with_llm(
+            user_id=user_id,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            db_factory=db_factory,
+        )
+    else:
+        consolidate_turn_memory(
+            user_id=user_id,
+            user_message=user_message,
+            assistant_response=assistant_response,
+            db_factory=db_factory,
+        )
+
+    # Opportunistic embedding backfill
+    try:
+        await _backfill_user_embeddings(user_id, db_factory=db_factory)
+    except Exception:  # noqa: BLE001
+        logger.debug("Embedding backfill skipped for user %s", user_id)
+
+    # Return restart cursor payload (F5.23)
+    return {
+        "thread_id": thread_id,
+        "last_processed_message_id": None,  # TODO: wire actual message ID
+        "messages_processed": 1,
+    }
+
+
+async def _task_graph_ingestion(
+    *,
+    user_id: int,
+    user_message: str = "",
+    assistant_response: str = "",
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Run knowledge graph ingestion (F4)."""
+    if settings.agent_provider == "scaffold":
+        return {"entities": 0, "relations": 0, "pruned": 0}
+
+    from anima_server.db.session import SessionLocal
+    from anima_server.services.agent.knowledge_graph import ingest_conversation_graph
+
+    factory = db_factory or SessionLocal
+    with factory() as db:
+        entities, relations, pruned = await ingest_conversation_graph(
+            db,
+            user_id=user_id,
+            user_message=user_message,
+            assistant_response=assistant_response,
+        )
+        db.commit()
+
+    return {"entities": entities, "relations": relations, "pruned": pruned}
+
+
+async def _task_heat_decay(
+    *,
+    user_id: int,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Decay heat scores for all items (F2)."""
+    from anima_server.db.session import SessionLocal
+    from anima_server.services.agent.heat_scoring import decay_all_heat
+
+    factory = db_factory or SessionLocal
+    with factory() as db:
+        count = decay_all_heat(db, user_id=user_id)
+        db.commit()
+
+    return {"items_decayed": count}
+
+
+async def _task_episode_gen(
+    *,
+    user_id: int,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Check and generate episode if appropriate."""
+    from anima_server.services.agent.episodes import maybe_generate_episode
+
+    episode = await maybe_generate_episode(user_id=user_id, db_factory=db_factory)
+    return {"generated": episode is not None}
+
+
+async def _task_contradiction_scan(
+    *,
+    user_id: int,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Scan for contradictions in memory items."""
+    from anima_server.services.agent.sleep_tasks import scan_contradictions
+
+    found, resolved = await scan_contradictions(user_id=user_id, db_factory=db_factory)
+    return {"found": found, "resolved": resolved}
+
+
+async def _task_profile_synthesis(
+    *,
+    user_id: int,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Synthesize user profile from facts."""
+    from anima_server.services.agent.sleep_tasks import synthesize_profile
+
+    merged = await synthesize_profile(user_id=user_id, db_factory=db_factory)
+    return {"merged": merged}
+
+
+async def _task_deep_monologue(
+    *,
+    user_id: int,
+    db_factory: Callable[..., object] | None = None,
+) -> dict:
+    """Run deep inner monologue."""
+    from anima_server.services.agent.inner_monologue import run_deep_monologue
+
+    monologue = await run_deep_monologue(user_id=user_id, db_factory=db_factory)
+    return {"errors": monologue.errors if monologue.errors else []}
+
+
+# ── Restart cursor ───────────────────────────────────────────────────
+
+def get_last_processed_message_id(
+    user_id: int,
+    thread_id: int | None = None,
+    *,
+    db_factory: Callable[..., object] | None = None,
+) -> int | None:
+    """Get the last processed message ID for the active cursor scope.
+
+    Reads from the most recent completed BackgroundTaskRun where
+    task_type='consolidation' and result_json.thread_id matches.
+    """
+    from anima_server.db.session import SessionLocal
+    from anima_server.models import BackgroundTaskRun
+    from sqlalchemy import select, desc
+
+    factory = db_factory or SessionLocal
+    with factory() as db:
+        stmt = (
+            select(BackgroundTaskRun)
+            .where(
+                BackgroundTaskRun.user_id == user_id,
+                BackgroundTaskRun.task_type == "consolidation",
+                BackgroundTaskRun.status == "completed",
+            )
+            .order_by(desc(BackgroundTaskRun.completed_at))
+        )
+        runs = list(db.scalars(stmt).all())
+
+    for run in runs:
+        rj = run.result_json
+        if not isinstance(rj, dict):
+            continue
+        if rj.get("thread_id") == thread_id:
+            msg_id = rj.get("last_processed_message_id")
+            if msg_id is not None:
+                return int(msg_id)
+    return None
+
+
+def update_last_processed_message_id(
+    user_id: int,
+    thread_id: int | None,
+    message_id: int,
+    messages_processed: int,
+    *,
+    db_factory: Callable[..., object] | None = None,
+) -> None:
+    """Persist the consolidation restart cursor in the most recent run."""
+    from anima_server.db.session import SessionLocal
+    from anima_server.models import BackgroundTaskRun
+    from sqlalchemy import select, desc
+
+    factory = db_factory or SessionLocal
+    with factory() as db:
+        stmt = (
+            select(BackgroundTaskRun)
+            .where(
+                BackgroundTaskRun.user_id == user_id,
+                BackgroundTaskRun.task_type == "consolidation",
+                BackgroundTaskRun.status == "completed",
+            )
+            .order_by(desc(BackgroundTaskRun.completed_at))
+            .limit(1)
+        )
+        run = db.scalars(stmt).first()
+        if run is not None:
+            run.result_json = {
+                "thread_id": thread_id,
+                "last_processed_message_id": message_id,
+                "messages_processed": messages_processed,
+            }
+            db.commit()
