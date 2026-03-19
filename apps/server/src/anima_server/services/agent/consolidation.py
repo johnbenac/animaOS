@@ -231,18 +231,45 @@ async def consolidate_turn_memory_with_llm(
         db_factory=db_factory,
     )
 
-    extraction = await extract_memories_via_llm(
-        user_message=user_message,
-        assistant_response=assistant_response,
-    )
-    llm_items = extraction.memories
-
     from anima_server.db.session import SessionLocal
 
     factory = db_factory or SessionLocal
 
+    # --- Predict-Calibrate path (F3) ---
+    # Try predict-calibrate extraction when enough facts exist.
+    # On failure, fall back to direct extraction (F3.9).
+    pc_items: list[dict[str, Any]] | None = None
+    try:
+        from anima_server.services.agent.predict_calibrate import predict_calibrate_extraction
+
+        with factory() as _pcdb:
+            pc_items = await predict_calibrate_extraction(
+                user_id=user_id,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                db=_pcdb,
+            )
+    except Exception:  # noqa: BLE001
+        logger.debug("predict_calibrate_extraction failed, falling back to direct extraction")
+
+    if pc_items is not None:
+        llm_items = pc_items
+        # Extract emotion data from predict-calibrate results (F3.12)
+        emotion_data: dict[str, Any] | None = None
+        for pc_item in pc_items:
+            if pc_item.get("detected_emotion"):
+                emotion_data = pc_item["detected_emotion"]
+                break
+    else:
+        # Fallback: direct extraction (original path)
+        extraction = await extract_memories_via_llm(
+            user_message=user_message,
+            assistant_response=assistant_response,
+        )
+        llm_items = extraction.memories
+        emotion_data = extraction.emotion
+
     # Record any emotional signal extracted alongside memories
-    emotion_data = extraction.emotion
     if emotion_data and emotion_data.get("emotion"):
         try:
             from anima_server.services.agent.emotional_intelligence import record_emotional_signal
@@ -317,6 +344,19 @@ async def consolidate_turn_memory_with_llm(
                     f"{write_result.matched_item.content} -> {content}"
                 )
                 result.llm_items_added.append(content)
+                # F7: suppress the old memory (flag derived refs for regeneration)
+                try:
+                    from anima_server.services.agent.forgetting import suppress_memory
+
+                    if write_result.matched_item and write_result.item:
+                        suppress_memory(
+                            db,
+                            memory_id=write_result.matched_item.id,
+                            superseded_by=write_result.item.id,
+                            user_id=user_id,
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.debug("Suppression failed for superseded item")
                 # Dual-write: supersede the structured claim too
                 try:
                     upsert_claim(
@@ -344,13 +384,26 @@ async def consolidate_turn_memory_with_llm(
                     new_content=content,
                 )
                 if resolution == "UPDATE":
+                    old_similar_id = write_result.similar_items[0].id
                     updated_item = supersede_memory_item(
                         db,
-                        old_item_id=write_result.similar_items[0].id,
+                        old_item_id=old_similar_id,
                         new_content=content,
                         importance=importance,
                     )
                     if updated_item is not None:
+                        # F7: suppress the old memory
+                        try:
+                            from anima_server.services.agent.forgetting import suppress_memory
+
+                            suppress_memory(
+                                db,
+                                memory_id=old_similar_id,
+                                superseded_by=updated_item.id,
+                                user_id=user_id,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.debug("Suppression failed for similar-update item")
                         result.conflicts_resolved.append(
                             f"{df(user_id, write_result.similar_items[0].content, table='memory_items', field='content')} -> {content}"
                         )
