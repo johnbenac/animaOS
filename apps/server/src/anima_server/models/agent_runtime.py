@@ -270,6 +270,9 @@ class MemoryEpisode(Base):
         Integer, nullable=False, default=3,
     )  # 1-5
     turn_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    needs_regeneration: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -486,6 +489,40 @@ class MemoryVector(Base):
         String(24), nullable=False, default="fact")
     importance: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class ForgetAuditLog(Base):
+    """Audit trail for intentional forgetting events.
+
+    Records THAT forgetting occurred (timestamp, scope, trigger) without
+    recording WHAT was forgotten, preserving the right to forget.
+    """
+
+    __tablename__ = "forget_audit_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    forgotten_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    trigger: Mapped[str] = mapped_column(
+        String(32), nullable=False,
+    )  # user_request, topic_forget, suppression
+    scope: Mapped[str] = mapped_column(
+        String(255), nullable=False,
+    )  # single, topic:{topic}, entity:{name}
+    items_forgotten: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
+    derived_refs_affected: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0,
+    )
 
 
 class KGEntity(Base):

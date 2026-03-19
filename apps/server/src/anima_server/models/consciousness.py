@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anima_server.db.base import Base
@@ -38,6 +38,9 @@ class SelfModelBlock(Base):
         String(32), nullable=False, default="system",
     )  # system, sleep_time, post_turn, user_edit
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    needs_regeneration: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0"),
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

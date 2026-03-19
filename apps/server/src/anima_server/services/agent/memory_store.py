@@ -260,9 +260,19 @@ def get_memory_items_scored(
     When *query_embedding* is provided, blends the retrieval score with cosine
     similarity to the query using per-category weights.
     """
+    from sqlalchemy import or_
+
+    from anima_server.services.agent.forgetting import HEAT_VISIBILITY_FLOOR
+
     query = select(MemoryItem).where(
         MemoryItem.user_id == user_id,
         MemoryItem.superseded_by.is_(None),
+        # Exclude items that have been scored (heat > 0) but decayed below floor.
+        # Items with heat == 0.0 are unscored and should NOT be excluded.
+        or_(
+            MemoryItem.heat == 0.0,
+            MemoryItem.heat >= HEAT_VISIBILITY_FLOOR,
+        ),
     )
     if category is not None:
         query = query.where(MemoryItem.category == category)

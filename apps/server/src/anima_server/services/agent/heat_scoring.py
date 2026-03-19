@@ -53,18 +53,22 @@ def compute_heat(
     importance: float = 0.0,
     now: datetime | None = None,
     created_at: datetime | None = None,
+    tau_hours: float = RECENCY_TAU_HOURS,
 ) -> float:
     """Compute heat: H = alpha*access + beta*depth + gamma*recency + delta*importance.
 
     For the recency component, ``last_accessed_at`` is preferred.  When it is
     ``None`` (item never accessed), ``created_at`` is used as a fallback so
     that freshly-created items still receive a recency signal.
+
+    ``tau_hours`` controls the time-decay rate (default: ``RECENCY_TAU_HOURS``).
+    Superseded items pass a smaller tau for faster decay.
     """
     ref_now = now or datetime.now(UTC)
     recency = 0.0
     recency_ref = last_accessed_at or created_at
     if recency_ref is not None:
-        recency = compute_time_decay(recency_ref, ref_now)
+        recency = compute_time_decay(recency_ref, ref_now, tau_hours=tau_hours)
     return (
         HEAT_ALPHA * access_count
         + HEAT_BETA * interaction_depth
@@ -111,17 +115,23 @@ def decay_all_heat(
     from anima_server.models import MemoryItem
 
     ref_now = now or datetime.now(UTC)
+    from anima_server.services.agent.forgetting import SUPERSEDED_DECAY_MULTIPLIER
+
+    # Decay both active and superseded items
     items = list(
         db.scalars(
             select(MemoryItem).where(
                 MemoryItem.user_id == user_id,
-                MemoryItem.superseded_by.is_(None),
             )
         ).all()
     )
 
     for item in items:
         ref_count = item.reference_count or 0
+        # Superseded items decay 3x faster (lower tau)
+        tau = RECENCY_TAU_HOURS
+        if item.superseded_by is not None:
+            tau = RECENCY_TAU_HOURS / SUPERSEDED_DECAY_MULTIPLIER
         item.heat = compute_heat(
             access_count=ref_count,
             interaction_depth=ref_count,
@@ -129,6 +139,7 @@ def decay_all_heat(
             importance=float(item.importance),
             now=ref_now,
             created_at=item.created_at,
+            tau_hours=tau,
         )
     db.flush()
     return len(items)

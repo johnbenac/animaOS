@@ -61,6 +61,7 @@ class SleepTaskResult:
     items_merged: int = 0
     episodes_generated: int = 0
     embeddings_backfilled: int = 0
+    refs_regenerated: int = 0
     deep_monologue_ran: bool = False
     errors: list[str] = field(default_factory=list)
 
@@ -84,6 +85,44 @@ async def run_sleep_tasks(
             db.commit()
     except Exception as e:  # noqa: BLE001
         logger.debug("Heat decay failed for user %s: %s", user_id, e)
+
+    # 0.5. Clear needs_regeneration flags on derived references
+    # In a full implementation this would re-generate the content using
+    # current knowledge.  For now we simply clear the flags so the
+    # records are no longer marked stale.
+    try:
+        from anima_server.db.session import SessionLocal as _SL05
+        from anima_server.models import MemoryEpisode
+        from anima_server.models.consciousness import SelfModelBlock
+
+        factory05 = db_factory or _SL05
+        with factory05() as db:
+            stale_episodes = list(
+                db.scalars(
+                    select(MemoryEpisode).where(
+                        MemoryEpisode.user_id == user_id,
+                        MemoryEpisode.needs_regeneration.is_(True),
+                    )
+                ).all()
+            )
+            stale_blocks = list(
+                db.scalars(
+                    select(SelfModelBlock).where(
+                        SelfModelBlock.user_id == user_id,
+                        SelfModelBlock.needs_regeneration.is_(True),
+                    )
+                ).all()
+            )
+            regen_count = len(stale_episodes) + len(stale_blocks)
+            for ep in stale_episodes:
+                ep.needs_regeneration = False
+            for blk in stale_blocks:
+                blk.needs_regeneration = False
+            if regen_count > 0:
+                db.commit()
+            result.refs_regenerated = regen_count
+    except Exception as e:  # noqa: BLE001
+        logger.debug("Derived ref regeneration failed for user %s: %s", user_id, e)
 
     # 1. Scan for contradictions
     try:
