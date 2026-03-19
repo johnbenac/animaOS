@@ -73,6 +73,43 @@ async def maybe_generate_episode(
         if len(remaining_logs) < EPISODE_MIN_TURNS:
             return None
 
+        # --- Batch segmentation path ---
+        from anima_server.services.agent.batch_segmenter import (
+            generate_episodes_from_segments,
+            indices_to_0based,
+            segment_messages_batch,
+            should_batch_segment,
+            validate_indices,
+        )
+        from anima_server.services.data_crypto import df as _df
+
+        if should_batch_segment(len(remaining_logs)):
+            try:
+                messages = [
+                    (
+                        _df(user_id, log.user_message, table="memory_daily_logs", field="user_message"),
+                        _df(user_id, log.assistant_response, table="memory_daily_logs", field="assistant_response"),
+                    )
+                    for log in remaining_logs
+                ]
+                groups = await segment_messages_batch(messages, user_id=user_id)
+
+                if validate_indices(groups, len(remaining_logs)):
+                    segments_0 = indices_to_0based(groups)
+                    episodes = await generate_episodes_from_segments(
+                        db,
+                        user_id=user_id,
+                        thread_id=thread_id,
+                        logs=remaining_logs,
+                        segments=segments_0,
+                        today=today,
+                    )
+                    db.commit()
+                    return episodes[0] if episodes else None
+            except Exception:  # noqa: BLE001
+                logger.exception("Batch segmentation failed, falling back to sequential")
+
+        # --- Sequential path (original behavior) ---
         episode_logs = remaining_logs[:EPISODE_MIN_TURNS * 2]
 
         if settings.agent_provider == "scaffold":

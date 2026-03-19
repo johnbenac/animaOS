@@ -36,6 +36,7 @@ class OpenAICompatibleChatClient:
         tools: Sequence[Any] = (),
         tool_choice: str | dict[str, object] | None = None,
         max_tokens: int | None = None,
+        temperature: float | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -46,6 +47,7 @@ class OpenAICompatibleChatClient:
         self._tools = tuple(tools)
         self._tool_choice = tool_choice
         self._max_tokens = max_tokens
+        self._temperature = temperature
         self._shared_client: httpx.AsyncClient | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
@@ -183,6 +185,8 @@ class OpenAICompatibleChatClient:
             payload["tools"] = [_serialize_tool(tool) for tool in self._tools]
         if self._tool_choice is not None:
             payload["tool_choice"] = self._tool_choice
+        if self._temperature is not None:
+            payload["temperature"] = self._temperature
         return payload
 
 
