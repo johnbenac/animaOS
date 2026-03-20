@@ -186,10 +186,10 @@ def unwrap_dek(
     user_id: int,
     domain: str,
 ) -> bytes:
-    salt = base64.b64decode(record.kdf_salt)
-    iv = base64.b64decode(record.wrap_iv)
-    tag = base64.b64decode(record.wrap_tag)
-    ciphertext = base64.b64decode(record.wrapped_dek)
+    salt = base64.b64decode(record.kdf_salt, validate=True)
+    iv = base64.b64decode(record.wrap_iv, validate=True)
+    tag = base64.b64decode(record.wrap_tag, validate=True)
+    ciphertext = base64.b64decode(record.wrapped_dek, validate=True)
     kek = derive_argon2id_key(
         passphrase,
         salt,
