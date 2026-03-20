@@ -426,6 +426,8 @@ def _maybe_unwrap_sqlcipher_key(password: str) -> None:
     if wrapped_data is None:
         return  # no wrapped key — plain SQLite mode
 
+    from cryptography.exceptions import InvalidTag
+
     from anima_server.services.crypto import WrappedDekRecord, unwrap_dek
 
     record = WrappedDekRecord(
@@ -440,6 +442,6 @@ def _maybe_unwrap_sqlcipher_key(password: str) -> None:
     )
     try:
         raw_key = unwrap_dek(password, record, int(wrapped_data.get("user_id", 0)), "sqlcipher")
-    except Exception as exc:  # noqa: BLE001
+    except InvalidTag as exc:
         raise ValueError("Invalid credentials") from exc
     set_sqlcipher_key(raw_key)
