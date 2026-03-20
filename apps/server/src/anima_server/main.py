@@ -20,6 +20,7 @@ from .api.routes.soul import router as soul_router
 from .api.routes.tasks import router as tasks_router
 from .api.routes.users import router as users_router
 from .api.routes.db import router as db_router
+from .api.routes.telegram import router as telegram_router
 from .api.routes.vault import router as vault_router
 from .config import settings
 from .services.core import acquire_core_lock, ensure_core_manifest, is_provisioned
@@ -164,6 +165,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(soul_router)
     app.include_router(tasks_router)
+    app.include_router(telegram_router)
     app.include_router(users_router)
     app.include_router(vault_router)
 
