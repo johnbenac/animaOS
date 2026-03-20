@@ -1,7 +1,8 @@
 ---
 title: Agent Runtime Deep Dive
-description: Cognitive loop mechanics, step execution, tool orchestration, compaction, and approval flow
+description: Cognitive loop mechanics, step execution, tool orchestration, compaction, approval flow, and security findings
 category: architecture
+updated: 2026-03-20
 ---
 
 # Agent Runtime Deep Dive
@@ -28,6 +29,7 @@ This document traces a user message through the agent runtime end-to-end, explai
 12. [Post-Turn Background Work](#post-turn-background-work)
 13. [Error Handling & Recovery](#error-handling--recovery)
 14. [Key Data Structures](#key-data-structures)
+15. [Security Findings](#security-findings)
 
 ---
 
@@ -71,6 +73,241 @@ HTTP Request
 ```
 
 Key principle: **the runtime is stateless**. It receives history, memory blocks, and tool definitions as arguments and returns an `AgentResult`. All state management (caching, persistence, compaction) lives in the layers above it.
+
+---
+
+## Full Turn Flow (Mermaid)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as routes/chat.py
+    participant S as service.py
+    participant TC as turn_coordinator.py
+    participant CP as AnimaCompanion
+    participant RT as AgentRuntime
+    participant LLM as LLM Adapter
+    participant EX as ToolExecutor
+    participant DB as Per-user SQLite
+
+    C->>R: POST /api/chat {message, userId, stream}
+    R->>R: require_unlocked_user(request, userId)
+    note over R: Validates x-anima-unlock token + user_id match
+
+    alt stream=true
+        R->>R: ensure_agent_ready()
+        R-->>C: StreamingResponse (SSE)
+        R->>S: stream_agent(message, userId, db)
+        S->>S: asyncio.Queue(maxsize=256)
+        S->>S: asyncio.create_task(worker)
+    else stream=false
+        R->>S: run_agent(message, userId, db)
+    end
+
+    S->>TC: get_user_lock(userId)
+    TC-->>S: asyncio.Lock (per-user, LRU cache of 256)
+    S->>S: async with user_lock (serializes concurrent turns)
+
+    rect rgb(240, 248, 255)
+        note over S: Stage 1 — Prepare Turn Context
+        S->>CP: get_or_build_companion(runtime, userId)
+        CP-->>S: AnimaCompanion (singleton per user)
+        S->>DB: get_or_create_thread(userId)
+        DB-->>S: AgentThread
+        S->>CP: ensure_history_loaded(db)
+        CP-->>S: list[StoredMessage] (from cache or DB)
+        S->>DB: create_run(thread_id, userId, provider, model, mode)
+        DB-->>S: AgentRun
+        S->>DB: reserve_message_sequences(count=1)
+        S->>DB: append_user_message(thread, run_id, content)
+        S->>DB: hybrid_search(userId, query=message, limit=15, threshold=0.25)
+        DB-->>S: semantic MemoryItems + query_embedding
+        S->>DB: build_runtime_memory_blocks(userId, thread_id, semantic_results)
+        DB-->>S: tuple[MemoryBlock, ...] (15+ block types)
+        S->>DB: collect_feedback_signals(userId, message)
+        S->>S: _inject_memory_pressure_warning() if >80% context
+        S->>CP: append_to_window([user_message])
+    end
+
+    rect rgb(240, 255, 240)
+        note over S: Stage 1b — Proactive Compaction (if needed)
+        S->>S: estimate_tokens = (block_chars + history_chars) // 4
+        alt estimated > max_tokens * trigger_ratio
+            S->>DB: compact_thread_context(thread, keep_last_N)
+            DB-->>S: CompactionResult
+            S->>CP: invalidate_history()
+            S->>CP: ensure_history_loaded(db)
+        end
+    end
+
+    rect rgb(255, 248, 240)
+        note over S: Stage 2 — Invoke Runtime
+        S->>CP: create_cancel_event(run.id)
+        S->>S: set_tool_context(ToolContext{db, userId, thread_id})
+        S->>RT: runner.invoke(message, userId, history, memory_blocks, ...)
+
+        loop for step_index in range(max_steps=6)
+            RT->>RT: check cancel_event.is_set()
+            RT->>RT: ToolRulesSolver.get_allowed_tools()
+            RT->>LLM: adapter.invoke(LLMRequest) OR adapter.stream(LLMRequest)
+
+            alt streaming
+                loop per token
+                    LLM-->>RT: StepStreamEvent{content_delta}
+                    RT-->>C: SSE chunk event
+                    RT->>RT: check cancel_event between chunks
+                end
+                LLM-->>RT: StepStreamEvent{result: StepExecutionResult}
+            else blocking
+                LLM-->>RT: StepExecutionResult
+            end
+
+            alt LLM returned tool calls
+                RT->>RT: ToolRulesSolver.validate_tool_call()
+                alt rule violation
+                    RT-->>RT: inject error result, continue loop
+                else requires_approval
+                    RT-->>RT: StopReason.AWAITING_APPROVAL, break
+                else normal execution
+                    RT->>EX: execute(tool_call, is_terminal)
+                    EX->>EX: lookup tool, check parse_error
+                    EX->>EX: asyncio.wait_for(invoke_tool(), timeout=30s)
+                    EX-->>RT: ToolExecutionResult{output, is_terminal, memory_modified}
+                    RT-->>C: SSE tool_call + tool_return events
+                    alt memory_modified
+                        RT->>DB: build_runtime_memory_blocks() [memory_refresher]
+                        RT->>RT: rebuild system prompt, replace messages[0]
+                    end
+                    alt is_terminal (send_message)
+                        RT-->>RT: StopReason.TERMINAL_TOOL, break
+                    end
+                end
+            else LLM returned plain text
+                RT->>RT: _coerce_text_tool_calls() [regex parse]
+                alt recognized tool pattern
+                    RT->>EX: execute(synthetic_tool_call)
+                else no pattern
+                    RT->>EX: execute(send_message{message: full_text})
+                end
+                RT-->>RT: StopReason.TERMINAL_TOOL (or END_TURN), break
+            end
+        end
+
+        RT-->>S: AgentResult{response, stop_reason, step_traces, ...}
+        S->>S: clear_tool_context()
+        S->>CP: clear_cancel_event(run.id)
+    end
+
+    alt stop_reason == CANCELLED
+        S->>DB: cancel_run(run.id)
+        S-->>C: SSE cancelled event
+    else stop_reason == AWAITING_APPROVAL
+        S->>DB: persist_agent_result() + save_approval_checkpoint()
+        S-->>C: SSE approval_pending{runId, toolName, toolArguments}
+    else success
+        rect rgb(255, 240, 255)
+            note over S: Stage 3 — Persist Result
+            S->>DB: persist_agent_result(thread, run, result)
+            S->>DB: commit()
+            S->>LLM: compact_thread_context_with_llm() [best-effort LLM summary]
+            S->>DB: compact_thread_context() [fallback text summary]
+            S->>DB: commit()
+            S->>CP: append_to_window(result_messages)
+        end
+        rect rgb(255, 255, 240)
+            note over S: Stage 4 — Post-Turn Hooks (fire-and-forget)
+            S->>DB: schedule_background_memory_consolidation()
+            note over DB: regex + LLM extraction, embeddings, episodes, daily log
+            S->>DB: schedule_reflection()
+            note over DB: quick monologue + deep self-model reflection (delayed ~5min)
+        end
+        S-->>C: SSE usage + done events (or JSON ChatResponse)
+    end
+```
+
+---
+
+## Approval Resume Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant R as routes/chat.py
+    participant S as service.py
+    participant RT as AgentRuntime
+    participant EX as ToolExecutor
+    participant DB as Per-user SQLite
+
+    C->>R: POST /api/chat/runs/{id}/approval {userId, approved, reason?, stream}
+    R->>R: require_unlocked_user(request, userId)
+    R->>DB: db.get(AgentRun, run_id)
+    R->>R: run.user_id != userId? → 403
+    R->>R: run.status != "awaiting_approval"? → 409
+
+    R->>S: approve_or_deny_turn(run_id, userId, approved, db)
+    S->>DB: load_approval_checkpoint(run_id)
+    DB-->>S: (AgentRun, AgentMessage[role=approval])
+    S->>S: run.user_id != userId? → PermissionError
+    S->>S: reconstruct ToolCall from checkpoint
+    S->>DB: clear_approval_checkpoint(run, approval_msg)
+
+    alt approved=true
+        S->>EX: execute(pending_tool_call, is_terminal)
+        EX-->>S: ToolExecutionResult
+        alt is_terminal
+            S->>DB: persist_agent_result()
+            S-->>C: ApprovalResponse{response, status: "completed"}
+        else non-terminal
+            S->>RT: runner.resume_after_approval() → one LLM follow-up call
+            RT->>LLM: invoke / stream
+            LLM-->>RT: StepExecutionResult
+            RT-->>S: AgentResult
+        end
+    else approved=false
+        S->>S: inject denial as tool error: "Tool {name} was denied. Reason: {reason}"
+        S->>RT: runner.resume_after_approval(approved=False)
+        RT->>LLM: invoke / stream (agent acknowledges denial)
+        LLM-->>RT: StepExecutionResult
+        RT-->>S: AgentResult
+    end
+
+    S->>DB: persist_agent_result() + compact + commit
+    S-->>C: SSE done event or ApprovalResponse
+```
+
+---
+
+## Cognitive Loop Step Detail
+
+```mermaid
+flowchart TD
+    A([invoke called]) --> B[build_system_prompt_with_budget]
+    B --> C[build_conversation_messages]
+    C --> D{step_index < max_steps?}
+    D -- no --> Z([StopReason.MAX_STEPS])
+    D -- yes --> E{cancel_event set?}
+    E -- yes --> Y([StopReason.CANCELLED])
+    E -- no --> F[ToolRulesSolver.get_allowed_tools]
+    F --> G[_run_step: call LLM with retry]
+    G --> H{LLM result?}
+    H -- tool calls --> I[validate each tool call]
+    I --> J{rule violation?}
+    J -- yes --> K[inject error result] --> D
+    J -- no --> L{requires_approval?}
+    L -- yes --> M([StopReason.AWAITING_APPROVAL])
+    L -- no --> N[ToolExecutor.execute]
+    N --> O{is_terminal?}
+    O -- yes --> P([StopReason.TERMINAL_TOOL])
+    O -- no --> Q{memory_modified?}
+    Q -- yes --> R[memory_refresher: rebuild system prompt]
+    Q -- no --> D
+    R --> D
+    H -- text only --> S[_coerce_text_tool_calls]
+    S --> T{recognized pattern?}
+    T -- yes --> N
+    T -- no, send_message avail --> U[coerce to send_message] --> N
+    T -- no, unavailable --> V([StopReason.END_TURN])
+```
 
 ---
 
@@ -743,3 +980,78 @@ When streaming, the runtime emits these event types:
 | `consolidation.py` | Post-turn memory extraction |
 | `reflection.py` | Post-turn self-model reflection |
 | `embeddings.py` | Embedding generation + hybrid search |
+
+---
+
+## Security Findings
+
+The following issues were identified during the 2026-03-20 audit. None are critical for the local desktop threat model, but they are tracked here for completeness.
+
+---
+
+### [LOW] `dry-run` returns the full decrypted system prompt to the client
+
+`POST /api/chat/dry-run` returns `systemPrompt` in the response — the fully assembled system prompt including all memory blocks (soul, persona, self-model, facts, emotions, episodes, session notes). The endpoint is gated by `require_unlocked_user` (same user only), so there is no cross-user exposure. However, if any future multi-user or shared-session mode were introduced, this endpoint would become a high-value target.
+
+**Location:** `api/routes/chat.py:421-448`
+
+---
+
+### [LOW] LLM provider errors bubble up verbatim as SSE `error` events
+
+`LLMConfigError` and `LLMInvocationError` are caught and stringified directly into the SSE stream:
+
+```python
+except (LLMConfigError, LLMInvocationError, PromptTemplateError) as exc:
+    yield _format_sse_event("error", {"error": str(exc)})
+```
+
+These exception messages may include provider base URLs, model names, rate-limit details, or connection strings from the LLM configuration. For a local desktop app this is acceptable (the client is the owner), but it's worth noting if a web-hosted mode is ever introduced.
+
+**Location:** `api/routes/chat.py:87-91`
+
+---
+
+### [LOW] Tool errors expose raw Python exception text to the client
+
+`ToolExecutor.execute()` returns raw exception messages:
+
+```python
+output=f"Tool {tool_call.name} failed: {exc}"
+```
+
+This string is fed back into the conversation (visible to the agent) and included in `step_traces` returned by `dry-run`. Internal DB errors, file paths, or ORM messages could appear here.
+
+**Location:** `executor.py:66-72`
+
+---
+
+### [LOW] Per-user turn lock held for full streaming duration
+
+`_execute_agent_turn()` acquires the per-user `asyncio.Lock` for the entire turn, including during SSE streaming. A long streaming response for user X blocks any other request for user X until it completes. This is intentional for consistency, but means a second tab sending a message while the first is streaming will appear to hang.
+
+**Location:** `service.py:349-353`, `turn_coordinator.py:20-43`
+
+---
+
+### [INFO] Text tool call coercion executes LLM plain-text output as tools
+
+`_coerce_text_tool_calls()` parses plain text output like `send_message("hello")` and executes it as a real tool call. The coercion is bounded to `known_tool_names` (registered tools only), so an unrecognized tool name in the text is ignored. However, a jailbroken or compromised LLM that knows the tool names could produce tool calls without going through the structured call path, bypassing any future structured-call-level audit hooks.
+
+**Location:** `runtime.py:794-847`
+
+---
+
+### [INFO] Background tasks (consolidation, reflection) run after logout
+
+Post-turn background tasks (`schedule_background_memory_consolidation`, `schedule_reflection`) use a separate DB factory and access DEKs via `unlock_session_store.get_active_dek(user_id)`. These tasks continue running for their full duration even if the user logs out between turns, because `_latest_deks_by_user` retains DEKs until all sessions for that user are revoked. This is by design (data integrity), but means logout is not an instant hard stop for in-flight background work.
+
+**Location:** `service.py:1010-1020`, `sessions.py:79-85`
+
+---
+
+### [INFO] `ToolContext` propagation across thread pool workers
+
+Synchronous tools run in `loop.run_in_executor(None, ctx.run, _run)` with `contextvars.copy_context()`. The copy-then-propagate pattern (`executor.py:137-146`) manually reads back `memory_modified` from the thread context. This relies on checking `_current_context` directly, which is a private implementation detail. If the contextvar name ever changes this silently breaks.
+
+**Location:** `executor.py:122-147`
