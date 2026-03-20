@@ -210,6 +210,10 @@ export default function AiSettings() {
               onChange={(e) => setOllamaUrl(e.target.value)}
               className={INPUT_CLASS}
             />
+            <p className="mt-1 text-[10px] text-text-muted">
+              Use the server root URL, for example `https://llm.example.com`.
+              The backend adds `/v1` automatically.
+            </p>
           </Field>
         )}
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Sequence
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any, Final, Protocol
 
 import httpx
@@ -73,8 +74,22 @@ def resolve_base_url(provider: str) -> str:
     validate_provider(provider)
     configured_base_url = settings.agent_base_url.strip()
     if configured_base_url:
-        return configured_base_url
+        return _normalize_provider_base_url(provider, configured_base_url)
     return DEFAULT_BASE_URLS[provider]
+
+
+def _normalize_provider_base_url(provider: str, base_url: str) -> str:
+    normalized = base_url.rstrip("/")
+    if provider != "ollama":
+        return normalized
+
+    split = urlsplit(normalized)
+    path = split.path.rstrip("/")
+    if path.endswith("/v1"):
+        return normalized
+
+    next_path = f"{path}/v1" if path else "/v1"
+    return urlunsplit(split._replace(path=next_path))
 
 
 def build_provider_headers(provider: str) -> dict[str, str]:

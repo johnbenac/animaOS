@@ -275,6 +275,7 @@ async def summarize_with_llm(
     tool-content-clamped version).
     """
     from anima_server.config import settings
+    from anima_server.services.agent.http_client import create_async_http_client
     from anima_server.services.agent.llm import (
         LLMConfigError,
         resolve_base_url,
@@ -302,9 +303,7 @@ async def summarize_with_llm(
     headers["Content-Type"] = "application/json"
 
     try:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with create_async_http_client(timeout=60.0) as client:
             resp = await client.post(
                 f"{base_url}/chat/completions",
                 headers=headers,

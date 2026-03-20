@@ -4,7 +4,11 @@ import pytest
 
 from anima_server.config import settings
 from anima_server.services.agent.embeddings import generate_embedding
-from anima_server.services.agent.llm import LLMConfigError, build_provider_headers
+from anima_server.services.agent.llm import (
+    LLMConfigError,
+    build_provider_headers,
+    resolve_base_url,
+)
 
 
 @pytest.mark.asyncio
@@ -48,3 +52,23 @@ def test_build_provider_headers_rejects_openrouter_without_api_key() -> None:
             build_provider_headers("openrouter")
     finally:
         settings.agent_api_key = original_api_key
+
+
+def test_resolve_base_url_appends_v1_for_custom_ollama_root() -> None:
+    original_base_url = settings.agent_base_url
+
+    try:
+        settings.agent_base_url = "https://llm.benac.dev"
+        assert resolve_base_url("ollama") == "https://llm.benac.dev/v1"
+    finally:
+        settings.agent_base_url = original_base_url
+
+
+def test_resolve_base_url_preserves_custom_ollama_v1_path() -> None:
+    original_base_url = settings.agent_base_url
+
+    try:
+        settings.agent_base_url = "https://llm.benac.dev/v1"
+        assert resolve_base_url("ollama") == "https://llm.benac.dev/v1"
+    finally:
+        settings.agent_base_url = original_base_url

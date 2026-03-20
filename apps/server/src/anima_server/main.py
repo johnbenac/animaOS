@@ -22,9 +22,11 @@ from .config import settings
 from .services.core import acquire_core_lock, ensure_core_manifest, is_provisioned
 from .db.user_store import ensure_per_user_databases_ready
 
+_LOOPBACK_HOSTS = ("localhost", "127.0.0.1", "[::1]")
+_DEV_UI_PORTS = (1420, 5173)
+
 CORS_ORIGINS = [
-    "http://localhost:1420",
-    "http://localhost:5173",
+    *(f"http://{host}:{port}" for host in _LOOPBACK_HOSTS for port in _DEV_UI_PORTS),
     "http://tauri.localhost",
     "https://tauri.localhost",
     "tauri://localhost",

@@ -7,6 +7,8 @@ from typing import Any
 
 import httpx
 
+from anima_server.services.agent.http_client import create_async_http_client
+
 
 @dataclass(frozen=True, slots=True)
 class OpenAICompatibleResponse:
@@ -53,7 +55,7 @@ class OpenAICompatibleChatClient:
     async def _get_client(self) -> httpx.AsyncClient:
         """Return a shared httpx client for connection reuse."""
         if self._shared_client is None or self._shared_client.is_closed:
-            self._shared_client = httpx.AsyncClient(
+            self._shared_client = create_async_http_client(
                 timeout=self._timeout,
                 transport=self._transport,
             )

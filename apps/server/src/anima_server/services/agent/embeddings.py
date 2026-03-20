@@ -34,6 +34,7 @@ from anima_server.services.agent.llm import (
     resolve_base_url,
     validate_provider_configuration,
 )
+from anima_server.services.agent.http_client import create_async_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -182,14 +183,12 @@ async def generate_embedding(text: str) -> list[float] | None:
 
 async def _embed_openai_compatible(text: str) -> list[float] | None:
     """Generate embeddings via any OpenAI-compatible /v1/embeddings endpoint."""
-    import httpx
-
     base_url = _resolve_embedding_base_url()
     model = _resolve_embedding_model()
     headers = build_provider_headers(settings.agent_provider)
     headers["Content-Type"] = "application/json"
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with create_async_http_client(timeout=30.0) as client:
         resp = await client.post(
             f"{base_url}/embeddings",
             headers=headers,
@@ -207,8 +206,6 @@ async def _embed_openai_compatible(text: str) -> list[float] | None:
 
 async def _embed_ollama(text: str) -> list[float] | None:
     """Generate embeddings via ollama's native /api/embed endpoint."""
-    import httpx
-
     # For ollama, use the raw base URL (without /v1 suffix)
     configured = settings.agent_base_url.strip()
     base_url = configured if configured else "http://127.0.0.1:11434"
@@ -216,7 +213,7 @@ async def _embed_ollama(text: str) -> list[float] | None:
     base_url = base_url.removesuffix("/v1")
     model = _resolve_embedding_model()
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with create_async_http_client(timeout=30.0) as client:
         resp = await client.post(
             f"{base_url}/api/embed",
             json={"model": model, "input": text},
@@ -701,8 +698,6 @@ async def _batch_embed_openai_compatible(
     max_batch_size: int = 32,
 ) -> list[list[float] | None]:
     """Batch embedding via OpenAI-compatible /v1/embeddings with adaptive retry."""
-    import httpx
-
     base_url = _resolve_embedding_base_url()
     model = _resolve_embedding_model()
     headers = build_provider_headers(settings.agent_provider)
@@ -717,7 +712,7 @@ async def _batch_embed_openai_compatible(
 
         while current_batch >= 1:
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with create_async_http_client(timeout=60.0) as client:
                     # Process sub-chunks if we had to halve
                     for sub_start in range(0, len(chunk), current_batch):
                         sub_chunk = chunk[sub_start: sub_start + current_batch]
