@@ -45,11 +45,41 @@ export interface VaultImportResponse {
 
 export type PersonaTemplate = "default" | "alice";
 
+export interface TraceMessagePreview {
+  role: string;
+  chars: number;
+  preview: string;
+  toolName?: string;
+  toolCallId?: string;
+  toolCallCount?: number;
+}
+
 export interface TraceEvent {
-  type: "tool_call" | "tool_return" | "usage" | "timing" | "done";
+  type:
+    | "step_state"
+    | "warning"
+    | "tool_call"
+    | "tool_return"
+    | "usage"
+    | "timing"
+    | "done"
+    | "approval_pending"
+    | "cancelled";
   stepIndex?: number;
+  phase?: "request" | "result";
+  messageCount?: number;
+  allowedTools?: string[];
+  forceToolCall?: boolean;
+  messages?: TraceMessagePreview[];
+  assistantTextChars?: number;
+  assistantTextPreview?: string;
+  toolCallCount?: number;
+  reasoningChars?: number;
+  reasoningCaptured?: boolean;
+  code?: string;
+  message?: string;
   name?: string;
-  arguments?: string;
+  arguments?: unknown;
   callId?: string;
   output?: string;
   isError?: boolean;
@@ -57,6 +87,7 @@ export interface TraceEvent {
   completionTokens?: number;
   totalTokens?: number;
   reasoningTokens?: number;
+  cachedInputTokens?: number;
   stepDurationMs?: number;
   llmDurationMs?: number;
   ttftMs?: number;
@@ -65,6 +96,7 @@ export interface TraceEvent {
   provider?: string;
   model?: string;
   toolsUsed?: string[];
+  runId?: number;
 }
 
 export interface ChatMessage {
@@ -376,6 +408,36 @@ export function createApiClient(options: ApiClientOptions) {
           yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
         }
 
+        if (event === "step_state") {
+          const traceEvent: TraceEvent = {
+            type: "step_state",
+            stepIndex: payload.stepIndex,
+            phase: payload.phase,
+            messageCount: payload.messageCount,
+            allowedTools: payload.allowedTools,
+            forceToolCall: payload.forceToolCall,
+            messages: payload.messages,
+            assistantTextChars: payload.assistantTextChars,
+            assistantTextPreview: payload.assistantTextPreview,
+            toolCallCount: payload.toolCallCount,
+            reasoningChars: payload.reasoningChars,
+            reasoningCaptured: payload.reasoningCaptured,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+          continue;
+        }
+
+        if (event === "warning") {
+          const traceEvent: TraceEvent = {
+            type: "warning",
+            stepIndex: payload.stepIndex,
+            code: payload.code,
+            message: payload.message,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+          continue;
+        }
+
         if (event === "tool_return") {
           const traceEvent: TraceEvent = {
             type: "tool_return",
@@ -404,6 +466,7 @@ export function createApiClient(options: ApiClientOptions) {
             completionTokens: payload.completionTokens,
             totalTokens: payload.totalTokens,
             reasoningTokens: payload.reasoningTokens,
+            cachedInputTokens: payload.cachedInputTokens,
           };
           yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
           continue;
@@ -440,6 +503,26 @@ export function createApiClient(options: ApiClientOptions) {
               yield `\x00CONTENT_RESET\x00${terminalToolOutput}`;
             }
           }
+        }
+
+        if (event === "approval_pending") {
+          const traceEvent: TraceEvent = {
+            type: "approval_pending",
+            runId: payload.runId,
+            name: payload.toolName,
+            callId: payload.toolCallId,
+            arguments: payload.arguments,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
+          continue;
+        }
+
+        if (event === "cancelled") {
+          const traceEvent: TraceEvent = {
+            type: "cancelled",
+            runId: payload.runId,
+          };
+          yield `\x00TRACE\x00${JSON.stringify(traceEvent)}`;
         }
       }
     }
@@ -727,7 +810,7 @@ type StreamEventPayload = {
   stepIndex?: number;
   id?: string;
   name?: string;
-  arguments?: string;
+  arguments?: unknown;
   // tool_return fields
   callId?: string;
   isError?: boolean;
@@ -736,16 +819,35 @@ type StreamEventPayload = {
   completionTokens?: number;
   totalTokens?: number;
   reasoningTokens?: number;
+  cachedInputTokens?: number;
   // timing fields
   stepDurationMs?: number;
   llmDurationMs?: number;
   ttftMs?: number;
+  // step_state fields
+  phase?: "request" | "result";
+  messageCount?: number;
+  allowedTools?: string[];
+  forceToolCall?: boolean;
+  messages?: TraceMessagePreview[];
+  assistantTextChars?: number;
+  assistantTextPreview?: string;
+  toolCallCount?: number;
+  reasoningChars?: number;
+  reasoningCaptured?: boolean;
+  // warning fields
+  code?: string;
+  message?: string;
   // done fields
   status?: string;
   stopReason?: string;
   provider?: string;
   model?: string;
   toolsUsed?: string[];
+  // approval/cancel fields
+  runId?: number;
+  toolName?: string;
+  toolCallId?: string;
 };
 
 function parseSseEvent(

@@ -4,7 +4,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from anima_server.services.agent.runtime_types import (
+    MessageSnapshot,
     StepTiming,
+    StepExecutionResult,
     StepTrace,
     ToolCall,
     ToolExecutionResult,
@@ -17,6 +19,9 @@ from anima_server.services.agent.state import AgentResult
 class AgentStreamEvent:
     event: str
     data: dict[str, object]
+
+
+_TRACE_PREVIEW_LIMIT = 160
 
 
 def build_chunk_event(content: str) -> AgentStreamEvent:
@@ -50,6 +55,63 @@ def build_timing_event(
         data["llmDurationMs"] = timing.llm_duration_ms
         data["ttftMs"] = timing.ttft_ms
     return AgentStreamEvent(event="timing", data=data)
+
+
+def build_step_request_event(
+    step_index: int,
+    *,
+    request_messages: tuple[MessageSnapshot, ...],
+    allowed_tools: tuple[str, ...],
+    force_tool_call: bool,
+) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        event="step_state",
+        data={
+            "stepIndex": step_index,
+            "phase": "request",
+            "messageCount": len(request_messages),
+            "allowedTools": list(allowed_tools),
+            "forceToolCall": force_tool_call,
+            "messages": [_serialize_message_preview(message) for message in request_messages],
+        },
+    )
+
+
+def build_step_result_event(
+    step_index: int,
+    *,
+    step_result: StepExecutionResult,
+) -> AgentStreamEvent:
+    assistant_text = step_result.assistant_text or ""
+    reasoning_content = step_result.reasoning_content or ""
+    return AgentStreamEvent(
+        event="step_state",
+        data={
+            "stepIndex": step_index,
+            "phase": "result",
+            "assistantTextChars": len(assistant_text),
+            "assistantTextPreview": _preview_text(assistant_text),
+            "toolCallCount": len(step_result.tool_calls),
+            "reasoningChars": len(reasoning_content),
+            "reasoningCaptured": bool(reasoning_content),
+        },
+    )
+
+
+def build_warning_event(
+    step_index: int,
+    *,
+    code: str,
+    message: str,
+) -> AgentStreamEvent:
+    return AgentStreamEvent(
+        event="warning",
+        data={
+            "stepIndex": step_index,
+            "code": code,
+            "message": message,
+        },
+    )
 
 
 def build_tool_call_event(step_index: int, tool_call: ToolCall) -> AgentStreamEvent:
@@ -149,6 +211,29 @@ def build_stream_events(
     chunk_size: int,
 ) -> Iterator[AgentStreamEvent]:
     for trace in result.step_traces:
+        if trace.llm_invoked:
+            yield build_step_request_event(
+                trace.step_index,
+                request_messages=trace.request_messages,
+                allowed_tools=trace.allowed_tools,
+                force_tool_call=trace.force_tool_call,
+            )
+            yield build_step_result_event(
+                trace.step_index,
+                step_result=StepExecutionResult(
+                    assistant_text=trace.assistant_text,
+                    tool_calls=trace.tool_calls,
+                    usage=trace.usage,
+                    reasoning_content=trace.reasoning_content,
+                    reasoning_signature=trace.reasoning_signature,
+                ),
+            )
+            if not trace.assistant_text and not trace.tool_calls:
+                yield build_warning_event(
+                    trace.step_index,
+                    code="empty_step_result",
+                    message="LLM returned no assistant text and no tool calls for this step.",
+                )
         # Reasoning before content (model thinks before it speaks).
         if trace.reasoning_content:
             yield build_reasoning_event(
@@ -215,3 +300,24 @@ def _build_tool_events(trace: StepTrace) -> Iterator[AgentStreamEvent]:
 
     for tool_result in trace.tool_results:
         yield build_tool_return_event(trace.step_index, tool_result)
+
+
+def _preview_text(text: str, *, limit: int = _TRACE_PREVIEW_LIMIT) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}..."
+
+
+def _serialize_message_preview(message: MessageSnapshot) -> dict[str, object]:
+    data: dict[str, object] = {
+        "role": message.role,
+        "chars": len(message.content),
+        "preview": _preview_text(message.content),
+    }
+    if message.tool_name is not None:
+        data["toolName"] = message.tool_name
+    if message.tool_call_id is not None:
+        data["toolCallId"] = message.tool_call_id
+    if message.tool_calls:
+        data["toolCallCount"] = len(message.tool_calls)
+    return data

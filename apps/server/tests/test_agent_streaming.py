@@ -38,6 +38,8 @@ def test_build_stream_events_emits_tool_events_chunks_usage_and_done() -> None:
     events = list(build_stream_events(result, chunk_size=5))
 
     assert [event.event for event in events] == [
+        "step_state",
+        "step_state",
         "tool_call",
         "tool_return",
         "chunk",
@@ -46,13 +48,13 @@ def test_build_stream_events_emits_tool_events_chunks_usage_and_done() -> None:
         "usage",
         "done",
     ]
-    assert events[0].data == {
+    assert events[2].data == {
         "stepIndex": 0,
         "id": "call-1",
         "name": "send_message",
         "arguments": {"message": "hello world"},
     }
-    assert events[1].data == {
+    assert events[3].data == {
         "stepIndex": 0,
         "callId": "call-1",
         "name": "send_message",
@@ -111,7 +113,7 @@ def test_build_stream_events_include_tool_parse_error_metadata() -> None:
 
     events = list(build_stream_events(result, chunk_size=16))
 
-    assert events[0].data == {
+    assert events[2].data == {
         "stepIndex": 0,
         "id": "call-bad",
         "name": "send_message",

@@ -264,10 +264,11 @@ async def test_runtime_surfaces_malformed_tool_args_as_explicit_step_error() -> 
     )
     assert result.step_traces[0].tool_results[0].is_error is True
     assert "malformed arguments" in result.step_traces[0].tool_results[0].output.lower()
-    assert [event.event for event in events[:2]] == ["tool_call", "tool_return"]
-    assert events[0].data["parseError"] == "Malformed tool-call arguments (invalid JSON)."
-    assert events[0].data["rawArguments"] == "{broken json"
-    assert events[1].data["isError"] is True
+    tool_events = [event for event in events if event.event in {"tool_call", "tool_return"}]
+    assert [event.event for event in tool_events[:2]] == ["tool_call", "tool_return"]
+    assert tool_events[0].data["parseError"] == "Malformed tool-call arguments (invalid JSON)."
+    assert tool_events[0].data["rawArguments"] == "{broken json"
+    assert tool_events[1].data["isError"] is True
 
 
 @pytest.mark.asyncio

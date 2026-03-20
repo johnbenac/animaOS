@@ -99,6 +99,7 @@ class StepTiming:
 @dataclass(frozen=True, slots=True)
 class StepTrace:
     step_index: int
+    llm_invoked: bool = True
     request_messages: tuple[MessageSnapshot, ...] = ()
     allowed_tools: tuple[str, ...] = ()
     force_tool_call: bool = False

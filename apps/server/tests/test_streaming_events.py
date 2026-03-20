@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from anima_server.services.agent.runtime_types import (
+    MessageSnapshot,
     StepTiming,
     StepTrace,
     ToolCall,
@@ -71,6 +72,8 @@ def test_full_event_sequence_with_reasoning_and_timing() -> None:
 
     # Reasoning comes before tool events; timing after; usage and done at end.
     assert event_types == [
+        "step_state",
+        "step_state",
         "reasoning",
         "tool_call",
         "tool_return",
@@ -81,16 +84,16 @@ def test_full_event_sequence_with_reasoning_and_timing() -> None:
     ]
 
     # Reasoning event.
-    assert events[0].data["content"] == "internal thinking"
-    assert events[0].data["signature"] == "sig-1"
+    assert events[2].data["content"] == "internal thinking"
+    assert events[2].data["signature"] == "sig-1"
 
     # Timing event.
-    assert events[3].data["stepDurationMs"] == 150.0
-    assert events[3].data["llmDurationMs"] == 120.0
-    assert events[3].data["ttftMs"] == 50.0
+    assert events[5].data["stepDurationMs"] == 150.0
+    assert events[5].data["llmDurationMs"] == 120.0
+    assert events[5].data["ttftMs"] == 50.0
 
     # Usage event includes reasoning tokens.
-    assert events[5].data["reasoningTokens"] == 3
+    assert events[7].data["reasoningTokens"] == 3
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +110,7 @@ def test_stream_events_without_reasoning_or_timing() -> None:
         step_traces=[
             StepTrace(
                 step_index=0,
+                assistant_text="ok",
                 usage=UsageStats(
                     prompt_tokens=1, completion_tokens=1, total_tokens=2),
             ),
@@ -117,7 +121,76 @@ def test_stream_events_without_reasoning_or_timing() -> None:
     event_types = [e.event for e in events]
 
     # No reasoning, no tool events, no timing (timing is None).
-    assert event_types == ["chunk", "usage", "done"]
+    assert event_types == ["step_state", "step_state", "chunk", "usage", "done"]
+
+
+def test_stream_events_include_step_state_and_empty_warning() -> None:
+    result = AgentResult(
+        response="",
+        model="m",
+        provider="p",
+        stop_reason="end_turn",
+        step_traces=[
+            StepTrace(
+                step_index=0,
+                request_messages=(
+                    MessageSnapshot(role="system", content="system prompt"),
+                    MessageSnapshot(role="user", content="hello there"),
+                ),
+                allowed_tools=("inner_thought", "send_message"),
+                force_tool_call=True,
+                timing=StepTiming(
+                    step_duration_ms=100.0,
+                    llm_duration_ms=90.0,
+                ),
+            ),
+        ],
+    )
+
+    events = list(build_stream_events(result, chunk_size=10))
+    event_types = [e.event for e in events]
+
+    assert event_types == [
+        "step_state",
+        "step_state",
+        "warning",
+        "timing",
+        "done",
+    ]
+
+    assert events[0].data == {
+        "stepIndex": 0,
+        "phase": "request",
+        "messageCount": 2,
+        "allowedTools": ["inner_thought", "send_message"],
+        "forceToolCall": True,
+        "messages": [
+            {
+                "role": "system",
+                "chars": 13,
+                "preview": "system prompt",
+            },
+            {
+                "role": "user",
+                "chars": 11,
+                "preview": "hello there",
+            },
+        ],
+    }
+    assert events[1].data == {
+        "stepIndex": 0,
+        "phase": "result",
+        "assistantTextChars": 0,
+        "assistantTextPreview": "",
+        "toolCallCount": 0,
+        "reasoningChars": 0,
+        "reasoningCaptured": False,
+    }
+    assert events[2].data == {
+        "stepIndex": 0,
+        "code": "empty_step_result",
+        "message": "LLM returned no assistant text and no tool calls for this step.",
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -11,9 +11,12 @@ from anima_server.services.agent.streaming import (
     AgentStreamEvent,
     build_chunk_event,
     build_reasoning_event,
+    build_step_request_event,
+    build_step_result_event,
     build_timing_event,
     build_tool_call_event,
     build_tool_return_event,
+    build_warning_event,
 )
 from anima_server.services.agent.state import AgentResult, StoredMessage
 from anima_server.services.agent.runtime_types import (
@@ -238,6 +241,15 @@ class AgentRuntime:
                 rules_solver.should_force_tool_call()
                 or "send_message" in allowed_tool_names
             )
+            if event_callback is not None:
+                await event_callback(
+                    build_step_request_event(
+                        step_index,
+                        request_messages=request_messages,
+                        allowed_tools=allowed_tool_names,
+                        force_tool_call=force_tool_call,
+                    )
+                )
             try:
                 step_result, streamed_assistant_text, step_ctx = await self._run_step(
                     messages=messages,
@@ -253,6 +265,29 @@ class AgentRuntime:
             except _CancelledDuringStream:
                 stop_reason = StopReason.CANCELLED
                 break
+            if event_callback is not None:
+                await event_callback(
+                    build_step_result_event(
+                        step_index,
+                        step_result=step_result,
+                    )
+                )
+                if not step_result.assistant_text and not step_result.tool_calls:
+                    await event_callback(
+                        build_warning_event(
+                            step_index,
+                            code="empty_step_result",
+                            message="LLM returned no assistant text and no tool calls for this step.",
+                        )
+                    )
+                if step_result.reasoning_content:
+                    await event_callback(
+                        build_reasoning_event(
+                            step_index,
+                            step_result.reasoning_content,
+                            step_result.reasoning_signature,
+                        )
+                    )
             tool_results: list[ToolExecutionResult] = []
             terminal_tool_hit = False
             awaiting_approval = False
@@ -545,6 +580,7 @@ class AgentRuntime:
                 request_messages,
                 allowed_tool_names,
                 False,
+                llm_invoked=False,
                 tool_calls=(tool_call,),
                 tool_results=(tool_result,),
             )
@@ -585,6 +621,15 @@ class AgentRuntime:
             rules_solver.should_force_tool_call()
             or "send_message" in allowed_tool_names
         )
+        if event_callback is not None:
+            await event_callback(
+                build_step_request_event(
+                    1,
+                    request_messages=_snapshot_messages(messages),
+                    allowed_tools=allowed_tool_names,
+                    force_tool_call=force_tool_call,
+                )
+            )
         try:
             step_result, streamed_assistant_text, follow_ctx = await self._run_step(
                 messages=messages,
@@ -607,6 +652,30 @@ class AgentRuntime:
                 step_traces=step_traces,
                 prompt_budget=prompt_budget,
             )
+
+        if event_callback is not None:
+            await event_callback(
+                build_step_result_event(
+                    1,
+                    step_result=step_result,
+                )
+            )
+            if not step_result.assistant_text and not step_result.tool_calls:
+                await event_callback(
+                    build_warning_event(
+                        1,
+                        code="empty_step_result",
+                        message="LLM returned no assistant text and no tool calls for this step.",
+                    )
+                )
+            if step_result.reasoning_content:
+                await event_callback(
+                    build_reasoning_event(
+                        1,
+                        step_result.reasoning_content,
+                        step_result.reasoning_signature,
+                    )
+                )
 
         response = step_result.assistant_text or response
         if (
@@ -692,16 +761,6 @@ class AgentRuntime:
             # Track whether we streamed content to the client.
             if event_callback is not None and step_result.assistant_text:
                 streamed_assistant_text = True
-
-            # Emit reasoning event before any chunk/tool events for this step.
-            if event_callback is not None and step_result.reasoning_content:
-                await event_callback(
-                    build_reasoning_event(
-                        step_index,
-                        step_result.reasoning_content,
-                        step_result.reasoning_signature,
-                    )
-                )
 
             if step_result.assistant_text or step_result.tool_calls:
                 messages.append(
@@ -998,11 +1057,13 @@ def _build_step_trace(
     allowed_tool_names: tuple[str, ...],
     force_tool_call: bool,
     *,
+    llm_invoked: bool = True,
     tool_calls: tuple[ToolCall, ...] | None = None,
     tool_results: tuple[ToolExecutionResult, ...] = (),
 ) -> StepTrace:
     return StepTrace(
         step_index=ctx.step_index,
+        llm_invoked=llm_invoked,
         request_messages=request_messages,
         allowed_tools=allowed_tool_names,
         force_tool_call=force_tool_call,

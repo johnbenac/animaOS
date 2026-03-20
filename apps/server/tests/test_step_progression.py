@@ -215,6 +215,57 @@ async def test_timing_event_emitted_via_callback() -> None:
     assert timing_events[0].data["stepDurationMs"] >= 0
 
 
+@pytest.mark.asyncio
+async def test_step_state_and_empty_warning_emitted_via_callback() -> None:
+    adapter = QueueAdapter([StepExecutionResult()])
+    runtime = AgentRuntime(
+        adapter=adapter,
+        tools=[send_message],
+        tool_rules=[TerminalToolRule(tool_name="send_message")],
+        max_steps=1,
+    )
+
+    events: list[AgentStreamEvent] = []
+
+    async def collect(event: AgentStreamEvent) -> None:
+        events.append(event)
+
+    await runtime.invoke("hello", user_id=1, history=[], event_callback=collect)
+
+    assert [event.event for event in events] == [
+        "step_state",
+        "step_state",
+        "warning",
+        "timing",
+    ]
+    assert events[0].data["stepIndex"] == 0
+    assert events[0].data["phase"] == "request"
+    assert events[0].data["messageCount"] == 2
+    assert events[0].data["allowedTools"] == ["send_message"]
+    assert events[0].data["forceToolCall"] is True
+    assert events[0].data["messages"][0]["role"] == "system"
+    assert events[0].data["messages"][0]["chars"] > 0
+    assert events[0].data["messages"][1] == {
+        "role": "user",
+        "chars": 5,
+        "preview": "hello",
+    }
+    assert events[1].data == {
+        "stepIndex": 0,
+        "phase": "result",
+        "assistantTextChars": 0,
+        "assistantTextPreview": "",
+        "toolCallCount": 0,
+        "reasoningChars": 0,
+        "reasoningCaptured": False,
+    }
+    assert events[2].data == {
+        "stepIndex": 0,
+        "code": "empty_step_result",
+        "message": "LLM returned no assistant text and no tool calls for this step.",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Enhanced usage stats
 # --------------------------------------------------------------------------- #

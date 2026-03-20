@@ -20,6 +20,7 @@ import {
   type SelfModelData,
   type SelfModelSection,
   type TaskItem,
+  type TraceEvent,
   type User,
   type DbTableInfo,
   type DbTableData,
