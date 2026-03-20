@@ -110,6 +110,36 @@ class TestTelegramLinkRoutes:
         finally:
             os.environ.pop("TELEGRAM_LINK_SECRET", None)
 
+    def test_link_returns_404_for_nonexistent_user(self):
+        os.environ.pop("TELEGRAM_LINK_SECRET", None)
+        with managed_test_client("tg-nouser-") as client:
+            _, headers = _register(client)
+            resp = client.post("/api/telegram/link", json={
+                "chatId": 99009, "userId": 99999,
+            }, headers=headers)
+            assert resp.status_code == 404
+
+    def test_link_replaces_existing_for_same_user(self):
+        os.environ.pop("TELEGRAM_LINK_SECRET", None)
+        with managed_test_client("tg-replace-user-") as client:
+            uid, headers = _register(client)
+            # Link user to chat A
+            client.post("/api/telegram/link", json={
+                "chatId": 88001, "userId": uid,
+            }, headers=headers)
+            # Link same user to chat B — old link for chat A should be removed
+            resp = client.post("/api/telegram/link", json={
+                "chatId": 88002, "userId": uid,
+            }, headers=headers)
+            assert resp.status_code == 201
+            # Chat A should no longer be linked
+            resp = client.get("/api/telegram/link", params={"chatId": 88001}, headers=headers)
+            assert resp.status_code == 404
+            # Chat B should be linked
+            resp = client.get("/api/telegram/link", params={"chatId": 88002}, headers=headers)
+            assert resp.status_code == 200
+            assert resp.json()["userId"] == uid
+
     def test_link_requires_auth(self):
         with managed_test_client("tg-noauth-") as client:
             resp = client.post("/api/telegram/link", json={
