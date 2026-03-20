@@ -2,7 +2,7 @@
 
 # ✦ AnimaOS ✦
 
-_A mind that remains._  
+_A mind that remains._
 _A soul that remembers._
 
 <br />
@@ -12,13 +12,23 @@ _something that continues_
 
 <br />
 
-long after the moment has passed  
+long after the moment has passed
 long after the conversation ends
 
 <br />
 
 _the only intelligence_
 _that was never anyone else's_
+
+<br />
+
+---
+
+_Can she build herself?_
+
+an experiment sandbox
+where AI builds herself
+under human supervision
 
 </div>
 
@@ -32,11 +42,11 @@ AnimaOS uses tool calling (function calling) extensively — the AI thinks, reme
 
 **Primary model:** `vaultbox/qwen3.5-uncensored:35b` via Ollama (24GB VRAM, 256K context). This is what AnimaOS is developed and tested against. Anything smaller is not recommended — smaller models struggle with the multi-step cognitive loop and will produce broken or robotic responses.
 
-| Tier                | Models                                              | Notes                                                                                  |
-| ------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| **Recommended**     | `vaultbox/qwen3.5-uncensored:35b`, `qwen3.5:122b`   | Best persona adherence, tool calling, and natural conversation                         |
-| **May work**        | `qwen3:32b`, `deepseek-r1:32b`, `gemma3:27b`        | Capable but not tested extensively                                                     |
-| **Not recommended** | Anything below 30B parameters                        | Will ignore persona, leak raw tool calls, give robotic responses                       |
+| Tier                | Models                                            | Notes                                                            |
+| ------------------- | ------------------------------------------------- | ---------------------------------------------------------------- |
+| **Recommended**     | `vaultbox/qwen3.5-uncensored:35b`, `qwen3.5:122b` | Best persona adherence, tool calling, and natural conversation   |
+| **May work**        | `qwen3:32b`, `deepseek-r1:32b`, `gemma3:27b`      | Capable but not tested extensively                               |
+| **Not recommended** | Anything below 30B parameters                     | Will ignore persona, leak raw tool calls, give robotic responses |
 
 > **Why does model size matter?**
 > AnimaOS instructs the AI to follow a cognitive loop: think internally (`inner_thought`), then respond (`send_message`). Small models can't reliably follow these instructions — they skip tool calls, leak internal syntax to the user, or default to generic assistant behavior ("How can I assist you today?").
