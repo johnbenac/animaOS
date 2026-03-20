@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 
 from anima_server.api.deps.unlock import read_unlock_token
 from anima_server.db import dispose_all_user_engines, get_db
-from anima_server.db.user_store import authenticate_account, recover_account_with_phrase, register_account
+from anima_server.db.user_store import (
+    InvalidCredentialsError,
+    authenticate_account,
+    recover_account_with_phrase,
+    register_account,
+)
 from anima_server.schemas.auth import (
     ChangePasswordRequest,
     ChangePasswordResponse,
@@ -152,7 +157,7 @@ def login(
 
     try:
         response, deks = authenticate_account(username, payload.password)
-    except ValueError:
+    except InvalidCredentialsError:
         retry_after = _record_failed_login_attempt(username, now)
         if retry_after is not None:
             return _rate_limited_login_response(retry_after)
