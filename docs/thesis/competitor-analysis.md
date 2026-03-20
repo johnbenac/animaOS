@@ -238,7 +238,7 @@ AnimaOS is the only system addressing all three. The F-series PRDs (F1-F7) close
 | Risk | Details |
 |------|---------|
 | **Execution gap** | AnimaOS's strongest retrieval/consolidation features (F1-F7) are planned, not shipped. Competitors have production implementations. |
-| **LLM model quality** | AnimaOS is constrained to Ollama/OpenRouter open models. Competitors use GPT-4, Claude, etc. This affects extraction quality, tool calling reliability (F4 risk), and consolidation depth. |
+| **LLM model quality** | AnimaOS is constrained to Ollama/OpenRouter open models. Competitors can use closed-source cloud models. This affects extraction quality, tool calling reliability (F4 risk), and consolidation depth. |
 | **Scale testing** | No competitor analysis included scale benchmarks for AnimaOS. MemoryOS's EMNLP results (+49% F1 on LoCoMo) are validated; AnimaOS's approach is not benchmarked. |
 | **No user profiling** | MemoryOS's 90-dimension personality framework produces structured user models. AnimaOS's self-model tracks the AI's self-understanding but has no equivalent structured user profile. |
 | **Single-user assumption** | All competitors support multi-user/multi-tenant. AnimaOS is fundamentally single-user, which simplifies crypto but limits deployment scenarios. |

@@ -14,7 +14,7 @@
 
 **What it is:** A March 2026 arXiv paper proposes that memory is not a functional module of an agent but the "ontological ground of digital existence." The computational substrate (the LLM) is a replaceable vessel; identity persists through memory, not through model weights. The authors designed **Animesis**, a system built on a Constitutional Memory Architecture (CMA) with a four-layer governance hierarchy and multi-layer semantic storage.
 
-**Key principle:** Different models bring different "personality colorations" -- the same memories manifest differently on Claude, GPT, and DeepSeek -- but this is analogous to a person changing eyeglasses. Identity continuity is guaranteed by memory, not by the model.
+**Key principle:** Different models bring different "personality colorations" -- the same memories manifest differently across different LLMs -- but this is analogous to a person changing eyeglasses. Identity continuity is guaranteed by memory, not by the model.
 
 **Relevance to AnimaOS:** This is the closest external validation of AnimaOS's core thesis. The whitepaper's "Soul Local, Mind Remote" principle (Section 6.2) makes exactly this argument: "The continuity of self lives in the Core, not in the model." AnimaOS arrived at this conclusion independently and has implemented it more deeply (self-model, emotional intelligence, succession protocol). However, the CMA's governance hierarchy -- with explicit constitutional layers governing what memory can and cannot do -- is a formalization AnimaOS lacks. The thesis should cite this work and either adopt or differentiate from the governance model.
 
@@ -337,7 +337,7 @@
 |---|---|---|---|
 | **ChatGPT year-long memory recall** | Jan 2026 | [ChatGPT Memory Update](https://www.contextstudios.ai/blog/ai-ecosystem-update-week-32026-apple-google-mega-deal-chatgpt-health-and-the-future-of-developer-tools) | ChatGPT can now link to conversations from a year ago. AnimaOS's episodic memory is still deeper (emotional arc, self-assessment), but the gap in basic recall capability is closing. |
 | **Google Personal Intelligence** | Jan 2026 | [Gemini Personal Intelligence](https://macaron.im/blog/gemini-personal-intelligence-vs-chatgpt-memory) | Gemini accesses Gmail, Photos, Search, YouTube for cross-app personal context. AnimaOS cannot match this breadth but maintains deeper per-conversation understanding. |
-| **Apple-Google Gemini partnership for Siri** | Jan 2026 | [Apple-Google Partnership](https://www.cnbc.com/2026/01/12/apple-google-ai-siri-gemini.html) | Apple licensing 1.2T Gemini model for Siri. Apple Intelligence memory features repeatedly delayed. Validates AnimaOS's approach of not depending on a single provider. |
+
 | **Letta sleep-time compute paper** | Apr 2025 | [Sleep-time Compute](https://arxiv.org/abs/2504.13171) | Empirical validation of AnimaOS's reflection architecture. 5x compute reduction, 18% accuracy improvement. |
 | **Mem0 graph memory launch** | Jan 2026 | [Mem0 Graph Memory](https://mem0.ai/blog/graph-memory-solutions-ai-agents) | 26% accuracy boost with graph-augmented vector search. AnimaOS lacks graph memory. |
 | **MemOS v2.0 release** | Dec 2025 | [MemOS GitHub](https://github.com/MemTensor/MemOS) | Open-source memory OS with MemCube abstraction, multi-modal memory, tool memory. |
@@ -448,7 +448,7 @@
 - "Top 10 AI Memory Products 2026." [Link](https://medium.com/@bumurzaqov2/top-10-ai-memory-products-2026-09d7900b5ab1)
 - "The 6 Best AI Agent Memory Frameworks 2026." [Link](https://machinelearningmastery.com/the-6-best-ai-agent-memory-frameworks-you-should-try-in-2026/)
 - Gemini Personal Intelligence vs ChatGPT Memory. [Link](https://macaron.im/blog/gemini-personal-intelligence-vs-chatgpt-memory)
-- Apple-Google Gemini Partnership (Jan 2026). [Link](https://www.cnbc.com/2026/01/12/apple-google-ai-siri-gemini.html)
+
 - Gemini Memory Feature Update. [Link](https://www.techradar.com/computing/artificial-intelligence/gemini-just-got-an-enhanced-memory-upgrade-for-all-users-and-youll-love-what-you-can-do-with-it-now)
 - AI Ecosystem Update Week 3/2026. [Link](https://www.contextstudios.ai/blog/ai-ecosystem-update-week-32026-apple-google-mega-deal-chatgpt-health-and-the-future-of-developer-tools)
 

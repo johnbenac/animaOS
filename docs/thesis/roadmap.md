@@ -170,7 +170,7 @@ Status: complete
 
 Delivered:
 
-- embeddings generated for memories via the server's OpenAI-compatible providers (`ollama`, `openrouter`, `vllm`)
+- embeddings generated for memories via the server's embedding-compatible providers (`ollama`, `openrouter`, `vllm`)
 - query-aware semantic retrieval: user messages are embedded and matched against stored memory embeddings at conversation time
 - semantically relevant memories injected as a dedicated memory block in the system prompt
 - process-local vector index rebuildable from SQLite-backed embeddings
