@@ -236,16 +236,8 @@ async def _call_llm_for_episode(logs: list[MemoryDailyLog], *, user_id: int = 0)
     return _parse_json_object(content)
 
 
+from anima_server.services.agent.json_utils import parse_json_object  # noqa: E302
+
+
 def _parse_json_object(text: str) -> dict[str, Any]:
-    text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return {}
-    try:
-        parsed = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return {}
-    if not isinstance(parsed, dict):
-        return {}
-    return parsed
+    return parse_json_object(text) or {}

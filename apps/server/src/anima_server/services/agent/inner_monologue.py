@@ -565,14 +565,4 @@ def _last_n_entries(growth_log: str, n: int) -> str:
     return "\n\n".join(f"### {e}" for e in last_entries) if last_entries else "No entries yet."
 
 
-def _parse_json(text: str) -> dict | None:
-    """Extract a JSON object from LLM response."""
-    text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        return json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return None
+from anima_server.services.agent.json_utils import parse_json_object as _parse_json  # noqa: E302

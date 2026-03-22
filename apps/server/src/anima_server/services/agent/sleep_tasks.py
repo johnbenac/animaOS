@@ -390,7 +390,7 @@ async def _check_contradiction(
     try:
         from anima_server.services.agent.llm import create_llm
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
-        from anima_server.services.agent.consolidation import _parse_json_array
+        from anima_server.services.agent.json_utils import parse_json_object
 
         llm = create_llm()
         prompt = CONTRADICTION_PROMPT.format(
@@ -404,14 +404,7 @@ async def _check_contradiction(
         if not isinstance(content, str):
             content = str(content)
 
-        # Parse as JSON object
-        import json
-        text = content.strip()
-        start = text.find("{")
-        end = text.rfind("}")
-        if start == -1 or end == -1:
-            return None
-        return json.loads(text[start:end + 1])
+        return parse_json_object(content)
     except Exception:  # noqa: BLE001
         logger.exception("Contradiction check failed")
         return None
@@ -422,7 +415,7 @@ async def _call_profile_synthesis(facts: list[MemoryItem], *, user_id: int = 0) 
     try:
         from anima_server.services.agent.llm import create_llm
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
-        from anima_server.services.agent.consolidation import _parse_json_array
+        from anima_server.services.agent.json_utils import parse_json_array as _parse_json_array
 
         facts_text = "\n".join(
             f"[id={f.id}] {df(user_id, f.content, table='memory_items', field='content')}" for f in facts)

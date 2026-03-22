@@ -18,9 +18,11 @@ from typing import Any
 from anima_server.config import settings
 from anima_server.services.agent.consolidation import (
     LLMExtractionResult,
-    _parse_json_array,
-    _parse_json_object,
     extract_memories_via_llm,
+)
+from anima_server.services.agent.json_utils import (
+    parse_json_array as _parse_json_array,
+    parse_json_object as _parse_json_object,
 )
 from anima_server.services.agent.embeddings import hybrid_search
 from anima_server.services.data_crypto import df

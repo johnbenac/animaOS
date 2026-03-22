@@ -559,36 +559,10 @@ async def resolve_conflict(
         return "DIFFERENT"
 
 
-def _parse_json_object(text: str) -> dict[str, Any] | None:
-    """Extract a JSON object from LLM response text."""
-    text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        parsed = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
-
-
-def _parse_json_array(text: str) -> list[dict[str, Any]]:
-    """Extract a JSON array from LLM response text."""
-    text = text.strip()
-    start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-    try:
-        parsed = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(parsed, list):
-        return []
-    return [item for item in parsed if isinstance(item, dict)]
+from anima_server.services.agent.json_utils import (  # noqa: E302
+    parse_json_array as _parse_json_array,
+    parse_json_object as _parse_json_object,
+)
 
 
 def extract_turn_memory(user_message: str) -> ExtractedTurnMemory:

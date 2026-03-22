@@ -771,17 +771,4 @@ async def ingest_conversation_graph(
 
 # ── JSON parsing helpers ─────────────────────────────────────────────
 
-def _parse_json_object(text: str) -> dict[str, Any] | None:
-    """Extract a JSON object from LLM response text."""
-    text = text.strip()
-    start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        return None
-    try:
-        parsed = json.loads(text[start:end + 1])
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(parsed, dict):
-        return None
-    return parsed
+from anima_server.services.agent.json_utils import parse_json_object as _parse_json_object  # noqa: E302

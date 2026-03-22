@@ -7,7 +7,7 @@ import type { View, RowViewMode, ExportFormat, Bookmark, TableStats, QueryHistor
 import { Dashboard, TableList, RowViewer, SchemaView, RelationsView, QueryEditor } from "../components/database/views";
 import { convertToCsv, generateInsertSQL, downloadFile, applyColumnFilters } from "../components/database/utils";
 import type { ColumnFilter } from "../components/database/ColumnFilter";
-import { KeyboardShortcutsHelp, useKeyboardShortcuts } from "../components/database";
+import { KeyboardShortcutsHelp, useKeyboardShortcuts, ToastContainer, showSuccess, showError, showInfo } from "../components/database";
 
 export default function Database() {
   // Password gate
@@ -236,6 +236,7 @@ export default function Database() {
     try {
       const data = await api.db.query(sql);
       setQueryResult(data);
+      showSuccess(`Query returned ${data.rowCount.toLocaleString()} rows`);
       const newItem: QueryHistoryItem = {
         sql: sql.trim(),
         timestamp: Date.now(),
@@ -244,7 +245,9 @@ export default function Database() {
       setQueryHistory((prev) => [newItem, ...prev.slice(0, 19)]);
       calculateDashboardStats();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Query failed");
+      const msg = e instanceof Error ? e.message : "Query failed";
+      showError(msg);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -368,10 +371,13 @@ export default function Database() {
     setError(null);
     try {
       await api.db.updateRow(tableData.table, conditions, updates);
+      showSuccess(`Updated ${Object.keys(updates).length} field(s)`);
       cancelEdit();
       await openTable(tableData.table, page);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Update failed");
+      const msg = e instanceof Error ? e.message : "Update failed";
+      showError(msg);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -384,9 +390,12 @@ export default function Database() {
     setError(null);
     try {
       await api.db.deleteRow(tableData.table, conditions);
+      showSuccess("Row deleted successfully");
       await openTable(tableData.table, page);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      const msg = e instanceof Error ? e.message : "Delete failed";
+      showError(msg);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -444,9 +453,10 @@ export default function Database() {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedCell(identifier);
+      showInfo("Copied to clipboard", 2000);
       setTimeout(() => setCopiedCell(null), 1500);
     } catch {
-      // ignore
+      showError("Failed to copy");
     }
   };
 
@@ -511,6 +521,7 @@ export default function Database() {
     }
 
     downloadFile(content, filename, mimeType);
+    showSuccess(`Exported ${filteredRows.length.toLocaleString()} rows as ${format.toUpperCase()}`);
     setShowExportMenu(false);
   };
 
@@ -567,34 +578,98 @@ export default function Database() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 px-6 py-4 border-b border-border bg-bg-card/50">
+      <header className="shrink-0 px-6 py-3 border-b border-border bg-bg-card/50">
         <div className="flex items-center justify-between">
+          {/* Left: Logo & Title */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+            <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
               <Icons.Schema />
             </div>
             <div>
-              <h1 className="text-base font-semibold">Database</h1>
+              <h1 className="text-base font-semibold">Database Viewer</h1>
               <p className="text-[11px] text-text-muted">
                 {tables.length} tables • {stats?.totalRows?.toLocaleString() ?? "—"} rows
               </p>
             </div>
           </div>
+
+          {/* Center: Main Navigation */}
+          <nav className="flex items-center gap-1 bg-bg-input/50 p-1 rounded-lg">
+            <NavButton 
+              active={view === "dashboard"} 
+              onClick={() => setView("dashboard")} 
+              icon={<Icons.Dashboard />}
+            >
+              Dashboard
+            </NavButton>
+            <NavButton 
+              active={view === "tables" || view === "rows"} 
+              onClick={() => setView("tables")} 
+              icon={<Icons.Table />}
+            >
+              Tables
+            </NavButton>
+            <NavButton 
+              active={view === "query"} 
+              onClick={() => setView("query")} 
+              icon={<Icons.Eye />}
+            >
+              SQL Query
+            </NavButton>
+          </nav>
+
+          {/* Right: Actions */}
           <div className="flex items-center gap-2">
-            <div className="flex gap-1">
-              <NavButton active={view === "dashboard"} onClick={() => setView("dashboard")} icon={<Icons.Dashboard />}>
-                Dashboard
-              </NavButton>
-              <NavButton active={view === "tables" || view === "rows"} onClick={() => setView("tables")} icon={<Icons.Table />}>
-                Tables
-              </NavButton>
-              <NavButton active={view === "query"} onClick={() => setView("query")} icon={<Icons.Eye />}>
-                Query
-              </NavButton>
-            </div>
+            {/* Refresh button */}
+            <button
+              onClick={loadTables}
+              disabled={loading}
+              className="p-2 text-text-muted hover:text-text hover:bg-bg-input rounded-lg transition-colors disabled:opacity-50"
+              title="Refresh tables"
+            >
+              <Icons.Refresh />
+            </button>
+
+            <div className="w-px h-6 bg-border" />
+
+            {/* Help & Shortcuts */}
             <KeyboardShortcutsHelp />
+
+            {/* Settings/Menu placeholder */}
+            <button
+              className="p-2 text-text-muted hover:text-text hover:bg-bg-input rounded-lg transition-colors"
+              title="Settings"
+            >
+              <Icons.Settings />
+            </button>
           </div>
         </div>
+
+        {/* Breadcrumb / Context bar */}
+        {tableData && (
+          <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/50">
+            <button
+              onClick={() => setView("tables")}
+              className="text-xs text-text-muted hover:text-text"
+            >
+              Tables
+            </button>
+            <Icons.ChevronRight />
+            <span className="text-xs font-mono font-medium">{tableData.table}</span>
+            {view === "schema" && (
+              <>
+                <Icons.ChevronRight />
+                <span className="text-xs text-text-muted">Schema</span>
+              </>
+            )}
+            {view === "relations" && (
+              <>
+                <Icons.ChevronRight />
+                <span className="text-xs text-text-muted">Relations</span>
+              </>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Content */}
@@ -737,6 +812,9 @@ export default function Database() {
           </>
         )}
       </div>
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </div>
   );
 }

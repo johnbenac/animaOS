@@ -164,31 +164,15 @@ async def _call_llm_for_segmentation(
     return _parse_json_array(content)
 
 
+from anima_server.services.agent.json_utils import parse_json_array  # noqa: E302
+
+
 def _parse_json_array(text: str) -> list[list[int]]:
-    """Parse a JSON array of arrays from LLM output.
-
-    Handles markdown code fences and extra whitespace.
-    """
-    text = text.strip()
-    # Strip markdown fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove first and last fence lines
-        if lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
-    start = text.find("[")
-    end = text.rfind("]")
-    if start == -1 or end == -1 or end <= start:
+    """Parse a JSON array of arrays from LLM output."""
+    result = parse_json_array(text)
+    if not result:
         raise ValueError(f"No JSON array found in: {text[:100]}")
-
-    parsed = json.loads(text[start:end + 1])
-    if not isinstance(parsed, list):
-        raise ValueError(f"Expected list, got {type(parsed)}")
-    return parsed
+    return result
 
 
 async def generate_episodes_from_segments(

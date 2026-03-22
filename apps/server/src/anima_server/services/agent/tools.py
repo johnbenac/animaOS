@@ -351,16 +351,19 @@ def complete_task(text: str) -> str:
 
 
 @tool
-def recall_memory(query: str, category: str = "", tags: str = "") -> str:
+def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0", count: str = "5") -> str:
     """Search your memory for information about the user. Use this when the user asks
     what you remember, or when you need to look up something specific about them.
     Returns matching memories ranked by relevance (semantic + keyword hybrid search).
     Optional category filter: fact, preference, goal, relationship (or empty for all).
     Optional tags filter: comma-separated labels to narrow results (e.g. "work,career").
+    Optional page: 0-indexed page number for paginated results (default "0").
+    Optional count: number of results per page (default "5").
     Examples:
     - "what do you remember about my sister?" -> query="sister"
     - "what are my goals?" -> query="goals", category="goal"
     - "work-related facts" -> query="work", tags="work,career"
+    - "show me more memories" -> query="...", page="1"
     """
     import asyncio
     from anima_server.services.agent.tool_context import get_tool_context
@@ -452,12 +455,34 @@ def recall_memory(query: str, category: str = "", tags: str = "") -> str:
     if not scored:
         return f"No memories found matching: {query}"
 
+    # Parse pagination parameters
+    try:
+        page_num = max(0, int(page))
+    except (ValueError, TypeError):
+        page_num = 0
+    try:
+        per_page = max(1, int(count))
+    except (ValueError, TypeError):
+        per_page = 5
+
     scored.sort(key=lambda x: x[0], reverse=True)
+
+    total = len(scored)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page_num = min(page_num, total_pages - 1)
+    start = page_num * per_page
+    end = start + per_page
+    page_items = scored[start:end]
+
     lines: list[str] = []
-    for _score, content, cat_label in scored[:10]:
+    for _score, content, cat_label in page_items:
         lines.append(f"- [{cat_label}] {content}")
 
-    return f"Found {len(scored)} matching memories:\n" + "\n".join(lines)
+    header = f"Found {total} matching memories (showing page {page_num + 1} of {total_pages}):"
+    result = header + "\n" + "\n".join(lines)
+    if page_num + 1 < total_pages:
+        result += f"\nUse page={page_num + 1} to see more results."
+    return result
 
 
 @tool
