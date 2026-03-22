@@ -3,13 +3,11 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import anima_server.api.routes.auth as auth_routes
-from fastapi.testclient import TestClient
-
 from anima_server.db import session as db_session
 from anima_server.services.agent.llm import LLMInvocationError
-from anima_server.services.sessions import get_active_dek
-from anima_server.services.sessions import get_sqlcipher_key, set_sqlcipher_key
+from anima_server.services.sessions import get_active_dek, get_sqlcipher_key, set_sqlcipher_key
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(
@@ -76,8 +74,7 @@ def test_login_me_and_logout_use_the_same_unlock_token() -> None:
 
         locked_response = client.get("/api/auth/me", headers=headers)
         assert locked_response.status_code == 401
-        assert locked_response.json() == {
-            "error": "Session locked. Please sign in again."}
+        assert locked_response.json() == {"error": "Session locked. Please sign in again."}
 
 
 def test_logout_clears_sqlcipher_key_and_disposes_user_engines() -> None:
@@ -296,8 +293,7 @@ def test_change_password_rejects_wrong_old_password() -> None:
 
 def test_register_blocked_after_provisioning() -> None:
     with managed_test_client("anima-auth-test-") as client:
-        _register_user(client, username="owner",
-                       password="pw123456", name="Owner")
+        _register_user(client, username="owner", password="pw123456", name="Owner")
 
         second = client.post(
             "/api/auth/register",
@@ -322,16 +318,16 @@ def test_create_ai_chat_hides_provider_error_details() -> None:
     async def _raise_provider_error(*args, **kwargs):  # type: ignore[no-untyped-def]
         raise LLMInvocationError("provider leaked details")
 
-    with managed_test_client("anima-auth-test-") as client:
-        with patch("anima_server.services.creation_agent.handle_creation_turn", _raise_provider_error):
-            with patch.object(auth_routes.logger, "exception") as log_exception:
-                response = client.post(
-                    "/api/auth/create-ai/chat",
-                    json={
-                        "ownerName": "Alice",
-                        "messages": [{"role": "user", "content": "hello"}],
-                    },
-                )
+    with managed_test_client("anima-auth-test-") as client, patch(
+        "anima_server.services.creation_agent.handle_creation_turn", _raise_provider_error
+    ), patch.object(auth_routes.logger, "exception") as log_exception:
+        response = client.post(
+            "/api/auth/create-ai/chat",
+            json={
+                "ownerName": "Alice",
+                "messages": [{"role": "user", "content": "hello"}],
+            },
+        )
 
     assert response.status_code == 503
     assert response.json() == {"error": "AI provider error occurred"}

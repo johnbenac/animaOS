@@ -12,16 +12,16 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryItem
 from anima_server.services.agent.memory_store import (
+    _similarity,
     get_memory_items,
     supersede_memory_item,
-    _similarity,
 )
 from anima_server.services.data_crypto import df
 
@@ -76,14 +76,14 @@ async def run_sleep_tasks(
 
     # 0. Decay heat scores for all items
     try:
-        from anima_server.services.agent.heat_scoring import decay_all_heat
         from anima_server.db.session import SessionLocal
+        from anima_server.services.agent.heat_scoring import decay_all_heat
 
         factory = db_factory or SessionLocal
         with factory() as db:
             decay_all_heat(db, user_id=user_id)
             db.commit()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("Heat decay failed for user %s: %s", user_id, e)
 
     # 0.5. Clear needs_regeneration flags on derived references
@@ -119,7 +119,7 @@ async def run_sleep_tasks(
             # implemented.  Clearing them prematurely would discard the
             # only signal that stale derived references need repair.
             result.refs_regenerated = regen_count
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("Derived ref regeneration failed for user %s: %s", user_id, e)
 
     # 1. Scan for contradictions
@@ -127,14 +127,14 @@ async def run_sleep_tasks(
         cr = await scan_contradictions(user_id=user_id, db_factory=db_factory)
         result.contradictions_found = cr[0]
         result.contradictions_resolved = cr[1]
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("Contradiction scan failed for user %s", user_id)
         result.errors.append(f"contradiction_scan: {e}")
 
     # 2. Profile synthesis (merge related facts)
     try:
         result.items_merged = await synthesize_profile(user_id=user_id, db_factory=db_factory)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("Profile synthesis failed for user %s", user_id)
         result.errors.append(f"profile_synthesis: {e}")
 
@@ -145,7 +145,7 @@ async def run_sleep_tasks(
         episode = await maybe_generate_episode(user_id=user_id, db_factory=db_factory)
         if episode is not None:
             result.episodes_generated = 1
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.exception("Episode generation failed for user %s", user_id)
         result.errors.append(f"episode_generation: {e}")
 
@@ -163,13 +163,13 @@ async def run_sleep_tasks(
                 mark_deep_monologue_done(user_id)
         else:
             logger.debug("Deep monologue skipped for user %s (ran recently)", user_id)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("Deep monologue skipped: %s", e)
 
     # 5. Embedding backfill
     try:
-        from anima_server.services.agent.embeddings import backfill_embeddings
         from anima_server.db.session import SessionLocal
+        from anima_server.services.agent.embeddings import backfill_embeddings
 
         factory = db_factory or SessionLocal
         with factory() as db:
@@ -177,7 +177,7 @@ async def run_sleep_tasks(
             if count > 0:
                 db.commit()
             result.embeddings_backfilled = count
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("Embedding backfill skipped: %s", e)
 
     return result
@@ -197,8 +197,7 @@ async def scan_contradictions(
 
     for category in ("fact", "preference", "goal", "relationship"):
         with factory() as db:
-            items = get_memory_items(
-                db, user_id=user_id, category=category, limit=100)
+            items = get_memory_items(db, user_id=user_id, category=category, limit=100)
             if len(items) < 2:
                 continue
 
@@ -207,7 +206,7 @@ async def scan_contradictions(
             # to match the contradiction prompt labels ("Memory A (older)")
             pairs: list[tuple[MemoryItem, MemoryItem]] = []
             for i, newer_item in enumerate(items):
-                for older_item in items[i + 1:]:
+                for older_item in items[i + 1 :]:
                     sim = _similarity(
                         df(user_id, older_item.content, table="memory_items", field="content"),
                         df(user_id, newer_item.content, table="memory_items", field="content"),
@@ -256,7 +255,9 @@ async def scan_contradictions(
                 elif action == "MERGE" and merged:
                     # Create one merged item, point both old items at it
                     merged_item = supersede_memory_item(
-                        db, old_item_id=item_a.id, new_content=merged,
+                        db,
+                        old_item_id=item_a.id,
+                        new_content=merged,
                         importance=max(item_a.importance, item_b.importance),
                     )
                     item_b.superseded_by = merged_item.id
@@ -277,24 +278,30 @@ def _cleanup_superseded_indexes(user_id: int, item_id: int, db: Any) -> None:
     """Remove a superseded item from vector store and BM25 index."""
     try:
         from anima_server.services.agent.vector_store import delete_memory
+
         delete_memory(user_id, item_id=item_id, db=db)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Vector cleanup failed for superseded item %d", item_id)
     try:
         from anima_server.services.agent.bm25_index import invalidate_index
+
         invalidate_index(user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("BM25 invalidation failed for user %d", user_id)
 
 
 def _suppress_after_contradiction(
-    db: Any, loser_id: int, winner_id: int, user_id: int,
+    db: Any,
+    loser_id: int,
+    winner_id: int,
+    user_id: int,
 ) -> None:
     """Flag derived references for the losing item in a contradiction."""
     try:
         from anima_server.services.agent.forgetting import suppress_memory
+
         suppress_memory(db, memory_id=loser_id, superseded_by=winner_id, user_id=user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Suppress failed for contradiction loser %d", loser_id)
 
 
@@ -313,8 +320,7 @@ async def synthesize_profile(
     merged_count = 0
 
     with factory() as db:
-        facts = get_memory_items(
-            db, user_id=user_id, category="fact", limit=50)
+        facts = get_memory_items(db, user_id=user_id, category="fact", limit=50)
         if len(facts) < 2:
             return 0
 
@@ -388,24 +394,24 @@ async def _check_contradiction(
         return None
 
     try:
+        from anima_server.services.agent.json_utils import parse_json_object
         from anima_server.services.agent.llm import create_llm
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
-        from anima_server.services.agent.json_utils import parse_json_object
 
         llm = create_llm()
-        prompt = CONTRADICTION_PROMPT.format(
-            memory_a=content_a, memory_b=content_b)
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="You check memory consistency. Respond only with JSON."),
-            HumanMessage(content=prompt),
-        ])
+        prompt = CONTRADICTION_PROMPT.format(memory_a=content_a, memory_b=content_b)
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content="You check memory consistency. Respond only with JSON."),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if not isinstance(content, str):
             content = str(content)
 
         return parse_json_object(content)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Contradiction check failed")
         return None
 
@@ -413,24 +419,27 @@ async def _check_contradiction(
 async def _call_profile_synthesis(facts: list[MemoryItem], *, user_id: int = 0) -> list[dict]:
     """Ask LLM to identify mergeable facts."""
     try:
+        from anima_server.services.agent.json_utils import parse_json_array as _parse_json_array
         from anima_server.services.agent.llm import create_llm
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
-        from anima_server.services.agent.json_utils import parse_json_array as _parse_json_array
 
         facts_text = "\n".join(
-            f"[id={f.id}] {df(user_id, f.content, table='memory_items', field='content')}" for f in facts)
+            f"[id={f.id}] {df(user_id, f.content, table='memory_items', field='content')}"
+            for f in facts
+        )
         prompt = PROFILE_SYNTHESIS_PROMPT.format(facts=facts_text)
 
         llm = create_llm()
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="You synthesize user profiles. Respond only with JSON."),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content="You synthesize user profiles. Respond only with JSON."),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if not isinstance(content, str):
             content = str(content)
         return _parse_json_array(content)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Profile synthesis LLM call failed")
         return []

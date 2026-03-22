@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import pytest
 from collections.abc import Generator
 from contextlib import contextmanager
 
+import pytest
+from anima_server.db.base import Base
+from anima_server.models import AgentThread, User
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from anima_server.db.base import Base
-from anima_server.models import AgentThread, User
 
 
 @contextmanager
@@ -40,8 +39,7 @@ def _db_session() -> Generator[Session, None, None]:
 
 
 def _setup(db: Session) -> tuple[User, AgentThread]:
-    user = User(username="consciousness-test",
-                display_name="Tester", password_hash="x")
+    user = User(username="consciousness-test", display_name="Tester", password_hash="x")
     db.add(user)
     db.flush()
     thread = AgentThread(user_id=user.id, status="active")
@@ -56,7 +54,7 @@ def _setup(db: Session) -> tuple[User, AgentThread]:
 def test_seed_self_model() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model, SECTIONS
+        from anima_server.services.agent.self_model import SECTIONS, seed_self_model
 
         blocks = seed_self_model(db, user_id=user.id)
         assert set(blocks.keys()) == set(SECTIONS)
@@ -82,8 +80,11 @@ def test_set_self_model_block_bumps_version() -> None:
 
         seed_self_model(db, user_id=user.id)
         block = set_self_model_block(
-            db, user_id=user.id, section="inner_state",
-            content="Updated inner state", updated_by="sleep_time",
+            db,
+            user_id=user.id,
+            section="inner_state",
+            content="Updated inner state",
+            updated_by="sleep_time",
         )
         assert block.version == 2
         assert block.content == "Updated inner state"
@@ -93,7 +94,10 @@ def test_set_self_model_block_bumps_version() -> None:
 def test_get_all_self_model_blocks() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model, get_all_self_model_blocks
+        from anima_server.services.agent.self_model import (
+            get_all_self_model_blocks,
+            seed_self_model,
+        )
 
         seed_self_model(db, user_id=user.id)
         blocks = get_all_self_model_blocks(db, user_id=user.id)
@@ -105,11 +109,12 @@ def test_get_all_self_model_blocks() -> None:
 def test_append_growth_log_entry() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model, append_growth_log_entry
+        from anima_server.services.agent.self_model import append_growth_log_entry, seed_self_model
 
         seed_self_model(db, user_id=user.id)
         block = append_growth_log_entry(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             entry="Communication style refined",
         )
         assert "Communication style refined" in block.content
@@ -119,7 +124,10 @@ def test_append_growth_log_entry() -> None:
 def test_ensure_self_model_exists() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import ensure_self_model_exists, get_all_self_model_blocks
+        from anima_server.services.agent.self_model import (
+            ensure_self_model_exists,
+            get_all_self_model_blocks,
+        )
 
         ensure_self_model_exists(db, user_id=user.id)
         blocks = get_all_self_model_blocks(db, user_id=user.id)
@@ -134,13 +142,20 @@ def test_ensure_self_model_exists() -> None:
 def test_render_self_model_section_budget() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model, set_self_model_block, render_self_model_section
+        from anima_server.services.agent.self_model import (
+            render_self_model_section,
+            seed_self_model,
+            set_self_model_block,
+        )
 
         seed_self_model(db, user_id=user.id)
         long_content = "x" * 5000
         block = set_self_model_block(
-            db, user_id=user.id, section="identity",
-            content=long_content, updated_by="test",
+            db,
+            user_id=user.id,
+            section="identity",
+            content=long_content,
+            updated_by="test",
         )
         rendered = render_self_model_section(block, budget=100)
         assert len(rendered) == 100
@@ -155,10 +170,15 @@ def test_record_emotional_signal() -> None:
         from anima_server.services.agent.emotional_intelligence import record_emotional_signal
 
         signal = record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="frustrated", confidence=0.8,
-            evidence_type="linguistic", evidence="shorter messages, repetition",
-            trajectory="escalating", topic="debugging",
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="frustrated",
+            confidence=0.8,
+            evidence_type="linguistic",
+            evidence="shorter messages, repetition",
+            trajectory="escalating",
+            topic="debugging",
         )
         assert signal is not None
         assert signal.emotion == "frustrated"
@@ -172,8 +192,11 @@ def test_emotional_signal_below_threshold_ignored() -> None:
         from anima_server.services.agent.emotional_intelligence import record_emotional_signal
 
         signal = record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="calm", confidence=0.2,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="calm",
+            confidence=0.2,
         )
         assert signal is None
 
@@ -184,8 +207,11 @@ def test_invalid_emotion_rejected() -> None:
         from anima_server.services.agent.emotional_intelligence import record_emotional_signal
 
         signal = record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="supercalifragilistic", confidence=0.9,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="supercalifragilistic",
+            confidence=0.9,
         )
         assert signal is None
 
@@ -193,13 +219,19 @@ def test_invalid_emotion_rejected() -> None:
 def test_emotional_signal_buffer_trimmed() -> None:
     with _db_session() as db:
         user, thread = _setup(db)
-        from anima_server.services.agent.emotional_intelligence import record_emotional_signal, get_recent_signals
+        from anima_server.services.agent.emotional_intelligence import (
+            get_recent_signals,
+            record_emotional_signal,
+        )
 
         # Record more than buffer size (default 20)
-        for i in range(25):
+        for _i in range(25):
             record_emotional_signal(
-                db, user_id=user.id, thread_id=thread.id,
-                emotion="calm", confidence=0.5,
+                db,
+                user_id=user.id,
+                thread_id=thread.id,
+                emotion="calm",
+                confidence=0.5,
             )
 
         signals = get_recent_signals(db, user_id=user.id)
@@ -215,14 +247,20 @@ def test_synthesize_emotional_context() -> None:
         )
 
         record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="stressed", confidence=0.8,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="stressed",
+            confidence=0.8,
             evidence="mentions deadline multiple times",
             topic="work review",
         )
         record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="anxious", confidence=0.7,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="anxious",
+            confidence=0.7,
             trajectory="escalating",
             topic="presentation prep",
         )
@@ -235,18 +273,26 @@ def test_synthesize_emotional_context() -> None:
 def test_trajectory_auto_detection() -> None:
     with _db_session() as db:
         user, thread = _setup(db)
-        from anima_server.services.agent.emotional_intelligence import record_emotional_signal, get_latest_signal
+        from anima_server.services.agent.emotional_intelligence import (
+            record_emotional_signal,
+        )
 
         # First signal
         record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="calm", confidence=0.6,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="calm",
+            confidence=0.6,
         )
 
         # Second signal with different emotion should auto-detect "shifted"
         signal = record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="frustrated", confidence=0.7,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="frustrated",
+            confidence=0.7,
         )
         assert signal is not None
         assert signal.trajectory == "shifted"
@@ -259,12 +305,13 @@ def test_trajectory_auto_detection() -> None:
 def test_add_intention() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model
         from anima_server.services.agent.intentions import add_intention
+        from anima_server.services.agent.self_model import seed_self_model
 
         seed_self_model(db, user_id=user.id)
         content = add_intention(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             title="Help prepare Q2 review",
             evidence="Mentioned deadline 3 times",
             priority="high",
@@ -277,12 +324,13 @@ def test_add_intention() -> None:
 def test_complete_intention() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model
         from anima_server.services.agent.intentions import add_intention, complete_intention
+        from anima_server.services.agent.self_model import seed_self_model
 
         seed_self_model(db, user_id=user.id)
         add_intention(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             title="Write report",
             priority="ongoing",
         )
@@ -293,24 +341,24 @@ def test_complete_intention() -> None:
 def test_complete_nonexistent_intention() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model
         from anima_server.services.agent.intentions import complete_intention
+        from anima_server.services.agent.self_model import seed_self_model
 
         seed_self_model(db, user_id=user.id)
-        found = complete_intention(
-            db, user_id=user.id, title="nonexistent goal")
+        found = complete_intention(db, user_id=user.id, title="nonexistent goal")
         assert found is False
 
 
 def test_add_procedural_rule() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model
         from anima_server.services.agent.intentions import add_procedural_rule
+        from anima_server.services.agent.self_model import seed_self_model
 
         seed_self_model(db, user_id=user.id)
         content = add_procedural_rule(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             rule="Lead with the answer, then explain",
             evidence="User interrupted explanation 3 times",
             confidence="high",
@@ -322,8 +370,8 @@ def test_add_procedural_rule() -> None:
 def test_duplicate_intention_skipped() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model
         from anima_server.services.agent.intentions import add_intention
+        from anima_server.services.agent.self_model import seed_self_model
 
         seed_self_model(db, user_id=user.id)
         add_intention(db, user_id=user.id, title="Build trust")
@@ -337,7 +385,7 @@ def test_duplicate_intention_skipped() -> None:
 
 def test_self_model_memory_blocks_created() -> None:
     with _db_session() as db:
-        user, thread = _setup(db)
+        user, _thread = _setup(db)
         from anima_server.services.agent.memory_blocks import build_self_model_memory_blocks
 
         blocks = build_self_model_memory_blocks(db, user_id=user.id)
@@ -364,8 +412,11 @@ def test_emotional_context_block_created_with_signals() -> None:
         from anima_server.services.agent.memory_blocks import build_emotional_context_block
 
         record_emotional_signal(
-            db, user_id=user.id, thread_id=thread.id,
-            emotion="excited", confidence=0.9,
+            db,
+            user_id=user.id,
+            thread_id=thread.id,
+            emotion="excited",
+            confidence=0.9,
             evidence="multiple exclamation marks, long messages",
         )
         block = build_emotional_context_block(db, user_id=user.id)
@@ -379,12 +430,17 @@ def test_emotional_context_block_created_with_signals() -> None:
 def test_growth_log_trimming() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
-        from anima_server.services.agent.self_model import seed_self_model, append_growth_log_entry, get_self_model_block
+        from anima_server.services.agent.self_model import (
+            append_growth_log_entry,
+            get_self_model_block,
+            seed_self_model,
+        )
 
         seed_self_model(db, user_id=user.id)
         for i in range(25):
             append_growth_log_entry(
-                db, user_id=user.id,
+                db,
+                user_id=user.id,
                 entry=f"Change number {i}",
                 max_entries=10,
             )
@@ -402,10 +458,10 @@ def test_expire_working_memory_items_removes_expired() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
         from anima_server.services.agent.self_model import (
+            expire_working_memory_items,
+            get_self_model_block,
             seed_self_model,
             set_self_model_block,
-            get_self_model_block,
-            expire_working_memory_items,
         )
 
         seed_self_model(db, user_id=user.id)
@@ -416,15 +472,17 @@ def test_expire_working_memory_items_removes_expired() -> None:
             "- No expiry item here\n"
         )
         set_self_model_block(
-            db, user_id=user.id, section="working_memory",
-            content=content, updated_by="test",
+            db,
+            user_id=user.id,
+            section="working_memory",
+            content=content,
+            updated_by="test",
         )
 
         removed = expire_working_memory_items(db, user_id=user.id)
         assert removed == 1
 
-        block = get_self_model_block(
-            db, user_id=user.id, section="working_memory")
+        block = get_self_model_block(db, user_id=user.id, section="working_memory")
         assert block is not None
         assert "project" not in block.content
         assert "meeting" in block.content
@@ -435,16 +493,19 @@ def test_expire_working_memory_noop_when_nothing_expired() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
         from anima_server.services.agent.self_model import (
+            expire_working_memory_items,
             seed_self_model,
             set_self_model_block,
-            expire_working_memory_items,
         )
 
         seed_self_model(db, user_id=user.id)
         content = "# Things I'm Holding in Mind\n- Future item [expires: 2099-12-31]\n"
         set_self_model_block(
-            db, user_id=user.id, section="working_memory",
-            content=content, updated_by="test",
+            db,
+            user_id=user.id,
+            section="working_memory",
+            content=content,
+            updated_by="test",
         )
 
         removed = expire_working_memory_items(db, user_id=user.id)
@@ -457,8 +518,7 @@ def test_expire_working_memory_noop_when_nothing_expired() -> None:
 def test_detect_correction_signal() -> None:
     from anima_server.services.agent.feedback_signals import detect_correction
 
-    signal = detect_correction(
-        "No, that's not what I asked. I want the summary.")
+    signal = detect_correction("No, that's not what I asked. I want the summary.")
     assert signal is not None
     assert signal.signal_type == "correction"
 
@@ -515,8 +575,7 @@ def test_record_feedback_signals_to_growth_log() -> None:
                 severity=0.7,
             ),
         ]
-        recorded = record_feedback_signals(
-            db, user_id=user.id, signals=signals)
+        recorded = record_feedback_signals(db, user_id=user.id, signals=signals)
         assert recorded == 1
 
         block = get_self_model_block(db, user_id=user.id, section="growth_log")
@@ -572,8 +631,12 @@ def test_apply_memory_correction_name() -> None:
 
         # Seed a wrong name memory
         add_memory_item(
-            db, user_id=user.id, content="Name: Alice",
-            category="fact", importance=5, source="extraction",
+            db,
+            user_id=user.id,
+            content="Name: Alice",
+            category="fact",
+            importance=5,
+            source="extraction",
         )
         db.flush()
 
@@ -591,8 +654,7 @@ def test_apply_memory_correction_name() -> None:
         # The old memory should now be superseded
         active = get_memory_items(db, user_id=user.id, category="fact", active_only=True)
         active_texts = [
-            df(user.id, item.content, table="memory_items", field="content")
-            for item in active
+            df(user.id, item.content, table="memory_items", field="content") for item in active
         ]
         assert not any("Alice" in t for t in active_texts)
         assert any("Leo" in t for t in active_texts)
@@ -607,8 +669,12 @@ def test_apply_memory_correction_wrong_and_right() -> None:
         from anima_server.services.data_crypto import df
 
         add_memory_item(
-            db, user_id=user.id, content="Lives in Paris",
-            category="fact", importance=4, source="extraction",
+            db,
+            user_id=user.id,
+            content="Lives in Paris",
+            category="fact",
+            importance=4,
+            source="extraction",
         )
         db.flush()
 
@@ -624,8 +690,7 @@ def test_apply_memory_correction_wrong_and_right() -> None:
 
         active = get_memory_items(db, user_id=user.id, category=None, active_only=True)
         active_texts = [
-            df(user.id, item.content, table="memory_items", field="content")
-            for item in active
+            df(user.id, item.content, table="memory_items", field="content") for item in active
         ]
         assert any("Berlin" in t for t in active_texts)
         assert not any(t == "Lives in Paris" for t in active_texts)
@@ -639,8 +704,12 @@ def test_apply_memory_correction_no_match() -> None:
         from anima_server.services.agent.memory_store import add_memory_item
 
         add_memory_item(
-            db, user_id=user.id, content="Likes hiking",
-            category="preference", importance=3, source="extraction",
+            db,
+            user_id=user.id,
+            content="Likes hiking",
+            category="preference",
+            importance=3,
+            source="extraction",
         )
         db.flush()
 
@@ -663,8 +732,12 @@ def test_apply_memory_correction_skips_already_correct() -> None:
         from anima_server.services.agent.memory_store import add_memory_item
 
         add_memory_item(
-            db, user_id=user.id, content="Name: Leo",
-            category="fact", importance=5, source="extraction",
+            db,
+            user_id=user.id,
+            content="Name: Leo",
+            category="fact",
+            importance=5,
+            source="extraction",
         )
         db.flush()
 
@@ -732,7 +805,7 @@ def test_semantic_memory_block_empty_returns_none() -> None:
 
 def test_greeting_context_gathered() -> None:
     with _db_session() as db:
-        user, thread = _setup(db)
+        user, _thread = _setup(db)
         db.commit()
         from anima_server.services.agent.proactive import gather_greeting_context
 
@@ -792,21 +865,23 @@ def test_create_task_tool() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
         from anima_server.services.agent.tools import create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
-            result = create_task(
-                "Buy groceries", due_date="2026-04-01", priority="3")
+            result = create_task("Buy groceries", due_date="2026-04-01", priority="3")
             assert "Buy groceries" in result
             assert "2026-04-01" in result
 
             from anima_server.models.task import Task
             from sqlalchemy import select
-            tasks = list(db.scalars(select(Task).where(
-                Task.user_id == user.id)).all())
+
+            tasks = list(db.scalars(select(Task).where(Task.user_id == user.id)).all())
             assert len(tasks) == 1
             assert tasks[0].text == "Buy groceries"
             assert tasks[0].due_date == "2026-04-01"
@@ -821,19 +896,22 @@ def test_create_task_tool_no_due_date() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
         from anima_server.services.agent.tools import create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             result = create_task("Walk the dog")
             assert "Walk the dog" in result
 
             from anima_server.models.task import Task
             from sqlalchemy import select
-            tasks = list(db.scalars(select(Task).where(
-                Task.user_id == user.id)).all())
+
+            tasks = list(db.scalars(select(Task).where(Task.user_id == user.id)).all())
             assert len(tasks) == 1
             assert tasks[0].due_date is None
         finally:
@@ -845,12 +923,15 @@ def test_create_task_tool_rejects_blank_text() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
-        from anima_server.services.agent.tools import create_task
         import pytest
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+        from anima_server.services.agent.tools import create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             with pytest.raises(ValueError, match="Task text cannot be empty"):
                 create_task("   ")
@@ -863,12 +944,15 @@ def test_create_task_tool_rejects_invalid_due_date() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
-        from anima_server.services.agent.tools import create_task
         import pytest
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+        from anima_server.services.agent.tools import create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             with pytest.raises(ValueError, match="YYYY-MM-DD"):
                 create_task("Buy groceries", due_date="tomorrow")
@@ -881,11 +965,14 @@ def test_list_tasks_tool() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
         from anima_server.services.agent.tools import create_task, list_tasks
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             create_task("Task A", priority="4")
             create_task("Task B", due_date="2026-05-01")
@@ -904,11 +991,14 @@ def test_list_tasks_tool_empty() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
         from anima_server.services.agent.tools import list_tasks
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             result = list_tasks()
             assert "No tasks" in result
@@ -921,11 +1011,14 @@ def test_complete_task_tool() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
-        from anima_server.services.agent.tools import create_task, complete_task
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+        from anima_server.services.agent.tools import complete_task, create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             create_task("Buy groceries")
             result = complete_task("Buy groceries")
@@ -934,8 +1027,8 @@ def test_complete_task_tool() -> None:
 
             from anima_server.models.task import Task
             from sqlalchemy import select
-            task = db.scalars(select(Task).where(
-                Task.user_id == user.id)).first()
+
+            task = db.scalars(select(Task).where(Task.user_id == user.id)).first()
             assert task is not None
             assert task.done is True
             assert task.completed_at is not None
@@ -948,11 +1041,14 @@ def test_complete_task_tool_fuzzy_match() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
-        from anima_server.services.agent.tools import create_task, complete_task
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+        from anima_server.services.agent.tools import complete_task, create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             create_task("Buy groceries from the store")
             # Fuzzy match — shares key words
@@ -964,14 +1060,13 @@ def test_complete_task_tool_fuzzy_match() -> None:
 
 def test_tasks_memory_block_shows_open_tasks() -> None:
     with _db_session() as db:
-        user, thread = _setup(db)
+        user, _thread = _setup(db)
         db.flush()
 
         from anima_server.models.task import Task
         from anima_server.services.agent.memory_blocks import build_tasks_memory_block
 
-        db.add(Task(user_id=user.id, text="Buy groceries",
-               priority=3, due_date="2026-04-01"))
+        db.add(Task(user_id=user.id, text="Buy groceries", priority=3, due_date="2026-04-01"))
         db.add(Task(user_id=user.id, text="Call dentist", priority=2))
         db.add(Task(user_id=user.id, text="Done task", priority=1, done=True))
         db.flush()
@@ -988,14 +1083,13 @@ def test_tasks_memory_block_shows_open_tasks() -> None:
 
 def test_tasks_memory_block_flags_overdue() -> None:
     with _db_session() as db:
-        user, thread = _setup(db)
+        user, _thread = _setup(db)
         db.flush()
 
         from anima_server.models.task import Task
         from anima_server.services.agent.memory_blocks import build_tasks_memory_block
 
-        db.add(Task(user_id=user.id, text="Overdue item",
-               priority=3, due_date="2020-01-01"))
+        db.add(Task(user_id=user.id, text="Overdue item", priority=3, due_date="2020-01-01"))
         db.flush()
 
         block = build_tasks_memory_block(db, user_id=user.id)
@@ -1005,7 +1099,7 @@ def test_tasks_memory_block_flags_overdue() -> None:
 
 def test_tasks_memory_block_empty_when_no_open_tasks() -> None:
     with _db_session() as db:
-        user, thread = _setup(db)
+        user, _thread = _setup(db)
         db.flush()
 
         from anima_server.services.agent.memory_blocks import build_tasks_memory_block
@@ -1025,8 +1119,7 @@ def test_tasks_memory_block_in_runtime_blocks() -> None:
         db.add(Task(user_id=user.id, text="Test task", priority=2))
         db.flush()
 
-        blocks = build_runtime_memory_blocks(
-            db, user_id=user.id, thread_id=thread.id)
+        blocks = build_runtime_memory_blocks(db, user_id=user.id, thread_id=thread.id)
         labels = [b.label for b in blocks]
         assert "user_tasks" in labels
 
@@ -1036,11 +1129,14 @@ def test_complete_task_tool_no_match() -> None:
         user, thread = _setup(db)
         db.flush()
 
-        from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
-        from anima_server.services.agent.tools import create_task, complete_task
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+        from anima_server.services.agent.tools import complete_task, create_task
 
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             create_task("Buy groceries")
             result = complete_task("write a novel")
@@ -1057,16 +1153,20 @@ def test_prompt_budget_preserves_tier_0() -> None:
     from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
 
     blocks = [
-        MemoryBlock(label="soul", value="A" * 3000,
-                    description="soul biography"),
+        MemoryBlock(label="soul", value="A" * 3000, description="soul biography"),
         MemoryBlock(label="facts", value="B" * 5000, description="facts"),
-        MemoryBlock(label="recent_episodes", value="C" *
-                    5000, description="episodes"),
+        MemoryBlock(label="recent_episodes", value="C" * 5000, description="episodes"),
     ]
-    result = apply_prompt_budget(blocks, BudgetConfig(
-        total_budget=4000, tier_0_budget=4000, tier_1_budget=0,
-        tier_2_budget=0, tier_3_budget=0,
-    ))
+    result = apply_prompt_budget(
+        blocks,
+        BudgetConfig(
+            total_budget=4000,
+            tier_0_budget=4000,
+            tier_1_budget=0,
+            tier_2_budget=0,
+            tier_3_budget=0,
+        ),
+    )
     labels = [b.label for b in result]
     assert "soul" in labels
     assert "facts" not in labels
@@ -1078,13 +1178,18 @@ def test_prompt_budget_truncates_oversized_block() -> None:
     from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
 
     blocks = [
-        MemoryBlock(label="soul", value="X" * 10000,
-                    description="big soul biography"),
+        MemoryBlock(label="soul", value="X" * 10000, description="big soul biography"),
     ]
-    result = apply_prompt_budget(blocks, BudgetConfig(
-        total_budget=5000, tier_0_budget=5000, tier_1_budget=0,
-        tier_2_budget=0, tier_3_budget=0,
-    ))
+    result = apply_prompt_budget(
+        blocks,
+        BudgetConfig(
+            total_budget=5000,
+            tier_0_budget=5000,
+            tier_1_budget=0,
+            tier_2_budget=0,
+            tier_3_budget=0,
+        ),
+    )
     assert len(result) == 1
     assert len(result[0].value) == 5000
 
@@ -1094,19 +1199,21 @@ def test_prompt_budget_drops_lowest_tier_first() -> None:
     from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
 
     blocks = [
-        MemoryBlock(label="soul", value="soul content",
-                    description="biography"),
-        MemoryBlock(label="self_identity",
-                    value="identity content", description=""),
-        MemoryBlock(label="relevant_memories",
-                    value="semantic hits", description=""),
-        MemoryBlock(label="recent_episodes",
-                    value="episode data", description=""),
+        MemoryBlock(label="soul", value="soul content", description="biography"),
+        MemoryBlock(label="self_identity", value="identity content", description=""),
+        MemoryBlock(label="relevant_memories", value="semantic hits", description=""),
+        MemoryBlock(label="recent_episodes", value="episode data", description=""),
     ]
-    result = apply_prompt_budget(blocks, BudgetConfig(
-        total_budget=100, tier_0_budget=50, tier_1_budget=50,
-        tier_2_budget=50, tier_3_budget=0,
-    ))
+    result = apply_prompt_budget(
+        blocks,
+        BudgetConfig(
+            total_budget=100,
+            tier_0_budget=50,
+            tier_1_budget=50,
+            tier_2_budget=50,
+            tier_3_budget=0,
+        ),
+    )
     labels = [b.label for b in result]
     assert "soul" in labels
     assert "self_identity" in labels
@@ -1118,17 +1225,21 @@ def test_prompt_budget_prioritizes_current_focus_over_working_memory_within_tier
     from anima_server.services.agent.prompt_budget import BudgetConfig, apply_prompt_budget
 
     blocks = [
-        MemoryBlock(label="self_working_memory",
-                    value="H" * 80, description=""),
+        MemoryBlock(label="self_working_memory", value="H" * 80, description=""),
         MemoryBlock(label="current_focus", value="focus", description=""),
         MemoryBlock(label="thread_summary", value="summary", description=""),
     ]
-    result = apply_prompt_budget(blocks, BudgetConfig(
-        total_budget=32, tier_0_budget=0, tier_1_budget=12,
-        tier_2_budget=0, tier_3_budget=0,
-    ))
-    assert [block.label for block in result] == [
-        "current_focus", "thread_summary"]
+    result = apply_prompt_budget(
+        blocks,
+        BudgetConfig(
+            total_budget=32,
+            tier_0_budget=0,
+            tier_1_budget=12,
+            tier_2_budget=0,
+            tier_3_budget=0,
+        ),
+    )
+    assert [block.label for block in result] == ["current_focus", "thread_summary"]
 
 
 # --- Invariant Tests: Provider Config ---
@@ -1152,20 +1263,23 @@ def test_identity_rewrite_blocked_when_young() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
         from anima_server.services.agent.self_model import (
-            seed_self_model, set_self_model_block, get_self_model_block,
+            get_self_model_block,
+            seed_self_model,
+            set_self_model_block,
         )
 
         seed_self_model(db, user_id=user.id)
         block = set_self_model_block(
-            db, user_id=user.id, section="identity",
+            db,
+            user_id=user.id,
+            section="identity",
             content="Completely new radical personality rewrite here",
             updated_by="deep_monologue",
         )
         assert block.version == 1
         assert "Who I Am" in block.content
 
-        growth = get_self_model_block(
-            db, user_id=user.id, section="growth_log")
+        growth = get_self_model_block(db, user_id=user.id, section="growth_log")
         assert growth is not None
         assert "identity update" in growth.content.lower()
 
@@ -1177,7 +1291,9 @@ def test_identity_rewrite_allowed_by_trusted_writer() -> None:
 
         seed_self_model(db, user_id=user.id)
         block = set_self_model_block(
-            db, user_id=user.id, section="identity",
+            db,
+            user_id=user.id,
+            section="identity",
             content="User-authored identity",
             updated_by="user",
         )
@@ -1189,18 +1305,22 @@ def test_growth_log_deduplicates_entries() -> None:
     with _db_session() as db:
         user, _ = _setup(db)
         from anima_server.services.agent.self_model import (
-            seed_self_model, append_growth_log_entry, get_self_model_block,
+            append_growth_log_entry,
+            get_self_model_block,
+            seed_self_model,
         )
 
         seed_self_model(db, user_id=user.id)
         result1 = append_growth_log_entry(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             entry="Learned that user prefers concise responses",
         )
         assert result1 is not None
 
         result2 = append_growth_log_entry(
-            db, user_id=user.id,
+            db,
+            user_id=user.id,
             entry="Learned that user prefers concise responses",
         )
         assert result2 is None
@@ -1228,10 +1348,11 @@ def test_per_user_lock_is_stable() -> None:
 
 
 def test_malformed_stream_args_produce_error() -> None:
-    from anima_server.services.agent.adapters.openai_compatible import (
-        MalformedToolArgumentsError, _parse_stream_arguments,
-    )
     import pytest
+    from anima_server.services.agent.adapters.openai_compatible import (
+        MalformedToolArgumentsError,
+        _parse_stream_arguments,
+    )
 
     result = _parse_stream_arguments('{"key": "value"}')
     assert result == {"key": "value"}
@@ -1248,6 +1369,7 @@ def test_malformed_stream_args_produce_error() -> None:
 
 def test_executor_rejects_parse_error_args() -> None:
     import asyncio
+
     from anima_server.services.agent.executor import ToolExecutor
     from anima_server.services.agent.runtime_types import ToolCall
     from anima_server.services.agent.tools import current_datetime
@@ -1275,17 +1397,36 @@ def test_recall_memory_exact_match() -> None:
         user, thread = _setup(db)
         from anima_server.models import MemoryItem
 
-        db.add(MemoryItem(user_id=user.id, content="User's sister is named Alice",
-               category="fact", importance=3, source="extraction"))
-        db.add(MemoryItem(user_id=user.id, content="User likes hiking on weekends",
-               category="preference", importance=2, source="extraction"))
+        db.add(
+            MemoryItem(
+                user_id=user.id,
+                content="User's sister is named Alice",
+                category="fact",
+                importance=3,
+                source="extraction",
+            )
+        )
+        db.add(
+            MemoryItem(
+                user_id=user.id,
+                content="User likes hiking on weekends",
+                category="preference",
+                importance=2,
+                source="extraction",
+            )
+        )
         db.flush()
 
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             result = recall_memory("sister")
             assert "Alice" in result
             assert "sister" in result.lower()
@@ -1296,11 +1437,16 @@ def test_recall_memory_exact_match() -> None:
 def test_recall_memory_no_match() -> None:
     with _db_session() as db:
         user, thread = _setup(db)
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             result = recall_memory("quantum physics")
             assert "no memories found" in result.lower()
         finally:
@@ -1312,17 +1458,36 @@ def test_recall_memory_category_filter() -> None:
         user, thread = _setup(db)
         from anima_server.models import MemoryItem
 
-        db.add(MemoryItem(user_id=user.id, content="User prefers dark mode",
-               category="preference", importance=2, source="extraction"))
-        db.add(MemoryItem(user_id=user.id, content="User works at a startup",
-               category="fact", importance=3, source="extraction"))
+        db.add(
+            MemoryItem(
+                user_id=user.id,
+                content="User prefers dark mode",
+                category="preference",
+                importance=2,
+                source="extraction",
+            )
+        )
+        db.add(
+            MemoryItem(
+                user_id=user.id,
+                content="User works at a startup",
+                category="fact",
+                importance=3,
+                source="extraction",
+            )
+        )
         db.flush()
 
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             # Search with category filter — only preferences
             result = recall_memory("dark mode", category="preference")
             assert "dark mode" in result.lower()
@@ -1335,18 +1500,27 @@ def test_recall_memory_episode_search() -> None:
         user, thread = _setup(db)
         from anima_server.models import MemoryEpisode
 
-        db.add(MemoryEpisode(
-            user_id=user.id, thread_id=thread.id,
-            date="2026-03-10", summary="Discussed weekend hiking plans and trail recommendations",
-            significance_score=3,
-        ))
+        db.add(
+            MemoryEpisode(
+                user_id=user.id,
+                thread_id=thread.id,
+                date="2026-03-10",
+                summary="Discussed weekend hiking plans and trail recommendations",
+                significance_score=3,
+            )
+        )
         db.flush()
 
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             result = recall_memory("hiking")
             assert "hiking" in result.lower()
             assert "Episode" in result
@@ -1359,15 +1533,27 @@ def test_recall_memory_word_overlap_match() -> None:
         user, thread = _setup(db)
         from anima_server.models import MemoryItem
 
-        db.add(MemoryItem(user_id=user.id, content="User enjoys running marathons every spring",
-               category="preference", importance=3, source="extraction"))
+        db.add(
+            MemoryItem(
+                user_id=user.id,
+                content="User enjoys running marathons every spring",
+                category="preference",
+                importance=3,
+                source="extraction",
+            )
+        )
         db.flush()
 
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             result = recall_memory("running marathons")
             assert "marathon" in result.lower()
         finally:
@@ -1377,11 +1563,16 @@ def test_recall_memory_word_overlap_match() -> None:
 def test_recall_memory_empty_query() -> None:
     with _db_session() as db:
         user, thread = _setup(db)
-        from anima_server.services.agent.tool_context import set_tool_context, clear_tool_context, ToolContext
-        set_tool_context(ToolContext(
-            db=db, user_id=user.id, thread_id=thread.id))
+        from anima_server.services.agent.tool_context import (
+            ToolContext,
+            clear_tool_context,
+            set_tool_context,
+        )
+
+        set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=thread.id))
         try:
             from anima_server.services.agent.tools import recall_memory
+
             result = recall_memory("")
             assert "provide" in result.lower()
         finally:
@@ -1409,7 +1600,6 @@ def test_encrypted_core_requires_passphrase() -> None:
 
 def test_encrypted_core_requires_sqlcipher() -> None:
     """core_require_encryption=True with passphrase but no sqlcipher3 should raise RuntimeError."""
-    import importlib
     from unittest.mock import patch
 
     with patch("anima_server.db.session.settings") as mock_settings:
@@ -1420,6 +1610,7 @@ def test_encrypted_core_requires_sqlcipher() -> None:
 
         # Block sqlcipher3 import
         import builtins
+
         real_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -1429,15 +1620,17 @@ def test_encrypted_core_requires_sqlcipher() -> None:
 
         from anima_server.db.session import _make_engine
 
-        with patch.object(builtins, "__import__", side_effect=mock_import):
-            with pytest.raises(RuntimeError, match="sqlcipher3 is not installed"):
-                _make_engine()
+        with (
+            patch.object(builtins, "__import__", side_effect=mock_import),
+            pytest.raises(RuntimeError, match="sqlcipher3 is not installed"),
+        ):
+            _make_engine()
 
 
 def test_encrypted_core_fallback_without_enforcement() -> None:
     """Without core_require_encryption, missing sqlcipher3 should fall back gracefully."""
-    from unittest.mock import patch
     import builtins
+    from unittest.mock import patch
 
     with patch("anima_server.db.session.settings") as mock_settings:
         mock_settings.database_url = "sqlite://"

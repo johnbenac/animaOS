@@ -4,19 +4,17 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import MemoryItem, User
 from anima_server.services.agent.memory_store import (
     _retrieval_score,
-    get_memory_items,
     get_memory_items_scored,
     touch_memory_items,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @contextmanager
@@ -53,14 +51,24 @@ def _make_user(db: Session) -> User:
 def test_retrieval_score_importance_matters() -> None:
     now = datetime.now(UTC)
     high = MemoryItem(
-        user_id=1, content="important", category="fact",
-        importance=5, source="user", reference_count=0,
-        created_at=now, updated_at=now,
+        user_id=1,
+        content="important",
+        category="fact",
+        importance=5,
+        source="user",
+        reference_count=0,
+        created_at=now,
+        updated_at=now,
     )
     low = MemoryItem(
-        user_id=1, content="trivial", category="fact",
-        importance=1, source="user", reference_count=0,
-        created_at=now, updated_at=now,
+        user_id=1,
+        content="trivial",
+        category="fact",
+        importance=1,
+        source="user",
+        reference_count=0,
+        created_at=now,
+        updated_at=now,
     )
     assert _retrieval_score(high, now) > _retrieval_score(low, now)
 
@@ -68,14 +76,24 @@ def test_retrieval_score_importance_matters() -> None:
 def test_retrieval_score_recency_decays() -> None:
     now = datetime.now(UTC)
     recent = MemoryItem(
-        user_id=1, content="new", category="fact",
-        importance=3, source="user", reference_count=0,
-        created_at=now, updated_at=now,
+        user_id=1,
+        content="new",
+        category="fact",
+        importance=3,
+        source="user",
+        reference_count=0,
+        created_at=now,
+        updated_at=now,
     )
     old = MemoryItem(
-        user_id=1, content="old", category="fact",
-        importance=3, source="user", reference_count=0,
-        created_at=now - timedelta(days=60), updated_at=now,
+        user_id=1,
+        content="old",
+        category="fact",
+        importance=3,
+        source="user",
+        reference_count=0,
+        created_at=now - timedelta(days=60),
+        updated_at=now,
     )
     assert _retrieval_score(recent, now) > _retrieval_score(old, now)
 
@@ -83,15 +101,25 @@ def test_retrieval_score_recency_decays() -> None:
 def test_retrieval_score_access_frequency_helps() -> None:
     now = datetime.now(UTC)
     accessed = MemoryItem(
-        user_id=1, content="used", category="fact",
-        importance=3, source="user", reference_count=10,
+        user_id=1,
+        content="used",
+        category="fact",
+        importance=3,
+        source="user",
+        reference_count=10,
         last_referenced_at=now - timedelta(hours=1),
-        created_at=now - timedelta(days=30), updated_at=now,
+        created_at=now - timedelta(days=30),
+        updated_at=now,
     )
     unused = MemoryItem(
-        user_id=1, content="unused", category="fact",
-        importance=3, source="user", reference_count=0,
-        created_at=now - timedelta(days=30), updated_at=now,
+        user_id=1,
+        content="unused",
+        category="fact",
+        importance=3,
+        source="user",
+        reference_count=0,
+        created_at=now - timedelta(days=30),
+        updated_at=now,
     )
     assert _retrieval_score(accessed, now) > _retrieval_score(unused, now)
 
@@ -103,16 +131,26 @@ def test_scored_retrieval_returns_items_in_score_order() -> None:
 
         # Low importance, old
         item_low = MemoryItem(
-            user_id=user.id, content="casual mention", category="fact",
-            importance=1, source="extraction", reference_count=0,
-            created_at=now - timedelta(days=90), updated_at=now,
+            user_id=user.id,
+            content="casual mention",
+            category="fact",
+            importance=1,
+            source="extraction",
+            reference_count=0,
+            created_at=now - timedelta(days=90),
+            updated_at=now,
         )
         # High importance, recent
         item_high = MemoryItem(
-            user_id=user.id, content="core identity", category="fact",
-            importance=5, source="user", reference_count=5,
+            user_id=user.id,
+            content="core identity",
+            category="fact",
+            importance=5,
+            source="user",
+            reference_count=5,
             last_referenced_at=now - timedelta(hours=1),
-            created_at=now - timedelta(days=1), updated_at=now,
+            created_at=now - timedelta(days=1),
+            updated_at=now,
         )
         db.add_all([item_low, item_high])
         db.flush()
@@ -129,9 +167,14 @@ def test_touch_memory_items_updates_tracking() -> None:
         now = datetime.now(UTC)
 
         item = MemoryItem(
-            user_id=user.id, content="test fact", category="fact",
-            importance=3, source="user", reference_count=0,
-            created_at=now, updated_at=now,
+            user_id=user.id,
+            content="test fact",
+            category="fact",
+            importance=3,
+            source="user",
+            reference_count=0,
+            created_at=now,
+            updated_at=now,
         )
         db.add(item)
         db.flush()

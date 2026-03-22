@@ -3,13 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     LargeBinary,
     String,
     Text,
@@ -31,8 +31,7 @@ class AgentThread(Base):
         nullable=False,
         unique=True,
     )
-    status: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="active")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -55,12 +54,12 @@ class AgentThread(Base):
         server_default=text("1"),
     )
 
-    messages: Mapped[list["AgentMessage"]] = relationship(
+    messages: Mapped[list[AgentMessage]] = relationship(
         back_populates="thread",
         cascade="all, delete-orphan",
         order_by="AgentMessage.sequence_id",
     )
-    runs: Mapped[list["AgentRun"]] = relationship(
+    runs: Mapped[list[AgentRun]] = relationship(
         back_populates="thread",
         cascade="all, delete-orphan",
         order_by="AgentRun.started_at",
@@ -82,8 +81,7 @@ class AgentRun(Base):
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str] = mapped_column(String(255), nullable=False)
     mode: Mapped[str] = mapped_column(String(24), nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="running")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="running")
     stop_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(
@@ -96,8 +94,7 @@ class AgentRun(Base):
         nullable=True,
     )
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    completion_tokens: Mapped[int | None] = mapped_column(
-        Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pending_approval_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("agent_messages.id", ondelete="SET NULL"),
@@ -105,7 +102,7 @@ class AgentRun(Base):
     )
 
     thread: Mapped[AgentThread] = relationship(back_populates="runs")
-    steps: Mapped[list["AgentStep"]] = relationship(
+    steps: Mapped[list[AgentStep]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         order_by="AgentStep.step_index",
@@ -114,8 +111,9 @@ class AgentRun(Base):
 
 class AgentStep(Base):
     __tablename__ = "agent_steps"
-    __table_args__ = (UniqueConstraint("run_id", "step_index",
-                      name="uq_agent_steps_run_id_step_index"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "step_index", name="uq_agent_steps_run_id_step_index"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     run_id: Mapped[int] = mapped_column(
@@ -128,14 +126,10 @@ class AgentStep(Base):
     )
     step_index: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
-    request_json: Mapped[dict[str, object]
-                         ] = mapped_column(JSON, nullable=False)
-    response_json: Mapped[dict[str, object]
-                          ] = mapped_column(JSON, nullable=False)
-    tool_calls_json: Mapped[list[dict[str, object]]
-                            | None] = mapped_column(JSON, nullable=True)
-    usage_json: Mapped[dict[str, object] |
-                       None] = mapped_column(JSON, nullable=True)
+    request_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    response_json: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    tool_calls_json: Mapped[list[dict[str, object]] | None] = mapped_column(JSON, nullable=True)
+    usage_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -149,8 +143,9 @@ class AgentStep(Base):
 class AgentMessage(Base):
     __tablename__ = "agent_messages"
     __table_args__ = (
-        UniqueConstraint("thread_id", "sequence_id",
-                         name="uq_agent_messages_thread_id_sequence_id"),
+        UniqueConstraint(
+            "thread_id", "sequence_id", name="uq_agent_messages_thread_id_sequence_id"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -169,15 +164,11 @@ class AgentMessage(Base):
     sequence_id: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[str] = mapped_column(String(24), nullable=False)
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
-    content_json: Mapped[dict[str, object] |
-                         None] = mapped_column(JSON, nullable=True)
+    content_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     tool_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    tool_call_id: Mapped[str | None] = mapped_column(
-        String(128), nullable=True)
-    tool_args_json: Mapped[dict[str, object] |
-                           None] = mapped_column(JSON, nullable=True)
-    is_in_context: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True)
+    tool_call_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    tool_args_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    is_in_context: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     token_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -191,8 +182,7 @@ class AgentMessage(Base):
 class MemoryItem(Base):
     __tablename__ = "memory_items"
     __table_args__ = (
-        Index("ix_memory_items_user_category_active",
-              "user_id", "category", "superseded_by"),
+        Index("ix_memory_items_user_category_active", "user_id", "category", "superseded_by"),
         Index("ix_memory_items_user_heat", "user_id", "heat"),
     )
 
@@ -203,32 +193,45 @@ class MemoryItem(Base):
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(
-        String(24), nullable=False,
+        String(24),
+        nullable=False,
     )  # fact, preference, goal, relationship, focus
     importance: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3,
+        Integer,
+        nullable=False,
+        default=3,
     )  # 1-5
     source: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="extraction",
+        String(24),
+        nullable=False,
+        default="extraction",
     )  # extraction, user, reflection
     superseded_by: Mapped[int | None] = mapped_column(
         ForeignKey("memory_items.id", ondelete="SET NULL"),
         nullable=True,
     )
     last_referenced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     reference_count: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0,
+        Integer,
+        nullable=False,
+        default=0,
     )
     embedding_json: Mapped[list[float] | None] = mapped_column(
-        JSON, nullable=True,
+        JSON,
+        nullable=True,
     )
     tags_json: Mapped[list[str] | None] = mapped_column(
-        JSON, nullable=True,
+        JSON,
+        nullable=True,
     )
     heat: Mapped[float] = mapped_column(
-        Float, nullable=False, default=0.0, server_default=text("0.0"),
+        Float,
+        nullable=False,
+        default=0.0,
+        server_default=text("0.0"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -241,7 +244,7 @@ class MemoryItem(Base):
         server_default=func.now(),
     )
 
-    tag_entries: Mapped[list["MemoryItemTag"]] = relationship(
+    tag_entries: Mapped[list[MemoryItemTag]] = relationship(
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
@@ -260,25 +263,31 @@ class MemoryEpisode(Base):
         nullable=True,
     )
     date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD
-    time: Mapped[str | None] = mapped_column(
-        String(8), nullable=True)  # HH:MM:SS
+    time: Mapped[str | None] = mapped_column(String(8), nullable=True)  # HH:MM:SS
     topics_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
-    emotional_arc: Mapped[str | None] = mapped_column(
-        String(128), nullable=True)
+    emotional_arc: Mapped[str | None] = mapped_column(String(128), nullable=True)
     significance_score: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3,
+        Integer,
+        nullable=False,
+        default=3,
     )  # 1-5
     turn_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     message_indices_json: Mapped[list[int] | None] = mapped_column(
-        JSON, nullable=True,
+        JSON,
+        nullable=True,
     )  # 1-based indices of included logs (batch segmentation)
     segmentation_method: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="sequential",
+        String(20),
+        nullable=False,
+        default="sequential",
         server_default=text("'sequential'"),
     )  # "sequential" or "batch_llm"
     needs_regeneration: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False, server_default=text("0"),
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -308,10 +317,11 @@ class SessionNote(Base):
     key: Mapped[str] = mapped_column(String(128), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     note_type: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="observation",
+        String(24),
+        nullable=False,
+        default="observation",
     )  # observation, plan, context, emotion
-    is_active: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     promoted_to_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("memory_items.id", ondelete="SET NULL"),
         nullable=True,
@@ -336,10 +346,7 @@ class MemoryItemTag(Base):
     """
 
     __tablename__ = "memory_item_tags"
-    __table_args__ = (
-        UniqueConstraint("item_id", "tag",
-                         name="uq_memory_item_tags_item_tag"),
-    )
+    __table_args__ = (UniqueConstraint("item_id", "tag", name="uq_memory_item_tags_item_tag"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     tag: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -368,9 +375,7 @@ class MemoryClaim(Base):
     """
 
     __tablename__ = "memory_claims"
-    __table_args__ = (
-        Index("ix_memory_claims_user_canonical", "user_id", "canonical_key"),
-    )
+    __table_args__ = (Index("ix_memory_claims_user_canonical", "user_id", "canonical_key"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -379,35 +384,50 @@ class MemoryClaim(Base):
         index=True,
     )
     subject_type: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="user",
+        String(24),
+        nullable=False,
+        default="user",
     )  # user, other_person, entity
     namespace: Mapped[str] = mapped_column(
-        String(24), nullable=False,
+        String(24),
+        nullable=False,
     )  # fact, preference, goal, relationship
     slot: Mapped[str] = mapped_column(
-        String(64), nullable=False,
+        String(64),
+        nullable=False,
     )  # age, occupation, location, etc.
     value_text: Mapped[str] = mapped_column(Text, nullable=False)
     value_json: Mapped[dict[str, object] | None] = mapped_column(
-        JSON, nullable=True,
+        JSON,
+        nullable=True,
     )
     polarity: Mapped[str] = mapped_column(
-        String(12), nullable=False, default="positive",
+        String(12),
+        nullable=False,
+        default="positive",
     )  # positive, negative, neutral
     confidence: Mapped[float] = mapped_column(
-        nullable=False, default=0.8,
+        nullable=False,
+        default=0.8,
     )
     status: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="active",
+        String(16),
+        nullable=False,
+        default="active",
     )  # active, superseded, retracted
     canonical_key: Mapped[str] = mapped_column(
-        String(255), nullable=False,
+        String(255),
+        nullable=False,
     )  # e.g. "user:fact:occupation"
     source_kind: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="extraction",
+        String(24),
+        nullable=False,
+        default="extraction",
     )  # extraction, user, reflection
     extractor: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="regex",
+        String(32),
+        nullable=False,
+        default="regex",
     )  # regex, llm, manual
     memory_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("memory_items.id", ondelete="SET NULL"),
@@ -428,7 +448,7 @@ class MemoryClaim(Base):
         server_default=func.now(),
     )
 
-    evidence: Mapped[list["MemoryClaimEvidence"]] = relationship(
+    evidence: Mapped[list[MemoryClaimEvidence]] = relationship(
         back_populates="claim",
         cascade="all, delete-orphan",
     )
@@ -447,7 +467,8 @@ class MemoryClaimEvidence(Base):
     )
     source_text: Mapped[str] = mapped_column(Text, nullable=False)
     source_kind: Mapped[str] = mapped_column(
-        String(24), nullable=False,
+        String(24),
+        nullable=False,
     )  # user_message, extraction, reflection
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -460,9 +481,7 @@ class MemoryClaimEvidence(Base):
 
 class MemoryDailyLog(Base):
     __tablename__ = "memory_daily_logs"
-    __table_args__ = (
-        Index("ix_memory_daily_logs_user_date", "user_id", "date"),
-    )
+    __table_args__ = (Index("ix_memory_daily_logs_user_date", "user_id", "date"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -492,8 +511,7 @@ class MemoryVector(Base):
         index=True,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="fact")
+    category: Mapped[str] = mapped_column(String(24), nullable=False, default="fact")
     importance: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
@@ -519,16 +537,22 @@ class ForgetAuditLog(Base):
         server_default=func.now(),
     )
     trigger: Mapped[str] = mapped_column(
-        String(32), nullable=False,
+        String(32),
+        nullable=False,
     )  # user_request, topic_forget, suppression
     scope: Mapped[str] = mapped_column(
-        String(255), nullable=False,
+        String(255),
+        nullable=False,
     )  # single, topic:{topic}, entity:{name}
     items_forgotten: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0,
+        Integer,
+        nullable=False,
+        default=0,
     )
     derived_refs_affected: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0,
+        Integer,
+        nullable=False,
+        default=0,
     )
 
 
@@ -536,30 +560,36 @@ class BackgroundTaskRun(Base):
     """Tracked background task execution for debugging and monitoring."""
 
     __tablename__ = "background_task_runs"
-    __table_args__ = (
-        Index("ix_bg_task_runs_user_status", "user_id", "status"),
-    )
+    __table_args__ = (Index("ix_bg_task_runs_user_status", "user_id", "status"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
     )
     task_type: Mapped[str] = mapped_column(
-        String(50), nullable=False,
+        String(50),
+        nullable=False,
     )  # consolidation, graph_ingestion, heat_decay, episode_gen, etc.
     status: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=text("'pending'"),
+        String(20),
+        nullable=False,
+        server_default=text("'pending'"),
     )  # pending, running, completed, failed
     result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(),
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
     )
 
 
@@ -573,22 +603,21 @@ class KGEntity(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     name_normalized: Mapped[str] = mapped_column(String(200), nullable=False)
     entity_type: Mapped[str] = mapped_column(
-        String(50), nullable=False, server_default=text("'unknown'"))
-    description: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("''"))
-    mentions: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1"))
-    embedding_json: Mapped[list[float] | None] = mapped_column(
-        JSON, nullable=True)
+        String(50), nullable=False, server_default=text("'unknown'")
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    mentions: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    embedding_json: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now())
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now())
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class KGRelation(Base):
@@ -601,18 +630,21 @@ class KGRelation(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     source_id: Mapped[int] = mapped_column(
-        ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False)
+        ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+    )
     destination_id: Mapped[int] = mapped_column(
-        ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False)
+        ForeignKey("kg_entities.id", ondelete="CASCADE"), nullable=False
+    )
     relation_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    mentions: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1"))
+    mentions: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     source_memory_id: Mapped[int | None] = mapped_column(
-        ForeignKey("memory_items.id", ondelete="SET NULL"), nullable=True)
+        ForeignKey("memory_items.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now())
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now())
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

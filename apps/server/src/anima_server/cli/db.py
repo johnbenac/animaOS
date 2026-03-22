@@ -4,6 +4,7 @@ Usage:
     python -m anima_server.cli.db "SELECT * FROM users"
     python -m anima_server.cli.db tables
 """
+
 from __future__ import annotations
 
 import sys
@@ -46,9 +47,7 @@ def main() -> None:
 
         # Print rows
         for str_row in str_rows:
-            line = " | ".join(
-                v[:60].ljust(widths[i]) for i, v in enumerate(str_row)
-            )
+            line = " | ".join(v[:60].ljust(widths[i]) for i, v in enumerate(str_row))
             print(line)
 
         print(f"\n({len(rows)} row{'s' if len(rows) != 1 else ''})")

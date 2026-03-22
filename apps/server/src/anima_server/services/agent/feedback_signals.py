@@ -19,19 +19,20 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from anima_server.models import AgentMessage, AgentThread, MemoryItem, SelfModelBlock
+from anima_server.models import AgentMessage, AgentThread, MemoryItem
 
 logger = logging.getLogger(__name__)
 
 _CORRECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?:no|nope),?\s+(?:I (?:said|meant|want)|that'?s (?:not|wrong))", re.IGNORECASE),
-    re.compile(r"(?:actually|wait),?\s+(?:I (?:said|meant|want)|that'?s (?:not|wrong))", re.IGNORECASE),
+    re.compile(
+        r"(?:actually|wait),?\s+(?:I (?:said|meant|want)|that'?s (?:not|wrong))", re.IGNORECASE
+    ),
     re.compile(r"that'?s not what I (?:asked|meant|said|wanted)", re.IGNORECASE),
     re.compile(r"you (?:misunderstood|got it wrong|didn'?t understand)", re.IGNORECASE),
     re.compile(r"I (?:already|just) (?:told|said|asked)", re.IGNORECASE),
@@ -111,9 +112,7 @@ def collect_feedback_signals(
 
     # Check for re-ask by comparing to recent user messages
     if thread_id is None:
-        thread = db.scalar(
-            select(AgentThread).where(AgentThread.user_id == user_id)
-        )
+        thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
         if thread is not None:
             thread_id = thread.id
 
@@ -172,35 +171,53 @@ def record_feedback_signals(
 
 _CORRECTION_EXTRACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # "actually, my X is Y" / "actually X is Y"
-    (re.compile(
-        r"(?:actually|wait|no),?\s+(?:my\s+)?(?P<topic>[a-z][a-z ]{0,30}?)\s+is\s+(?P<right>[^.?!\n]+)",
-        re.IGNORECASE,
-    ), "topic_is"),
+    (
+        re.compile(
+            r"(?:actually|wait|no),?\s+(?:my\s+)?(?P<topic>[a-z][a-z ]{0,30}?)\s+is\s+(?P<right>[^.?!\n]+)",
+            re.IGNORECASE,
+        ),
+        "topic_is",
+    ),
     # "it's Y, not X" / "it's Y not X"
-    (re.compile(
-        r"it(?:'s| is)\s+(?P<right>[^,]+?),?\s+not\s+(?P<wrong>[^.?!\n]+)",
-        re.IGNORECASE,
-    ), "right_not_wrong"),
+    (
+        re.compile(
+            r"it(?:'s| is)\s+(?P<right>[^,]+?),?\s+not\s+(?P<wrong>[^.?!\n]+)",
+            re.IGNORECASE,
+        ),
+        "right_not_wrong",
+    ),
     # "not X, it's Y" / "not X, but Y"
-    (re.compile(
-        r"not\s+(?P<wrong>[^,]+?),?\s+(?:it(?:'s| is)|but)\s+(?P<right>[^.?!\n]+)",
-        re.IGNORECASE,
-    ), "not_wrong_but_right"),
+    (
+        re.compile(
+            r"not\s+(?P<wrong>[^,]+?),?\s+(?:it(?:'s| is)|but)\s+(?P<right>[^.?!\n]+)",
+            re.IGNORECASE,
+        ),
+        "not_wrong_but_right",
+    ),
     # "no, that's wrong, it's Y" / "no, that's wrong. it's Y"
-    (re.compile(
-        r"(?:no|nope),?\s+(?:that'?s (?:wrong|not right|incorrect))[.,]?\s*(?:it(?:'s| is)\s+)?(?P<right>[^.?!\n]+)",
-        re.IGNORECASE,
-    ), "wrong_its_right"),
+    (
+        re.compile(
+            r"(?:no|nope),?\s+(?:that'?s (?:wrong|not right|incorrect))[.,]?\s*(?:it(?:'s| is)\s+)?(?P<right>[^.?!\n]+)",
+            re.IGNORECASE,
+        ),
+        "wrong_its_right",
+    ),
     # "I said X not Y" / "I meant X"
-    (re.compile(
-        r"I (?:said|meant|want)\s+(?P<right>[^,]+?)(?:,?\s+not\s+(?P<wrong>[^.?!\n]+))?$",
-        re.IGNORECASE,
-    ), "i_said"),
+    (
+        re.compile(
+            r"I (?:said|meant|want)\s+(?P<right>[^,]+?)(?:,?\s+not\s+(?P<wrong>[^.?!\n]+))?$",
+            re.IGNORECASE,
+        ),
+        "i_said",
+    ),
     # "my name is X" (standalone correction after a correction signal)
-    (re.compile(
-        r"(?:my\s+)?(?P<topic>name|age|birthday|job|occupation|city|location)\s+is\s+(?P<right>[^.?!\n]+)",
-        re.IGNORECASE,
-    ), "topic_is_simple"),
+    (
+        re.compile(
+            r"(?:my\s+)?(?P<topic>name|age|birthday|job|occupation|city|location)\s+is\s+(?P<right>[^.?!\n]+)",
+            re.IGNORECASE,
+        ),
+        "topic_is_simple",
+    ),
 )
 
 # Map topic words to memory categories + search keywords
@@ -221,6 +238,7 @@ _TOPIC_CATEGORY_MAP: dict[str, tuple[str, str]] = {
 @dataclass(frozen=True, slots=True)
 class CorrectionFact:
     """A structured correction extracted from a user message."""
+
     right: str  # the corrected (new) value
     wrong: str | None  # the old incorrect value (may be None)
     topic: str | None  # optional topic keyword (e.g. "name", "age")
@@ -264,12 +282,14 @@ def extract_correction_facts(user_message: str) -> list[CorrectionFact]:
                 continue
             seen.add(key)
 
-            results.append(CorrectionFact(
-                right=right,
-                wrong=wrong,
-                topic=topic,
-                pattern_kind=kind,
-            ))
+            results.append(
+                CorrectionFact(
+                    right=right,
+                    wrong=wrong,
+                    topic=topic,
+                    pattern_kind=kind,
+                )
+            )
 
     return results
 
@@ -279,12 +299,45 @@ def extract_correction_facts(user_message: str) -> list[CorrectionFact]:
 # ---------------------------------------------------------------------------
 
 # Words that are too generic to match against memory content
-_CORRECTION_STOPWORDS = frozenset({
-    "a", "an", "the", "i", "me", "my", "am", "is", "are", "was", "were",
-    "as", "at", "in", "to", "for", "of", "on", "with", "and", "it",
-    "that", "this", "not", "no", "but", "or", "so", "if", "its",
-    "actually", "really", "just", "now", "like",
-})
+_CORRECTION_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "i",
+        "me",
+        "my",
+        "am",
+        "is",
+        "are",
+        "was",
+        "were",
+        "as",
+        "at",
+        "in",
+        "to",
+        "for",
+        "of",
+        "on",
+        "with",
+        "and",
+        "it",
+        "that",
+        "this",
+        "not",
+        "no",
+        "but",
+        "or",
+        "so",
+        "if",
+        "its",
+        "actually",
+        "really",
+        "just",
+        "now",
+        "like",
+    }
+)
 
 _WORD_RE = re.compile(r"[a-z0-9']+")
 
@@ -292,8 +345,7 @@ _WORD_RE = re.compile(r"[a-z0-9']+")
 def _correction_tokens(text: str) -> set[str]:
     """Tokenize text into lowercase words, stripping stopwords."""
     return {
-        w for w in _WORD_RE.findall(text.lower())
-        if w not in _CORRECTION_STOPWORDS and len(w) > 1
+        w for w in _WORD_RE.findall(text.lower()) if w not in _CORRECTION_STOPWORDS and len(w) > 1
     }
 
 
@@ -368,8 +420,10 @@ def apply_memory_correction(
 
         for item in candidates:
             plaintext = df(
-                user_id, item.content,
-                table="memory_items", field="content",
+                user_id,
+                item.content,
+                table="memory_items",
+                field="content",
             )
             item_tokens = _correction_tokens(plaintext)
 
@@ -409,8 +463,10 @@ def apply_memory_correction(
 
         # Build the corrected content
         old_plaintext = df(
-            user_id, best_match.content,
-            table="memory_items", field="content",
+            user_id,
+            best_match.content,
+            table="memory_items",
+            field="content",
         )
 
         # If we know both wrong and right, do a targeted replacement in the
@@ -420,14 +476,18 @@ def apply_memory_correction(
             # Case-insensitive replacement of wrong->right within existing text
             escaped_wrong = re.escape(correction.wrong)
             new_content = re.sub(
-                escaped_wrong, correction.right, old_plaintext, count=1,
+                escaped_wrong,
+                correction.right,
+                old_plaintext,
+                count=1,
                 flags=re.IGNORECASE,
             )
         elif correction.topic:
             # Build a fact-style replacement: "Topic: right"
             # Preserve the existing memory's format if it uses "Topic: value"
             colon_match = re.match(
-                r"^([A-Za-z ]+):\s*", old_plaintext,
+                r"^([A-Za-z ]+):\s*",
+                old_plaintext,
             )
             if colon_match:
                 prefix = colon_match.group(1)
@@ -448,16 +508,20 @@ def apply_memory_correction(
                 old_item_id=best_match.id,
                 new_content=new_content,
             )
-            applied.append({
-                "old_content": old_plaintext,
-                "new_content": new_content,
-                "memory_id": best_match.id,
-            })
+            applied.append(
+                {
+                    "old_content": old_plaintext,
+                    "new_content": new_content,
+                    "memory_id": best_match.id,
+                }
+            )
             logger.info(
                 "Memory correction applied for user %s: '%s' -> '%s'",
-                user_id, old_plaintext, new_content,
+                user_id,
+                old_plaintext,
+                new_content,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Failed to supersede memory %d during correction",
                 best_match.id,

@@ -4,11 +4,10 @@ When a conversation buffer exceeds BATCH_THRESHOLD messages, the LLM groups
 messages into non-contiguous topic episodes instead of using fixed-size
 sequential chunking.
 """
+
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -86,7 +85,7 @@ async def segment_messages_batch(
 
     try:
         groups = await _call_llm_for_segmentation(messages)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM batch segmentation failed, using single-group fallback")
         return fallback
 
@@ -148,12 +147,14 @@ async def _call_llm_for_segmentation(
     )
 
     try:
-        response = await client.ainvoke([
-            SystemMessage(
-                content="You group conversation messages by topic. Respond only with a JSON array of arrays."
-            ),
-            HumanMessage(content=prompt),
-        ])
+        response = await client.ainvoke(
+            [
+                SystemMessage(
+                    content="You group conversation messages by topic. Respond only with a JSON array of arrays."
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
     finally:
         await client.aclose()
 
@@ -164,7 +165,7 @@ async def _call_llm_for_segmentation(
     return _parse_json_array(content)
 
 
-from anima_server.services.agent.json_utils import parse_json_array  # noqa: E302
+from anima_server.services.agent.json_utils import parse_json_array
 
 
 def _parse_json_array(text: str) -> list[list[int]]:

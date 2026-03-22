@@ -16,13 +16,9 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import AgentMessage, AgentRun, AgentThread, User
+from anima_server.services.agent import service as agent_service
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.persistence import (
     append_message,
@@ -48,8 +44,10 @@ from anima_server.services.agent.sequencing import reserve_message_sequences
 from anima_server.services.agent.state import AgentResult
 from anima_server.services.agent.streaming import build_approval_pending_event
 from anima_server.services.agent.tools import send_message, tool
-from anima_server.services.agent import service as agent_service
-
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -138,7 +136,8 @@ async def test_approve_terminal_tool_no_llm_call() -> None:
     )
 
     pending_call = ToolCall(
-        id="call-1", name="delete_file",
+        id="call-1",
+        name="delete_file",
         arguments={"path": "/tmp/data.txt"},
     )
 
@@ -163,18 +162,20 @@ async def test_approve_terminal_tool_no_llm_call() -> None:
 @pytest.mark.asyncio
 async def test_approve_non_terminal_tool_makes_one_llm_call() -> None:
     """Approving a non-terminal tool should execute it, then make one LLM call."""
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text="I've executed the tool for you.",
-            tool_calls=(
-                ToolCall(
-                    id="call-resp",
-                    name="send_message",
-                    arguments={"message": "I've executed the tool for you."},
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text="I've executed the tool for you.",
+                tool_calls=(
+                    ToolCall(
+                        id="call-resp",
+                        name="send_message",
+                        arguments={"message": "I've executed the tool for you."},
+                    ),
                 ),
             ),
-        ),
-    ])
+        ]
+    )
 
     @tool
     def search_memory(query: str) -> str:
@@ -192,7 +193,8 @@ async def test_approve_non_terminal_tool_makes_one_llm_call() -> None:
     )
 
     pending_call = ToolCall(
-        id="call-1", name="search_memory",
+        id="call-1",
+        name="search_memory",
         arguments={"query": "user preferences"},
     )
 
@@ -215,19 +217,20 @@ async def test_approve_non_terminal_tool_makes_one_llm_call() -> None:
 @pytest.mark.asyncio
 async def test_deny_produces_companion_response() -> None:
     """Denying a tool should inject error and produce an LLM response."""
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text="I understand you don't want me to do that.",
-            tool_calls=(
-                ToolCall(
-                    id="call-resp",
-                    name="send_message",
-                    arguments={
-                        "message": "I understand you don't want me to do that."},
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text="I understand you don't want me to do that.",
+                tool_calls=(
+                    ToolCall(
+                        id="call-resp",
+                        name="send_message",
+                        arguments={"message": "I understand you don't want me to do that."},
+                    ),
                 ),
             ),
-        ),
-    ])
+        ]
+    )
 
     @tool
     def delete_file(path: str) -> str:
@@ -245,7 +248,8 @@ async def test_deny_produces_companion_response() -> None:
     )
 
     pending_call = ToolCall(
-        id="call-1", name="delete_file",
+        id="call-1",
+        name="delete_file",
         arguments={"path": "/tmp/data.txt"},
     )
 
@@ -260,7 +264,8 @@ async def test_deny_produces_companion_response() -> None:
     assert len(adapter.requests) == 1  # one LLM call to produce response
     # The tool result injected into context should contain denial message
     tool_messages = [
-        msg for msg in adapter.requests[0].messages
+        msg
+        for msg in adapter.requests[0].messages
         if hasattr(msg, "content") and "denied by user" in str(getattr(msg, "content", "")).lower()
     ]
     assert len(tool_messages) >= 1
@@ -273,10 +278,11 @@ async def test_deny_produces_companion_response() -> None:
 
 def test_save_and_load_approval_checkpoint() -> None:
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         pending_call = ToolCall(
-            id="call-1", name="delete_file",
+            id="call-1",
+            name="delete_file",
             arguments={"path": "/tmp/data.txt"},
         )
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
@@ -307,7 +313,7 @@ def test_save_and_load_approval_checkpoint() -> None:
 
 def test_load_checkpoint_returns_none_for_completed_run() -> None:
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        _thread, run, _user = _setup_thread_and_run(db)
         run.status = "completed"
         db.add(run)
         db.commit()
@@ -317,16 +323,21 @@ def test_load_checkpoint_returns_none_for_completed_run() -> None:
 
 def test_clear_checkpoint() -> None:
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         pending_call = ToolCall(
-            id="call-1", name="delete_file",
+            id="call-1",
+            name="delete_file",
             arguments={"path": "/tmp/demo.txt"},
         )
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
         approval_msg = save_approval_checkpoint(
-            db, thread=thread, run=run, tool_call=pending_call,
-            step_id=None, sequence_id=seq_id,
+            db,
+            thread=thread,
+            run=run,
+            tool_call=pending_call,
+            step_id=None,
+            sequence_id=seq_id,
         )
         db.commit()
 
@@ -344,16 +355,21 @@ def test_clear_checkpoint() -> None:
 
 def test_cancel_awaiting_approval_run_clears_checkpoint() -> None:
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         pending_call = ToolCall(
-            id="call-1", name="delete_file",
+            id="call-1",
+            name="delete_file",
             arguments={"path": "/tmp/demo.txt"},
         )
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
         approval_msg = save_approval_checkpoint(
-            db, thread=thread, run=run, tool_call=pending_call,
-            step_id=None, sequence_id=seq_id,
+            db,
+            thread=thread,
+            run=run,
+            tool_call=pending_call,
+            step_id=None,
+            sequence_id=seq_id,
         )
         db.commit()
         assert run.status == "awaiting_approval"
@@ -376,24 +392,37 @@ def test_cancel_awaiting_approval_run_clears_checkpoint() -> None:
 def test_approval_role_excluded_from_thread_history() -> None:
     """role='approval' messages must not appear in load_thread_history."""
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         # Add a normal user message
         append_message(
-            db, thread=thread, run_id=run.id, step_id=None,
-            sequence_id=1, role="user", content_text="hello",
+            db,
+            thread=thread,
+            run_id=run.id,
+            step_id=None,
+            sequence_id=1,
+            role="user",
+            content_text="hello",
         )
         # Add an approval message
         append_message(
-            db, thread=thread, run_id=run.id, step_id=None,
-            sequence_id=2, role="approval",
+            db,
+            thread=thread,
+            run_id=run.id,
+            step_id=None,
+            sequence_id=2,
+            role="approval",
             content_text="Approval required for tool: delete_file",
             tool_name="delete_file",
         )
         # Add an assistant message
         append_message(
-            db, thread=thread, run_id=run.id, step_id=None,
-            sequence_id=3, role="assistant",
+            db,
+            thread=thread,
+            run_id=run.id,
+            step_id=None,
+            sequence_id=3,
+            role="assistant",
             content_text="Sure thing!",
         )
         db.commit()
@@ -413,16 +442,21 @@ def test_approval_role_excluded_from_thread_history() -> None:
 def test_double_load_after_clear_returns_none() -> None:
     """After clearing a checkpoint, loading it again returns None."""
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         pending_call = ToolCall(
-            id="call-1", name="delete_file",
+            id="call-1",
+            name="delete_file",
             arguments={"path": "/tmp/demo.txt"},
         )
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
         approval_msg = save_approval_checkpoint(
-            db, thread=thread, run=run, tool_call=pending_call,
-            step_id=None, sequence_id=seq_id,
+            db,
+            thread=thread,
+            run=run,
+            tool_call=pending_call,
+            step_id=None,
+            sequence_id=seq_id,
         )
         db.commit()
 
@@ -476,7 +510,7 @@ class _ApproveResumeRunner:
     def prepare_system_prompt(self) -> str:
         return ""
 
-    async def resume_after_approval(self, **kwargs) -> AgentResult:  # noqa: ANN003
+    async def resume_after_approval(self, **kwargs) -> AgentResult:
         self.resume_calls.append(kwargs)
         return self._canned
 
@@ -499,8 +533,7 @@ async def test_approve_or_deny_turn_persists_and_finalizes(
                 step_index=0,
                 assistant_text="File deleted.",
                 tool_calls=(
-                    ToolCall(id="call-1", name="delete_file",
-                             arguments={"path": "/tmp/data.txt"}),
+                    ToolCall(id="call-1", name="delete_file", arguments={"path": "/tmp/data.txt"}),
                 ),
                 tool_results=(
                     ToolExecutionResult(
@@ -517,30 +550,37 @@ async def test_approve_or_deny_turn_persists_and_finalizes(
 
     # Patch module-level singletons used by approve_or_deny_turn.
     monkeypatch.setattr(agent_service, "get_or_build_runner", lambda: runner)
-    monkeypatch.setattr(
-        agent_service, "_run_post_turn_hooks", lambda **kw: None)
+    monkeypatch.setattr(agent_service, "_run_post_turn_hooks", lambda **kw: None)
 
     with _db_session() as db:
         thread, run, user = _setup_thread_and_run(db)
 
         # Create a real approval checkpoint.
         pending_call = ToolCall(
-            id="call-1", name="delete_file",
+            id="call-1",
+            name="delete_file",
             arguments={"path": "/tmp/data.txt"},
         )
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
         save_approval_checkpoint(
-            db, thread=thread, run=run,
-            tool_call=pending_call, step_id=None, sequence_id=seq_id,
+            db,
+            thread=thread,
+            run=run,
+            tool_call=pending_call,
+            step_id=None,
+            sequence_id=seq_id,
         )
         db.commit()
         assert run.status == "awaiting_approval"
 
         # Call the service function.
         from anima_server.services.agent import approve_or_deny_turn
+
         result = await approve_or_deny_turn(
-            run_id=run.id, user_id=user.id,
-            approved=True, db=db,
+            run_id=run.id,
+            user_id=user.id,
+            approved=True,
+            db=db,
         )
 
     assert result.response == "File deleted."
@@ -555,7 +595,10 @@ async def test_approve_or_deny_turn_raises_on_wrong_user(
 ) -> None:
     """Service must reject approval from a different user."""
     canned = AgentResult(
-        response="x", model="m", provider="p", stop_reason="end_turn",
+        response="x",
+        model="m",
+        provider="p",
+        stop_reason="end_turn",
         step_traces=[],
     )
     runner = _ApproveResumeRunner(canned)
@@ -566,16 +609,23 @@ async def test_approve_or_deny_turn_raises_on_wrong_user(
         pending_call = ToolCall(id="c-1", name="t", arguments={})
         seq_id = reserve_message_sequences(db, thread_id=thread.id, count=1)
         save_approval_checkpoint(
-            db, thread=thread, run=run,
-            tool_call=pending_call, step_id=None, sequence_id=seq_id,
+            db,
+            thread=thread,
+            run=run,
+            tool_call=pending_call,
+            step_id=None,
+            sequence_id=seq_id,
         )
         db.commit()
 
         from anima_server.services.agent import approve_or_deny_turn
+
         with pytest.raises(PermissionError):
             await approve_or_deny_turn(
-                run_id=run.id, user_id=user.id + 999,
-                approved=True, db=db,
+                run_id=run.id,
+                user_id=user.id + 999,
+                approved=True,
+                db=db,
             )
 
 
@@ -585,23 +635,29 @@ async def test_approve_or_deny_turn_raises_on_no_checkpoint(
 ) -> None:
     """Calling approve on a run with no checkpoint should raise ValueError."""
     canned = AgentResult(
-        response="x", model="m", provider="p", stop_reason="end_turn",
+        response="x",
+        model="m",
+        provider="p",
+        stop_reason="end_turn",
         step_traces=[],
     )
     runner = _ApproveResumeRunner(canned)
     monkeypatch.setattr(agent_service, "get_or_build_runner", lambda: runner)
 
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        _thread, run, user = _setup_thread_and_run(db)
         run.status = "completed"
         db.add(run)
         db.commit()
 
         from anima_server.services.agent import approve_or_deny_turn
+
         with pytest.raises(ValueError, match="not awaiting approval"):
             await approve_or_deny_turn(
-                run_id=run.id, user_id=user.id,
-                approved=True, db=db,
+                run_id=run.id,
+                user_id=user.id,
+                approved=True,
+                db=db,
             )
 
 
@@ -613,7 +669,7 @@ async def test_approve_or_deny_turn_raises_on_no_checkpoint(
 def test_persist_approval_checkpoint_creates_message_and_sets_status() -> None:
     """Verify the service helper persists step traces + approval checkpoint."""
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         result = AgentResult(
             response="",
@@ -625,8 +681,9 @@ def test_persist_approval_checkpoint_creates_message_and_sets_status() -> None:
                     step_index=0,
                     assistant_text="I need to delete a file.",
                     tool_calls=(
-                        ToolCall(id="call-1", name="delete_file",
-                                 arguments={"path": "/tmp/data.txt"}),
+                        ToolCall(
+                            id="call-1", name="delete_file", arguments={"path": "/tmp/data.txt"}
+                        ),
                     ),
                     tool_results=(
                         ToolExecutionResult(
@@ -641,7 +698,10 @@ def test_persist_approval_checkpoint_creates_message_and_sets_status() -> None:
         )
 
         pending_tc = agent_service._persist_approval_checkpoint(
-            db, thread=thread, run=run, result=result,
+            db,
+            thread=thread,
+            run=run,
+            result=result,
             initial_sequence_id=1,
         )
         # Must return the ToolCall that was checkpointed.
@@ -653,11 +713,7 @@ def test_persist_approval_checkpoint_creates_message_and_sets_status() -> None:
         assert run.status == "awaiting_approval"
         assert run.pending_approval_message_id is not None
 
-        approval_msgs = (
-            db.query(AgentMessage)
-            .filter_by(role="approval")
-            .all()
-        )
+        approval_msgs = db.query(AgentMessage).filter_by(role="approval").all()
         assert len(approval_msgs) == 1
         assert approval_msgs[0].tool_name == "delete_file"
 
@@ -665,7 +721,7 @@ def test_persist_approval_checkpoint_creates_message_and_sets_status() -> None:
 def test_persist_approval_checkpoint_fails_gracefully_without_tool_call() -> None:
     """If approval trace has no matching tool call, run should be marked failed."""
     with _db_session() as db:
-        thread, run, user = _setup_thread_and_run(db)
+        thread, run, _user = _setup_thread_and_run(db)
 
         # Result with no tool_calls at all.
         result = AgentResult(
@@ -679,7 +735,10 @@ def test_persist_approval_checkpoint_fails_gracefully_without_tool_call() -> Non
         )
 
         pending_tc = agent_service._persist_approval_checkpoint(
-            db, thread=thread, run=run, result=result,
+            db,
+            thread=thread,
+            run=run,
+            result=result,
             initial_sequence_id=1,
         )
         assert pending_tc is None

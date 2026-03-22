@@ -3,10 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from jinja2 import UndefinedError
-
-from anima_server.services.agent.messages import build_conversation_messages
 from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.messages import build_conversation_messages
 from anima_server.services.agent.state import StoredMessage
 from anima_server.services.agent.system_prompt import (
     PromptTemplateError,
@@ -15,6 +13,7 @@ from anima_server.services.agent.system_prompt import (
     build_system_prompt,
     render_system_prompt_template,
 )
+from jinja2 import UndefinedError
 
 
 def test_build_system_prompt_includes_structured_sections() -> None:
@@ -45,7 +44,10 @@ def test_build_system_prompt_includes_structured_sections() -> None:
     assert "2026-03-14T09:30:00+00:00" in prompt
     assert "Follow the instruction hierarchy" in prompt
     assert "Maintain the active persona consistently" in prompt
-    assert "Do not fabricate facts, tool usage, permissions, external actions, or completed work." in prompt
+    assert (
+        "Do not fabricate facts, tool usage, permissions, external actions, or completed work."
+        in prompt
+    )
     assert 'Do not default to generic "as an AI" disclaimers' in prompt
     assert "A thoughtful, capable companion" in prompt
     assert "Calm, perceptive, sincere" in prompt
@@ -55,9 +57,7 @@ def test_build_system_prompt_includes_structured_sections() -> None:
 
 
 def test_build_system_prompt_omits_empty_optional_sections() -> None:
-    prompt = build_system_prompt(
-        SystemPromptContext(now=datetime(2026, 3, 14, 9, 30, tzinfo=UTC))
-    )
+    prompt = build_system_prompt(SystemPromptContext(now=datetime(2026, 3, 14, 9, 30, tzinfo=UTC)))
 
     assert "Available Tools:" not in prompt
     assert "Memory Blocks:" not in prompt

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
-import re
 from typing import Any
 
 from jinja2 import Environment, StrictUndefined, Template
@@ -56,18 +56,21 @@ def build_system_prompt(
             "now_iso": now.isoformat(),
         },
     )
-    persona = resolved.persona_content.strip() if resolved.persona_content.strip(
-    ) else build_persona_prompt(resolved.persona_template)
+    persona = (
+        resolved.persona_content.strip()
+        if resolved.persona_content.strip()
+        else build_persona_prompt(resolved.persona_template)
+    )
     dynamic_identity = resolved.dynamic_identity.strip()
     filtered_blocks = tuple(resolved.memory_blocks)
     if dynamic_identity:
         filtered_blocks = tuple(
-            block for block in filtered_blocks
-            if block.label not in ("self_identity", "persona")
+            block for block in filtered_blocks if block.label not in ("self_identity", "persona")
         )
     else:
         dynamic_identity, persona_from_blocks, filtered_blocks = split_prompt_memory_blocks(
-            filtered_blocks)
+            filtered_blocks
+        )
         if persona_from_blocks:
             persona = persona_from_blocks
 
@@ -172,15 +175,13 @@ def render_template(path: Path, context: dict[str, Any]) -> str:
     try:
         return load_template(str(path.resolve())).render(**context).strip()
     except FileNotFoundError as exc:
-        raise PromptTemplateError(
-            f"Missing prompt template: {path.name}") from exc
+        raise PromptTemplateError(f"Missing prompt template: {path.name}") from exc
 
 
 def resolve_persona_template_path(template_name: str) -> Path:
     normalized = template_name.strip().lower()
     if not normalized or _TEMPLATE_NAME_RE.fullmatch(normalized) is None:
-        raise PromptTemplateError(
-            f"Invalid persona template name: {template_name!r}")
+        raise PromptTemplateError(f"Invalid persona template name: {template_name!r}")
 
     path = PERSONA_TEMPLATES_DIR / f"{normalized}.md.j2"
     if not path.exists():

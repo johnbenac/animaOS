@@ -61,31 +61,21 @@ class ToolRulesSolver:
     """Stateful solver for tool orchestration rules."""
 
     def __init__(self, tool_rules: Sequence[ToolRule] = ()) -> None:
-        self._init_rules = tuple(
-            rule for rule in tool_rules if isinstance(rule, InitToolRule)
-        )
+        self._init_rules = tuple(rule for rule in tool_rules if isinstance(rule, InitToolRule))
         self._terminal_tools = {
-            rule.tool_name
-            for rule in tool_rules
-            if isinstance(rule, TerminalToolRule)
+            rule.tool_name for rule in tool_rules if isinstance(rule, TerminalToolRule)
         }
         self._child_rules = {
-            rule.tool_name: rule
-            for rule in tool_rules
-            if isinstance(rule, ChildToolRule)
+            rule.tool_name: rule for rule in tool_rules if isinstance(rule, ChildToolRule)
         }
         self._approval_tools = {
-            rule.tool_name
-            for rule in tool_rules
-            if isinstance(rule, RequiresApprovalToolRule)
+            rule.tool_name for rule in tool_rules if isinstance(rule, RequiresApprovalToolRule)
         }
         self._prerequisite_rules = tuple(
             rule for rule in tool_rules if isinstance(rule, PrerequisiteToolRule)
         )
         self._conditional_rules = {
-            rule.tool_name: rule
-            for rule in tool_rules
-            if isinstance(rule, ConditionalToolRule)
+            rule.tool_name: rule for rule in tool_rules if isinstance(rule, ConditionalToolRule)
         }
         self._call_history: list[str] = []
         self._last_tool_return_value: str | None = None
@@ -105,30 +95,31 @@ class ToolRulesSolver:
         known = _normalize_tool_names(known_tools)
         for rule in self._init_rules:
             if rule.tool_name not in known:
-                _warn_rule_issue(
-                    "InitToolRule references unknown tool %r", rule.tool_name)
+                _warn_rule_issue("InitToolRule references unknown tool %r", rule.tool_name)
         for name in self._terminal_tools:
             if name not in known:
-                _warn_rule_issue(
-                    "TerminalToolRule references unknown tool %r", name)
+                _warn_rule_issue("TerminalToolRule references unknown tool %r", name)
         for rule in self._prerequisite_rules:
             if rule.prerequisite_tool not in known:
                 _warn_rule_issue(
-                    "PrerequisiteToolRule references unknown prerequisite tool %r", rule.prerequisite_tool)
+                    "PrerequisiteToolRule references unknown prerequisite tool %r",
+                    rule.prerequisite_tool,
+                )
             if rule.dependent_tool not in known:
                 _warn_rule_issue(
-                    "PrerequisiteToolRule references unknown dependent tool %r", rule.dependent_tool)
+                    "PrerequisiteToolRule references unknown dependent tool %r", rule.dependent_tool
+                )
         for rule in self._conditional_rules.values():
             if rule.tool_name not in known:
-                _warn_rule_issue(
-                    "ConditionalToolRule references unknown tool %r", rule.tool_name)
+                _warn_rule_issue("ConditionalToolRule references unknown tool %r", rule.tool_name)
             for child in rule.child_output_mapping.values():
                 if child not in known:
-                    _warn_rule_issue(
-                        "ConditionalToolRule maps to unknown child tool %r", child)
+                    _warn_rule_issue("ConditionalToolRule maps to unknown child tool %r", child)
             if rule.default_child and rule.default_child not in known:
                 _warn_rule_issue(
-                    "ConditionalToolRule default_child references unknown tool %r", rule.default_child)
+                    "ConditionalToolRule default_child references unknown tool %r",
+                    rule.default_child,
+                )
 
     @property
     def call_history(self) -> tuple[str, ...]:
@@ -145,9 +136,7 @@ class ToolRulesSolver:
 
         if not self._call_history and self._init_rules:
             allowed = {
-                rule.tool_name
-                for rule in self._init_rules
-                if rule.tool_name in available_tools
+                rule.tool_name for rule in self._init_rules if rule.tool_name in available_tools
             }
             return self._apply_prerequisite_filter(allowed, available_tools)
 
@@ -157,40 +146,36 @@ class ToolRulesSolver:
             # Conditional rules (output-based routing) take priority
             cond_rule = self._conditional_rules.get(last_tool)
             if cond_rule is not None:
-                cond_result = self._evaluate_conditional_rule(
-                    cond_rule, available_tools)
+                cond_result = self._evaluate_conditional_rule(cond_rule, available_tools)
                 if cond_result is not None:
                     return self._apply_prerequisite_filter(cond_result, available_tools)
 
             # Child rules (static parent→children mapping)
             child_rule = self._child_rules.get(last_tool)
             if child_rule is not None:
-                allowed = {
-                    child
-                    for child in child_rule.children
-                    if child in available_tools
-                }
+                allowed = {child for child in child_rule.children if child in available_tools}
                 return self._apply_prerequisite_filter(allowed, available_tools)
 
         return self._apply_prerequisite_filter(set(available_tools), available_tools)
 
     def _apply_prerequisite_filter(
-        self, allowed: set[str], available_tools: set[str],
+        self,
+        allowed: set[str],
+        available_tools: set[str],
     ) -> set[str]:
         """Remove tools whose prerequisites have not been called this turn."""
         if not self._prerequisite_rules:
             return allowed
         called = set(self._call_history)
         for rule in self._prerequisite_rules:
-            if (
-                rule.dependent_tool in allowed
-                and rule.prerequisite_tool not in called
-            ):
+            if rule.dependent_tool in allowed and rule.prerequisite_tool not in called:
                 allowed = allowed - {rule.dependent_tool}
         return allowed
 
     def _evaluate_conditional_rule(
-        self, rule: ConditionalToolRule, available_tools: set[str],
+        self,
+        rule: ConditionalToolRule,
+        available_tools: set[str],
     ) -> set[str] | None:
         """Return the allowed tool set based on the last tool's output."""
         response = self._last_tool_return_value
@@ -223,9 +208,7 @@ class ToolRulesSolver:
     def should_force_tool_call(self) -> bool:
         if not self._call_history and self._init_rules:
             return True
-        if self._call_history and self._call_history[-1] in self._child_rules:
-            return True
-        return False
+        return bool(self._call_history and self._call_history[-1] in self._child_rules)
 
     def is_terminal(self, tool_name: str) -> bool:
         return tool_name in self._terminal_tools
@@ -253,9 +236,7 @@ class ToolRulesSolver:
         if not self._call_history and self._init_rules:
             init_tools = ", ".join(
                 sorted(
-                    rule.tool_name
-                    for rule in self._init_rules
-                    if rule.tool_name in available_tools
+                    rule.tool_name for rule in self._init_rules if rule.tool_name in available_tools
                 )
             )
             return (
@@ -275,8 +256,7 @@ class ToolRulesSolver:
 
         allowed_display = ", ".join(sorted(allowed_tools))
         return (
-            f"Tool {normalized_name!r} is not allowed right now. "
-            f"Allowed tools: {allowed_display}."
+            f"Tool {normalized_name!r} is not allowed right now. Allowed tools: {allowed_display}."
         )
 
     def update_state(self, tool_name: str, return_value: str | None = None) -> None:
@@ -333,8 +313,7 @@ def _detect_cycles(
     # Build adjacency list: edge from A → B means "A must run before B"
     edges: dict[str, set[str]] = {}
     for rule in prerequisite_rules:
-        edges.setdefault(rule.prerequisite_tool, set()
-                         ).add(rule.dependent_tool)
+        edges.setdefault(rule.prerequisite_tool, set()).add(rule.dependent_tool)
     for rule_tool, rule in conditional_rules.items():
         for child in rule.child_output_mapping.values():
             edges.setdefault(rule_tool, set()).add(child)
@@ -356,7 +335,7 @@ def _detect_cycles(
             if c == WHITE:
                 path = dfs(neighbour)
                 if path is not None:
-                    return [node] + path
+                    return [node, *path]
         color[node] = BLACK
         return None
 

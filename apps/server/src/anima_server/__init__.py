@@ -1,2 +1,1 @@
 """ANIMA server package."""
-

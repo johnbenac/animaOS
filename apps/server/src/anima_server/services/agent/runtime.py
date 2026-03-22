@@ -1,25 +1,32 @@
 from __future__ import annotations
+
+import asyncio
 import json
-from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
-from anima_server.services.agent.system_prompt import (
-    SystemPromptContext,
-    build_system_prompt,
-    split_prompt_memory_blocks,
+import logging
+import re
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, replace
+from typing import Any
+
+from anima_server.config import settings
+from anima_server.services.agent.adapters import build_adapter
+from anima_server.services.agent.adapters.base import BaseLLMAdapter
+from anima_server.services.agent.compaction import estimate_message_tokens
+from anima_server.services.agent.executor import ToolExecutor
+from anima_server.services.agent.llm import (
+    ContextWindowOverflowError,
+    LLMInvocationError,
+)
+from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.messages import (
+    build_conversation_messages,
+    make_assistant_message,
+    make_tool_message,
+    message_content,
 )
 from anima_server.services.agent.prompt_budget import PromptBudgetTrace, plan_prompt_budget
-from anima_server.services.agent.streaming import (
-    AgentStreamEvent,
-    build_chunk_event,
-    build_reasoning_event,
-    build_step_request_event,
-    build_step_result_event,
-    build_thought_event,
-    build_timing_event,
-    build_tool_call_event,
-    build_tool_return_event,
-    build_warning_event,
-)
-from anima_server.services.agent.state import AgentResult, StoredMessage
+from anima_server.services.agent.rules import InitToolRule, ToolRule, ToolRulesSolver
 from anima_server.services.agent.runtime_types import (
     DryRunResult,
     LLMRequest,
@@ -34,31 +41,25 @@ from anima_server.services.agent.runtime_types import (
     ToolCall,
     ToolExecutionResult,
 )
-from anima_server.services.agent.rules import InitToolRule, ToolRule, ToolRulesSolver
-from anima_server.services.agent.messages import (
-    build_conversation_messages,
-    make_assistant_message,
-    make_tool_message,
-    message_content,
+from anima_server.services.agent.state import AgentResult, StoredMessage
+from anima_server.services.agent.streaming import (
+    AgentStreamEvent,
+    build_chunk_event,
+    build_reasoning_event,
+    build_step_request_event,
+    build_step_result_event,
+    build_thought_event,
+    build_timing_event,
+    build_tool_call_event,
+    build_tool_return_event,
+    build_warning_event,
 )
-from anima_server.services.agent.memory_blocks import MemoryBlock
-from anima_server.services.agent.executor import ToolExecutor
-from anima_server.services.agent.compaction import estimate_message_tokens
-from anima_server.services.agent.adapters.base import BaseLLMAdapter
-from anima_server.services.agent.adapters import build_adapter
-from anima_server.config import settings
-from anima_server.services.agent.llm import (
-    ContextWindowOverflowError,
-    LLMInvocationError,
+from anima_server.services.agent.system_prompt import (
+    SystemPromptContext,
+    build_system_prompt,
+    split_prompt_memory_blocks,
 )
-
-import asyncio
-import logging
-import re
-import time
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, replace
-from typing import Any
+from anima_server.services.agent.tools import get_tool_rules, get_tool_summaries, get_tools
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +73,20 @@ def _is_retryable_error(exc: Exception) -> bool:
     if isinstance(exc, LLMInvocationError):
         msg = str(exc).lower()
         # Rate limits and server errors are retryable
-        for pattern in ("429", "500", "502", "503", "504", "rate limit",
-                        "overloaded", "temporarily unavailable", "try again"):
+        for pattern in (
+            "429",
+            "500",
+            "502",
+            "503",
+            "504",
+            "rate limit",
+            "overloaded",
+            "temporarily unavailable",
+            "try again",
+        ):
             if pattern in msg:
                 return True
-    if isinstance(exc, (ConnectionError, OSError)):
-        return True
-    return False
+    return bool(isinstance(exc, (ConnectionError, OSError)))
 
 
 StreamEventCallback = Callable[[AgentStreamEvent], Awaitable[None]]
@@ -104,18 +112,14 @@ class AgentRuntime:
         max_steps: int = 4,
     ) -> None:
         self._adapter = adapter
-        self._tool_registry = {
-            tool_name: tool for tool in tools if (tool_name := _tool_name(tool))
-        }
+        self._tool_registry = {tool_name: tool for tool in tools if (tool_name := _tool_name(tool))}
         self._tool_names = tuple(self._tool_registry)
         self._tool_rules = tuple(tool_rules)
         if self._tool_rules:
-            ToolRulesSolver(self._tool_rules).warn_unknown_tools(
-                self._tool_names)
+            ToolRulesSolver(self._tool_rules).warn_unknown_tools(self._tool_names)
         self._persona_template = persona_template
         self._tool_summaries = tuple(tool_summaries)
-        self._tool_executor = tool_executor or ToolExecutor(
-            list(self._tool_registry.values()))
+        self._tool_executor = tool_executor or ToolExecutor(list(self._tool_registry.values()))
         self._max_steps = max_steps
 
     def prepare_system_prompt(self) -> str:
@@ -138,7 +142,8 @@ class AgentRuntime:
     ) -> tuple[str, PromptBudgetTrace | None]:
         self._adapter.prepare()
         dynamic_identity, persona_content, prompt_memory_blocks = split_prompt_memory_blocks(
-            memory_blocks)
+            memory_blocks
+        )
         budget_plan = plan_prompt_budget(prompt_memory_blocks)
         system_prompt = build_system_prompt(
             SystemPromptContext(
@@ -189,16 +194,13 @@ class AgentRuntime:
         )
 
         rules_solver = ToolRulesSolver(self._tool_rules)
-        allowed_tool_names = tuple(
-            sorted(rules_solver.get_allowed_tools(self._tool_names))
-        )
+        allowed_tool_names = tuple(sorted(rules_solver.get_allowed_tools(self._tool_names)))
 
         # --- Dry-run: return prompt assembly without side effects ---
         if dry_run:
             request_messages = _snapshot_messages(messages)
             tool_schemas = tuple(
-                _strip_thinking_from_schema(
-                    _tool_schema(self._tool_registry[name]))
+                _strip_thinking_from_schema(_tool_schema(self._tool_registry[name]))
                 for name in allowed_tool_names
                 if name in self._tool_registry
             )
@@ -252,8 +254,7 @@ class AgentRuntime:
                 allowed_set = allowed_set - {last_failed_tool}
             allowed_tool_names = tuple(sorted(allowed_set))
             force_tool_call = bool(allowed_tool_names) and (
-                rules_solver.should_force_tool_call()
-                or "send_message" in allowed_tool_names
+                rules_solver.should_force_tool_call() or "send_message" in allowed_tool_names
             )
             if event_callback is not None:
                 await event_callback(
@@ -333,15 +334,19 @@ class AgentRuntime:
                     step_ctx.progression = StepProgression.TOOLS_COMPLETED
                     step_traces.append(
                         _build_step_trace(
-                            step_ctx, step_result, request_messages,
-                            allowed_tool_names, force_tool_call,
+                            step_ctx,
+                            step_result,
+                            request_messages,
+                            allowed_tool_names,
+                            force_tool_call,
                             tool_calls=all_coerced_calls,
                             tool_results=all_coerced_results,
                         )
                     )
                     if event_callback is not None:
                         await event_callback(
-                            build_timing_event(step_index, _compute_timing(step_ctx)))
+                            build_timing_event(step_index, _compute_timing(step_ctx))
+                        )
                     # Check if any coerced call was terminal (send_message).
                     terminal_hit = any(tr.is_terminal for _, tr in coerced)
                     if terminal_hit:
@@ -364,13 +369,15 @@ class AgentRuntime:
                     await event_callback(build_chunk_event(step_result.assistant_text))
                 step_traces.append(
                     _build_step_trace(
-                        step_ctx, step_result, request_messages,
-                        allowed_tool_names, force_tool_call,
+                        step_ctx,
+                        step_result,
+                        request_messages,
+                        allowed_tool_names,
+                        force_tool_call,
                     )
                 )
                 if event_callback is not None:
-                    await event_callback(
-                        build_timing_event(step_index, _compute_timing(step_ctx)))
+                    await event_callback(build_timing_event(step_index, _compute_timing(step_ctx)))
                 # Detect completely empty response (no text, no tool calls)
                 # when tool use was forced — the model failed to comply.
                 stop_reason = _resolve_empty_forced_tool_stop_reason(
@@ -412,7 +419,9 @@ class AgentRuntime:
                         logger.info(
                             "Step %d: deferring blocked tool call %r for "
                             "post-turn execution (violation: %s)",
-                            step_index, tool_call.name, violation,
+                            step_index,
+                            tool_call.name,
+                            violation,
                         )
 
                     tool_result = ToolExecutionResult(
@@ -430,9 +439,7 @@ class AgentRuntime:
                         )
                     )
                     if event_callback is not None:
-                        await event_callback(
-                            build_tool_return_event(step_index, tool_result)
-                        )
+                        await event_callback(build_tool_return_event(step_index, tool_result))
                     rule_violation_hit = True
                     break
 
@@ -452,9 +459,7 @@ class AgentRuntime:
                         )
                     )
                     if event_callback is not None:
-                        await event_callback(
-                            build_tool_return_event(step_index, tool_result)
-                        )
+                        await event_callback(build_tool_return_event(step_index, tool_result))
                     stop_reason = StopReason.AWAITING_APPROVAL
                     awaiting_approval = True
                     break
@@ -476,7 +481,9 @@ class AgentRuntime:
                 if event_callback is not None:
                     await event_callback(build_tool_return_event(step_index, tool_result))
                 if tool_result.inner_thinking and event_callback is not None:
-                    await event_callback(build_thought_event(step_index, tool_result.inner_thinking))
+                    await event_callback(
+                        build_thought_event(step_index, tool_result.inner_thinking)
+                    )
                 rules_solver.update_state(tool_call.name, tool_result.output)
                 # Track consecutive failures for exclusion.
                 if tool_result.is_error:
@@ -497,20 +504,24 @@ class AgentRuntime:
                 step_ctx.progression = StepProgression.TOOLS_COMPLETED
             step_traces.append(
                 _build_step_trace(
-                    step_ctx, step_result, request_messages,
-                    allowed_tool_names, force_tool_call,
+                    step_ctx,
+                    step_result,
+                    request_messages,
+                    allowed_tool_names,
+                    force_tool_call,
                     tool_results=tuple(tool_results),
                 )
             )
             if event_callback is not None:
-                await event_callback(
-                    build_timing_event(step_index, _compute_timing(step_ctx)))
+                await event_callback(build_timing_event(step_index, _compute_timing(step_ctx)))
 
             if rule_violation_hit:
-                messages.append(_sandwich_message(
-                    "Tool rule violation — the tool was not allowed at "
-                    "this point. Check allowed tools and try again."
-                ))
+                messages.append(
+                    _sandwich_message(
+                        "Tool rule violation — the tool was not allowed at "
+                        "this point. Check allowed tools and try again."
+                    )
+                )
                 continue
 
             # Refresh memory blocks between steps if a tool modified memory.
@@ -527,10 +538,15 @@ class AgentRuntime:
                             memory_blocks=fresh_blocks,
                         )
                         # Replace the system message (always first in the list).
-                        if messages and hasattr(messages[0], "type") and getattr(messages[0], "type", "") == "system":
+                        if (
+                            messages
+                            and hasattr(messages[0], "type")
+                            and getattr(messages[0], "type", "") == "system"
+                        ):
                             from anima_server.services.agent.messages import make_system_message
+
                             messages[0] = make_system_message(system_prompt)
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Memory refresh between steps failed", exc_info=True)
 
             if terminal_tool_hit or awaiting_approval:
@@ -539,18 +555,14 @@ class AgentRuntime:
             # Continue the loop only if a heartbeat was requested, a
             # tool error occurred (give the model a chance to recover),
             # or a rule violation was hit (already handled above).
-            any_heartbeat = any(
-                tr.heartbeat_requested for tr in tool_results
-            )
+            any_heartbeat = any(tr.heartbeat_requested for tr in tool_results)
             any_error = any(tr.is_error for tr in tool_results)
             if any_heartbeat or any_error:
                 # Sandwich message: inject a system-as-user message
                 # explaining WHY the loop continues, so the model
                 # has context for the next step.
                 if any_error:
-                    failed_names = [
-                        tr.name for tr in tool_results if tr.is_error
-                    ]
+                    failed_names = [tr.name for tr in tool_results if tr.is_error]
                     sandwich = _sandwich_message(
                         f"Tool call failed ({', '.join(failed_names)}). "
                         "You may retry with corrected arguments or "
@@ -578,8 +590,7 @@ class AgentRuntime:
         if deferred_tool_calls:
             if stop_reason != StopReason.TERMINAL_TOOL:
                 logger.warning(
-                    "Turn ended with stop reason %r before %d deferred tool "
-                    "call(s) could run: %s",
+                    "Turn ended with stop reason %r before %d deferred tool call(s) could run: %s",
                     stop_reason.value,
                     len(deferred_tool_calls),
                     ", ".join(tc.name for tc in deferred_tool_calls),
@@ -603,13 +614,13 @@ class AgentRuntime:
                         if dtc.name not in tools_used:
                             tools_used.append(dtc.name)
                         logger.info(
-                            "Deferred tool call %r executed successfully "
-                            "(call_id=%s, error=%s)",
-                            dtc.name, dtc.id, deferred_result.is_error,
+                            "Deferred tool call %r executed successfully (call_id=%s, error=%s)",
+                            dtc.name,
+                            dtc.id,
+                            deferred_result.is_error,
                         )
                         if event_callback is not None:
-                            await event_callback(
-                                build_tool_call_event(deferred_step_index, dtc))
+                            await event_callback(build_tool_call_event(deferred_step_index, dtc))
                             await event_callback(
                                 build_tool_return_event(
                                     deferred_step_index,
@@ -623,7 +634,7 @@ class AgentRuntime:
                                         deferred_result.inner_thinking,
                                     )
                                 )
-                    except Exception:  # noqa: BLE001
+                    except Exception:
                         logger.warning(
                             "Deferred tool call %r failed",
                             dtc.name,
@@ -721,9 +732,7 @@ class AgentRuntime:
 
         step_ctx.progression = StepProgression.TOOLS_COMPLETED
         request_messages = _snapshot_messages(messages)
-        allowed_tool_names = tuple(
-            sorted(rules_solver.get_allowed_tools(self._tool_names))
-        )
+        allowed_tool_names = tuple(sorted(rules_solver.get_allowed_tools(self._tool_names)))
         step_traces.append(
             _build_step_trace(
                 step_ctx,
@@ -737,8 +746,7 @@ class AgentRuntime:
             )
         )
         if event_callback is not None:
-            await event_callback(
-                build_timing_event(0, _compute_timing(step_ctx)))
+            await event_callback(build_timing_event(0, _compute_timing(step_ctx)))
 
         # If the tool is terminal and was approved, return immediately.
         if approved and tool_result.is_terminal:
@@ -765,12 +773,9 @@ class AgentRuntime:
                 prompt_budget=prompt_budget,
             )
 
-        allowed_tool_names = tuple(
-            sorted(rules_solver.get_allowed_tools(self._tool_names))
-        )
+        allowed_tool_names = tuple(sorted(rules_solver.get_allowed_tools(self._tool_names)))
         force_tool_call = bool(allowed_tool_names) and (
-            rules_solver.should_force_tool_call()
-            or "send_message" in allowed_tool_names
+            rules_solver.should_force_tool_call() or "send_message" in allowed_tool_names
         )
         if event_callback is not None:
             await event_callback(
@@ -839,13 +844,15 @@ class AgentRuntime:
         follow_request_messages = _snapshot_messages(messages)
         step_traces.append(
             _build_step_trace(
-                follow_ctx, step_result, follow_request_messages,
-                allowed_tool_names, force_tool_call,
+                follow_ctx,
+                step_result,
+                follow_request_messages,
+                allowed_tool_names,
+                force_tool_call,
             )
         )
         if event_callback is not None:
-            await event_callback(
-                build_timing_event(1, _compute_timing(follow_ctx)))
+            await event_callback(build_timing_event(1, _compute_timing(follow_ctx)))
 
         stop_reason = _resolve_empty_forced_tool_stop_reason(
             step_index=1,
@@ -960,7 +967,8 @@ class AgentRuntime:
                 timeout = settings.agent_llm_timeout
                 if event_callback is None:
                     step_result = await asyncio.wait_for(
-                        self._adapter.invoke(request), timeout=timeout,
+                        self._adapter.invoke(request),
+                        timeout=timeout,
                     )
                     ctx.llm_end_time = time.monotonic()
                     ctx.progression = StepProgression.RESPONSE_RECEIVED
@@ -980,8 +988,7 @@ class AgentRuntime:
                     ctx.llm_end_time = time.monotonic()
 
                     if step_result is None:
-                        raise RuntimeError(
-                            "Adapter stream ended without a final step result.")
+                        raise RuntimeError("Adapter stream ended without a final step result.")
                     if step_result.ttft_ms is not None:
                         ttft_time = ctx.start_time + (step_result.ttft_ms / 1000)
                         if ctx.ttft_time is None or ttft_time < ctx.ttft_time:
@@ -1005,7 +1012,10 @@ class AgentRuntime:
                 delay = min(backoff_factor * (2 ** (attempt - 1)), max_delay)
                 logger.warning(
                     "LLM call failed (attempt %d/%d): %s. Retrying in %.1fs",
-                    attempt, retry_limit + 1, exc, delay,
+                    attempt,
+                    retry_limit + 1,
+                    exc,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -1041,10 +1051,12 @@ class AgentRuntime:
             # coercing the entire text as a send_message if available.
             if "send_message" not in self._tool_registry:
                 return None
-            parsed = [_ParsedTextToolCall(
-                name="send_message",
-                arguments={"message": step_result.assistant_text.strip()},
-            )]
+            parsed = [
+                _ParsedTextToolCall(
+                    name="send_message",
+                    arguments={"message": step_result.assistant_text.strip()},
+                )
+            ]
 
         results: list[tuple[ToolCall, ToolExecutionResult]] = []
         for i, ptc in enumerate(parsed):
@@ -1065,7 +1077,9 @@ class AgentRuntime:
                 await event_callback(build_tool_call_event(step_index, tool_call))
                 await event_callback(build_tool_return_event(step_index, tool_result))
                 if tool_result.inner_thinking:
-                    await event_callback(build_thought_event(step_index, tool_result.inner_thinking))
+                    await event_callback(
+                        build_thought_event(step_index, tool_result.inner_thinking)
+                    )
             results.append((tool_call, tool_result))
 
         return results if results else None
@@ -1086,18 +1100,18 @@ def build_loop_runtime() -> AgentRuntime:
 # Matches: tool_name("content") or tool_name('content') with optional triple-quotes.
 # Captures: group 'name' = tool name, groups 1-4 = content variants.
 _TEXT_TOOL_CALL_RE = re.compile(
-    r'^(?P<name>[a-z_][a-z0-9_]*)\(\s*(?:'
-    r'"((?:[^"\\]|\\.)*)"|'       # double-quoted content
-    r"'((?:[^'\\]|\\.)*)'|"       # single-quoted content
-    r'"""(.*?)"""|'               # triple-double-quoted
-    r"'''(.*?)'''"                # triple-single-quoted
-    r')\s*\)$',
+    r"^(?P<name>[a-z_][a-z0-9_]*)\(\s*(?:"
+    r'"((?:[^"\\]|\\.)*)"|'  # double-quoted content
+    r"'((?:[^'\\]|\\.)*)'|"  # single-quoted content
+    r'"""(.*?)"""|'  # triple-double-quoted
+    r"'''(.*?)'''"  # triple-single-quoted
+    r")\s*\)$",
     re.DOTALL,
 )
 
 # Matches: tool_name {"key": "..."} or tool_name({"key": "..."})
 _TEXT_TOOL_CALL_JSON_RE = re.compile(
-    r'^(?P<name>[a-z_][a-z0-9_]*)\s*\(?\s*(?P<json>\{.*?\})\s*\)?$',
+    r"^(?P<name>[a-z_][a-z0-9_]*)\s*\(?\s*(?P<json>\{.*?\})\s*\)?$",
     re.DOTALL,
 )
 
@@ -1115,6 +1129,7 @@ _PARAMETER_TAG_RE = re.compile(
 @dataclass(frozen=True, slots=True)
 class _ParsedTextToolCall:
     """A tool call parsed from plain text output."""
+
     name: str
     arguments: dict[str, object]
 
@@ -1182,7 +1197,7 @@ def _parse_function_tag_tool_calls(
             continue
 
         next_start = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        raw_content = text[match.end():next_start]
+        raw_content = text[match.end() : next_start]
         closing_index = raw_content.find("</function>")
         if closing_index != -1:
             raw_content = raw_content[:closing_index]
@@ -1203,10 +1218,12 @@ def _parse_function_tag_tool_calls(
         # Try parsing Letta/MemGPT-style <parameter=name>value</parameter> tags.
         param_matches = _PARAMETER_TAG_RE.findall(content)
         if param_matches:
-            results.append(_ParsedTextToolCall(
-                name=name,
-                arguments={k: v.strip() for k, v in param_matches},
-            ))
+            results.append(
+                _ParsedTextToolCall(
+                    name=name,
+                    arguments={k: v.strip() for k, v in param_matches},
+                )
+            )
             continue
 
         arg_name = _infer_first_arg_name(name)
@@ -1260,9 +1277,7 @@ def _infer_first_arg_name(tool_name: str) -> str:
     return _FIRST_ARG_NAMES.get(tool_name, "input")
 
 
-_SANDWICH_PREFIX = (
-    "[This is an automated system message hidden from the user] "
-)
+_SANDWICH_PREFIX = "[This is an automated system message hidden from the user] "
 
 
 def _sandwich_message(reason: str) -> object:
@@ -1275,6 +1290,7 @@ def _sandwich_message(reason: str) -> object:
     that tells the model they are hidden from the user.
     """
     from anima_server.services.agent.messages import make_user_message
+
     return make_user_message(f"{_SANDWICH_PREFIX}{reason}")
 
 
@@ -1299,11 +1315,7 @@ def _resolve_empty_forced_tool_stop_reason(
     force_tool_call: bool,
     step_result: StepExecutionResult,
 ) -> StopReason | None:
-    if (
-        not force_tool_call
-        or step_result.assistant_text.strip()
-        or step_result.tool_calls
-    ):
+    if not force_tool_call or step_result.assistant_text.strip() or step_result.tool_calls:
         return None
     logger.warning(
         "Step %d: force_tool_call was set but LLM produced "
@@ -1316,12 +1328,13 @@ def _resolve_empty_forced_tool_stop_reason(
 def _compute_timing(ctx: StepContext) -> StepTiming:
     now = time.monotonic()
     return StepTiming(
-        step_duration_ms=round((now - ctx.start_time) * 1000, 2)
-        if ctx.start_time else None,
+        step_duration_ms=round((now - ctx.start_time) * 1000, 2) if ctx.start_time else None,
         llm_duration_ms=round((ctx.llm_end_time - ctx.start_time) * 1000, 2)
-        if ctx.llm_end_time and ctx.start_time else None,
+        if ctx.llm_end_time and ctx.start_time
+        else None,
         ttft_ms=round((ctx.ttft_time - ctx.start_time) * 1000, 2)
-        if ctx.ttft_time and ctx.start_time else None,
+        if ctx.ttft_time and ctx.start_time
+        else None,
     )
 
 
@@ -1372,8 +1385,7 @@ def _snapshot_messages(messages: list[object]) -> tuple[MessageSnapshot, ...]:
                 content=message_content(message),
                 tool_name=getattr(message, "name", None),
                 tool_call_id=getattr(message, "tool_call_id", None),
-                tool_calls=_snapshot_tool_calls(
-                    getattr(message, "tool_calls", ())),
+                tool_calls=_snapshot_tool_calls(getattr(message, "tool_calls", ())),
             )
         )
 
@@ -1394,8 +1406,7 @@ def _snapshot_tool_calls(raw_tool_calls: object) -> tuple[ToolCall, ...]:
             raw_arguments = raw_tool_call.get("raw_arguments")
         else:
             name = str(getattr(raw_tool_call, "name", "")).strip()
-            call_id = str(getattr(raw_tool_call, "id", None)
-                          or f"tool-call-{index}")
+            call_id = str(getattr(raw_tool_call, "id", None) or f"tool-call-{index}")
             arguments = getattr(raw_tool_call, "args", {})
             parse_error = getattr(raw_tool_call, "parse_error", None)
             raw_arguments = getattr(raw_tool_call, "raw_arguments", None)
@@ -1432,9 +1443,8 @@ def _tool_schema(tool: Any) -> dict[str, Any]:
     if hasattr(tool, "args_schema"):
         try:
             schema["parameters"] = tool.args_schema.model_json_schema()
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Failed to extract schema for tool %s", _tool_name(tool))
+        except Exception:
+            logger.warning("Failed to extract schema for tool %s", _tool_name(tool))
     return schema
 
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from anima_server.api.deps.unlock import require_unlocked_session
 from anima_server.api.deps.db_mode import require_sqlite_mode
+from anima_server.api.deps.unlock import require_unlocked_session
 from anima_server.db import get_db
 from anima_server.models import User
 from anima_server.schemas.vault import (

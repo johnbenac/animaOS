@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from anima_server.services.crypto import (
     create_wrapped_dek,
     decrypt_text_with_dek,

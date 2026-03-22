@@ -5,6 +5,7 @@ import contextvars
 import inspect
 import json
 import logging
+from datetime import UTC
 from typing import Any
 
 from anima_server.config import settings
@@ -57,8 +58,7 @@ def unpack_heartbeat_from_kwargs(
 class ToolExecutor:
     def __init__(self, tools: list[Any]) -> None:
         self._tools = {
-            (getattr(tool, "name", "") or getattr(tool, "__name__", "")): tool
-            for tool in tools
+            (getattr(tool, "name", "") or getattr(tool, "__name__", "")): tool for tool in tools
         }
 
     async def execute(
@@ -87,6 +87,7 @@ class ToolExecutor:
             raw = tool_call.raw_arguments or ""
             if raw and "thinking" in raw:
                 import json as _json
+
                 try:
                     parsed_raw = _json.loads(raw)
                     if isinstance(parsed_raw, dict):
@@ -123,20 +124,20 @@ class ToolExecutor:
                 _invoke_tool(tool, tool_call.arguments, flags),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
                 output=_package_error_response(
-                    f"Tool {tool_call.name} timed out after {settings.agent_tool_timeout}s"),
+                    f"Tool {tool_call.name} timed out after {settings.agent_tool_timeout}s"
+                ),
                 is_error=True,
             )
         except Exception as exc:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
-                output=_package_error_response(
-                    f"Tool {tool_call.name} failed: {exc}"),
+                output=_package_error_response(f"Tool {tool_call.name} failed: {exc}"),
                 is_error=True,
             )
 
@@ -144,9 +145,7 @@ class ToolExecutor:
         # user-facing response.  Non-terminal tools get the JSON envelope
         # so the model sees structured status/message/time.
         formatted_output = (
-            _stringify_output(output)
-            if is_terminal
-            else _package_tool_response(output)
+            _stringify_output(output) if is_terminal else _package_tool_response(output)
         )
 
         return ToolExecutionResult(
@@ -174,10 +173,7 @@ class ToolExecutor:
                 results.append(await self.execute(tc, is_terminal=terminal))
             return results
 
-        tasks = [
-            self.execute(tc, is_terminal=terminal)
-            for tc, terminal in tool_calls
-        ]
+        tasks = [self.execute(tc, is_terminal=terminal) for tc, terminal in tool_calls]
         return list(await asyncio.gather(*tasks))
 
 
@@ -216,6 +212,7 @@ async def _invoke_tool(
     # Also check the copied context's ToolContext (thread may have set it there).
     try:
         from anima_server.services.agent.tool_context import _current_context
+
         thread_ctx = ctx.get(_current_context)
         if thread_ctx is not None and thread_ctx.memory_modified:
             flags["memory_modified"] = True
@@ -233,6 +230,7 @@ def _check_memory_modified(flags: dict[str, bool]) -> None:
     """Check if the current ToolContext has memory_modified set."""
     try:
         from anima_server.services.agent.tool_context import get_tool_context
+
         ctx = get_tool_context()
         if ctx.memory_modified:
             flags["memory_modified"] = True
@@ -252,17 +250,12 @@ def _validate_tool_arguments(
         return None
 
     # Skip injected keys (e.g. ``thinking``) that are stripped before dispatch.
-    effective_required = tuple(
-        name for name in required_arguments if name not in ignore_keys
-    )
+    effective_required = tuple(name for name in required_arguments if name not in ignore_keys)
     if not effective_required:
         return None
 
     payload = arguments if isinstance(arguments, dict) else {}
-    missing = [
-        name for name in effective_required
-        if name not in payload or payload[name] is None
-    ]
+    missing = [name for name in effective_required if name not in payload or payload[name] is None]
     if not missing:
         return None
 
@@ -308,7 +301,7 @@ def _get_tool_schema(tool: Any) -> dict[str, Any] | None:
 
     try:
         resolved = schema.model_json_schema()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
     return resolved if isinstance(resolved, dict) else None
@@ -329,7 +322,7 @@ def _package_tool_response(
     Returns ``{"status": "OK"|"Failed", "message": "...", "time": "..."}``.
     Truncates the message with an in-band warning if it exceeds *char_limit*.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     message = _stringify_output(output)
 
@@ -339,11 +332,13 @@ def _package_tool_response(
             f"{len(message)} > {char_limit} chars]"
         )
 
-    return json.dumps({
-        "status": "OK" if was_success else "Failed",
-        "message": message,
-        "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
-    })
+    return json.dumps(
+        {
+            "status": "OK" if was_success else "Failed",
+            "message": message,
+            "time": datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        }
+    )
 
 
 def _package_error_response(error_msg: str) -> str:

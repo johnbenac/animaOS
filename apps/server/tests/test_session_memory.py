@@ -3,13 +3,8 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
-from anima_server.models import AgentThread, SessionNote, User
+from anima_server.models import AgentThread, User
 from anima_server.services.agent.session_memory import (
     clear_session_notes,
     get_session_notes,
@@ -18,6 +13,10 @@ from anima_server.services.agent.session_memory import (
     render_session_memory_text,
     write_session_note,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @contextmanager
@@ -88,12 +87,18 @@ def test_update_existing_note_by_key() -> None:
         user, thread = _setup(db)
 
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="mood", value="neutral",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="mood",
+            value="neutral",
         )
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="mood", value="excited about project",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="mood",
+            value="excited about project",
         )
 
         notes = get_session_notes(db, thread_id=thread.id)
@@ -106,8 +111,11 @@ def test_remove_session_note() -> None:
         user, thread = _setup(db)
 
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="temp", value="temporary note",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="temp",
+            value="temporary note",
         )
         assert len(get_session_notes(db, thread_id=thread.id)) == 1
 
@@ -125,8 +133,11 @@ def test_clear_all_session_notes() -> None:
 
         for i in range(5):
             write_session_note(
-                db, thread_id=thread.id, user_id=user.id,
-                key=f"note_{i}", value=f"value {i}",
+                db,
+                thread_id=thread.id,
+                user_id=user.id,
+                key=f"note_{i}",
+                value=f"value {i}",
             )
 
         count = clear_session_notes(db, thread_id=thread.id)
@@ -139,8 +150,11 @@ def test_promote_session_note_to_memory() -> None:
         user, thread = _setup(db)
 
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="job", value="Works as a data scientist",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="job",
+            value="Works as a data scientist",
         )
 
         item = promote_session_note(
@@ -171,12 +185,20 @@ def test_render_session_memory_text() -> None:
         user, thread = _setup(db)
 
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="mood", value="calm", note_type="emotion",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="mood",
+            value="calm",
+            note_type="emotion",
         )
         write_session_note(
-            db, thread_id=thread.id, user_id=user.id,
-            key="goal", value="plan the weekend", note_type="plan",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            key="goal",
+            value="plan the weekend",
+            note_type="plan",
         )
 
         notes = get_session_notes(db, thread_id=thread.id)
@@ -192,8 +214,11 @@ def test_max_notes_enforced() -> None:
         # Write more than the max (default 20)
         for i in range(25):
             write_session_note(
-                db, thread_id=thread.id, user_id=user.id,
-                key=f"note_{i:03d}", value=f"value {i}",
+                db,
+                thread_id=thread.id,
+                user_id=user.id,
+                key=f"note_{i:03d}",
+                value=f"value {i}",
             )
 
         notes = get_session_notes(db, thread_id=thread.id)

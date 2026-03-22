@@ -97,7 +97,10 @@ def build_provider_headers(provider: str) -> dict[str, str]:
         # Log key prefix for debugging (never log full key)
         key_preview = api_key[:10] + "..." if len(api_key) > 10 else "[too short]"
         import logging
-        logging.getLogger(__name__).info(f"Moonshot auth header using key starting with: {key_preview}")
+
+        logging.getLogger(__name__).info(
+            f"Moonshot auth header using key starting with: {key_preview}"
+        )
         headers["Authorization"] = f"Bearer {api_key}"
         headers["Content-Type"] = "application/json"
         return headers
@@ -124,9 +127,7 @@ def validate_provider_configuration(provider: str) -> None:
 def require_provider_api_key(provider: str) -> str:
     api_key = settings.agent_api_key.strip()
     if provider in ("openrouter", "moonshot") and not api_key:
-        raise LLMConfigError(
-            f"ANIMA_AGENT_API_KEY is required when agent_provider='{provider}'"
-        )
+        raise LLMConfigError(f"ANIMA_AGENT_API_KEY is required when agent_provider='{provider}'")
     return api_key
 
 
@@ -163,9 +164,7 @@ def wrap_llm_error(exc: Exception, *, provider: str, base_url: str) -> LLMInvoca
         return LLMInvocationError(msg)
 
     if isinstance(exc, httpx.HTTPError):
-        return LLMInvocationError(
-            f"Failed to reach {provider} at {base_url!r}: {exc}"
-        )
+        return LLMInvocationError(f"Failed to reach {provider} at {base_url!r}: {exc}")
 
     error_str = str(exc)
     if _is_context_overflow_message(error_str):

@@ -1,15 +1,21 @@
 from __future__ import annotations
-from anima_server.services.crypto import (
-    AUTH_TAG_LENGTH,
-    IV_LENGTH,
-    KEY_LENGTH,
-    SALT_LENGTH,
-    VAULT_ARGON2_MEMORY_COST_KIB,
-    VAULT_ARGON2_PARALLELISM,
-    VAULT_ARGON2_TIME_COST,
-    decrypt_text_with_dek,
-    derive_argon2id_key,
-)
+
+import base64
+import hashlib
+import json
+import logging
+import os
+import shutil
+from datetime import UTC, datetime
+from pathlib import Path, PurePosixPath
+from typing import Any
+from uuid import uuid4
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
+from anima_server.config import settings
 from anima_server.models import (
     AgentMessage,
     AgentRun,
@@ -25,23 +31,20 @@ from anima_server.models import (
     User,
     UserKey,
 )
-from anima_server.config import settings
-from anima_server.services.data_crypto import ef as encrypt_field_for_user, resolve_domain
+from anima_server.services.crypto import (
+    AUTH_TAG_LENGTH,
+    IV_LENGTH,
+    KEY_LENGTH,
+    SALT_LENGTH,
+    VAULT_ARGON2_MEMORY_COST_KIB,
+    VAULT_ARGON2_PARALLELISM,
+    VAULT_ARGON2_TIME_COST,
+    decrypt_text_with_dek,
+    derive_argon2id_key,
+)
+from anima_server.services.data_crypto import ef as encrypt_field_for_user
+from anima_server.services.data_crypto import resolve_domain
 from anima_server.services.sessions import get_active_deks
-from sqlalchemy.orm import Session
-from sqlalchemy import select, text
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-import base64
-import hashlib
-import json
-import logging
-import os
-import shutil
-from datetime import UTC, datetime
-from pathlib import Path, PurePosixPath
-from typing import Any
-from uuid import uuid4
 
 vault_logger = logging.getLogger(__name__)
 
@@ -80,27 +83,39 @@ def _migrate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     while version < VAULT_VERSION:
         migrator = VAULT_MIGRATORS.get(version)
         if migrator is None:
-            raise ValueError(
-                f"No migration path from vault version {version} to {version + 1}."
-            )
+            raise ValueError(f"No migration path from vault version {version} to {version + 1}.")
         payload = migrator(payload)
         version = payload.get("version", version + 1)
     return payload
 
 
-_MEMORY_TABLES = frozenset({
-    "memoryItems", "memoryEpisodes", "memoryDailyLogs",
-    "selfModelBlocks", "emotionalSignals", "sessionNotes",
-})
+_MEMORY_TABLES = frozenset(
+    {
+        "memoryItems",
+        "memoryEpisodes",
+        "memoryDailyLogs",
+        "selfModelBlocks",
+        "emotionalSignals",
+        "sessionNotes",
+    }
+)
 
-_IDENTITY_TABLES = frozenset({
-    "users", "userKeys",
-})
+_IDENTITY_TABLES = frozenset(
+    {
+        "users",
+        "userKeys",
+    }
+)
 
-_CONVERSATION_TABLES = frozenset({
-    "agentThreads", "agentRuns", "agentSteps", "agentMessages",
-    "tasks",
-})
+_CONVERSATION_TABLES = frozenset(
+    {
+        "agentThreads",
+        "agentRuns",
+        "agentSteps",
+        "agentMessages",
+        "tasks",
+    }
+)
 
 
 def _decrypt_field_value(
@@ -124,7 +139,11 @@ def _decrypt_field_value(
 
 
 def _re_encrypt_field_value(
-    value: str | None, user_id: int, *, table: str = "", field: str = "",
+    value: str | None,
+    user_id: int,
+    *,
+    table: str = "",
+    field: str = "",
 ) -> str | None:
     """Re-encrypt a plaintext value with the importing user's active DEK."""
     if value is None:
@@ -132,7 +151,9 @@ def _re_encrypt_field_value(
     return encrypt_field_for_user(user_id, value, table=table, field=field)
 
 
-def export_vault(db: Session, passphrase: str, *, user_id: int | None = None, scope: str = "full") -> dict[str, Any]:
+def export_vault(
+    db: Session, passphrase: str, *, user_id: int | None = None, scope: str = "full"
+) -> dict[str, Any]:
     # Resolve active DEK so we can decrypt field-level encryption before export.
     # The vault envelope is the only encryption layer in the exported file.
     deks: dict[str, bytes] | None = None
@@ -144,8 +165,7 @@ def export_vault(db: Session, passphrase: str, *, user_id: int | None = None, sc
     if scope == "memories":
         # Only memory/identity tables — no conversation transcripts
         snapshot = {
-            k: v for k, v in full_snapshot.items()
-            if k in _MEMORY_TABLES or k in _IDENTITY_TABLES
+            k: v for k, v in full_snapshot.items() if k in _MEMORY_TABLES or k in _IDENTITY_TABLES
         }
     else:
         snapshot = full_snapshot
@@ -162,7 +182,7 @@ def export_vault(db: Session, passphrase: str, *, user_id: int | None = None, sc
         "userFiles": read_data_snapshot(user_id=user_id) if scope == "full" else {},
     }
     plaintext = json.dumps(payload)
-    aad = f"anima-vault:v{VAULT_VERSION}:{scope}".encode("utf-8")
+    aad = f"anima-vault:v{VAULT_VERSION}:{scope}".encode()
     envelope = encrypt_string(plaintext, passphrase, aad=aad)
     vault = json.dumps(envelope)
     date_stamp = datetime.now().date().isoformat()
@@ -173,7 +193,9 @@ def export_vault(db: Session, passphrase: str, *, user_id: int | None = None, sc
     }
 
 
-def import_vault(db: Session, vault: str, passphrase: str, *, user_id: int | None = None) -> dict[str, Any]:
+def import_vault(
+    db: Session, vault: str, passphrase: str, *, user_id: int | None = None
+) -> dict[str, Any]:
     """Import an encrypted vault into the current database context."""
     try:
         envelope = json.loads(vault)
@@ -246,8 +268,7 @@ def encrypt_string(
         parallelism=VAULT_ARGON2_PARALLELISM,
     )
     encrypted = AESGCM(key).encrypt(iv, plaintext.encode("utf-8"), aad)
-    ciphertext, tag = encrypted[:-
-                                AUTH_TAG_LENGTH], encrypted[-AUTH_TAG_LENGTH:]
+    ciphertext, tag = encrypted[:-AUTH_TAG_LENGTH], encrypted[-AUTH_TAG_LENGTH:]
     ciphertext_b64 = base64.b64encode(ciphertext).decode("ascii")
     integrity_hash = hashlib.sha256(ciphertext_b64.encode("ascii")).hexdigest()
     envelope: dict[str, Any] = {
@@ -308,9 +329,7 @@ def decrypt_string(envelope: dict[str, Any], passphrase: str) -> str:
         expected = checksum.get("hash", "")
         actual = hashlib.sha256(ciphertext_b64.encode("ascii")).hexdigest()
         if actual != expected:
-            raise ValueError(
-                "Vault integrity check failed — ciphertext may be corrupted."
-            )
+            raise ValueError("Vault integrity check failed — ciphertext may be corrupted.")
 
     # Recover AAD from envelope (backwards-compatible: None if absent)
     aad: bytes | None = None
@@ -344,9 +363,8 @@ def decrypt_string(envelope: dict[str, Any], passphrase: str) -> str:
         plaintext = AESGCM(key).decrypt(iv, ciphertext + tag, aad)
     except ValueError:
         raise
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(
-            "Failed to decrypt vault. Check the passphrase and payload.") from exc
+    except Exception as exc:
+        raise ValueError("Failed to decrypt vault. Check the passphrase and payload.") from exc
 
     return plaintext.decode("utf-8")
 
@@ -359,17 +377,11 @@ def _validate_vault_kdf_params(
     key_length: int,
 ) -> None:
     if time_cost > _MAX_VAULT_TIME_COST:
-        raise ValueError(
-            "Vault KDF timeCost exceeds maximum allowed value of 10."
-        )
+        raise ValueError("Vault KDF timeCost exceeds maximum allowed value of 10.")
     if memory_cost_kib > _MAX_VAULT_MEMORY_COST_KIB:
-        raise ValueError(
-            "Vault KDF memoryCostKiB exceeds maximum allowed value of 2097152."
-        )
+        raise ValueError("Vault KDF memoryCostKiB exceeds maximum allowed value of 2097152.")
     if parallelism > _MAX_VAULT_PARALLELISM:
-        raise ValueError(
-            "Vault KDF parallelism exceeds maximum allowed value of 8."
-        )
+        raise ValueError("Vault KDF parallelism exceeds maximum allowed value of 8.")
     if key_length != 32:
         raise ValueError("Vault KDF keyLength must be exactly 32.")
 
@@ -386,11 +398,12 @@ def export_database_snapshot(
         return query
 
     if user_id is not None:
-        users = [serialize_user_record(u) for u in db.scalars(
-            select(User).where(User.id == user_id)).all()]
+        users = [
+            serialize_user_record(u)
+            for u in db.scalars(select(User).where(User.id == user_id)).all()
+        ]
     else:
-        users = [serialize_user_record(u)
-                 for u in db.scalars(select(User)).all()]
+        users = [serialize_user_record(u) for u in db.scalars(select(User)).all()]
     user_keys = [
         serialize_user_key_record(user_key)
         for user_key in db.scalars(_scoped(select(UserKey), UserKey)).all()
@@ -407,44 +420,42 @@ def export_database_snapshot(
         serialize_memory_daily_log_record(log, deks=deks)
         for log in db.scalars(_scoped(select(MemoryDailyLog), MemoryDailyLog)).all()
     ]
-    tasks = [
-        serialize_task_record(task)
-        for task in db.scalars(_scoped(select(Task), Task)).all()
-    ]
+    tasks = [serialize_task_record(task) for task in db.scalars(_scoped(select(Task), Task)).all()]
     agent_threads = [
         serialize_agent_thread_record(t)
         for t in db.scalars(_scoped(select(AgentThread), AgentThread)).all()
     ]
     # Scope runs/steps/messages via user_id on runs, thread_id on steps/messages
     agent_runs = [
-        serialize_agent_run_record(r)
-        for r in db.scalars(_scoped(select(AgentRun), AgentRun)).all()
+        serialize_agent_run_record(r) for r in db.scalars(_scoped(select(AgentRun), AgentRun)).all()
     ]
     # Build thread_id -> user_id map for message decryption
-    _thread_user_map: dict[int, int] = {
-        t["id"]: t["user_id"] for t in agent_threads}
+    _thread_user_map: dict[int, int] = {t["id"]: t["user_id"] for t in agent_threads}
 
     if user_id is not None:
         scoped_thread_ids = [t["id"] for t in agent_threads]
-        agent_steps = [
-            serialize_agent_step_record(s)
-            for s in db.scalars(
-                select(AgentStep).where(
-                    AgentStep.thread_id.in_(scoped_thread_ids))
-            ).all()
-        ] if scoped_thread_ids else []
-        agent_messages = [
-            serialize_agent_message_record(m, thread_user_map=_thread_user_map, deks=deks)
-            for m in db.scalars(
-                select(AgentMessage).where(
-                    AgentMessage.thread_id.in_(scoped_thread_ids))
-            ).all()
-        ] if scoped_thread_ids else []
+        agent_steps = (
+            [
+                serialize_agent_step_record(s)
+                for s in db.scalars(
+                    select(AgentStep).where(AgentStep.thread_id.in_(scoped_thread_ids))
+                ).all()
+            ]
+            if scoped_thread_ids
+            else []
+        )
+        agent_messages = (
+            [
+                serialize_agent_message_record(m, thread_user_map=_thread_user_map, deks=deks)
+                for m in db.scalars(
+                    select(AgentMessage).where(AgentMessage.thread_id.in_(scoped_thread_ids))
+                ).all()
+            ]
+            if scoped_thread_ids
+            else []
+        )
     else:
-        agent_steps = [
-            serialize_agent_step_record(s)
-            for s in db.scalars(select(AgentStep)).all()
-        ]
+        agent_steps = [serialize_agent_step_record(s) for s in db.scalars(select(AgentStep)).all()]
         agent_messages = [
             serialize_agent_message_record(m, thread_user_map=_thread_user_map, deks=deks)
             for m in db.scalars(select(AgentMessage)).all()
@@ -487,8 +498,7 @@ def restore_database_snapshot(
     users_payload = snapshot.get("users")
     user_keys_payload = snapshot.get("userKeys")
     if not isinstance(users_payload, list) or not isinstance(user_keys_payload, list):
-        raise ValueError(
-            "Vault database snapshot is missing users or userKeys.")
+        raise ValueError("Vault database snapshot is missing users or userKeys.")
 
     memory_items_payload = snapshot.get("memoryItems", [])
     memory_episodes_payload = snapshot.get("memoryEpisodes", [])
@@ -533,10 +543,8 @@ def restore_database_snapshot(
                     gender=coerce_optional_str(record.get("gender")),
                     age=coerce_optional_int(record.get("age")),
                     birthday=coerce_optional_str(record.get("birthday")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -556,10 +564,8 @@ def restore_database_snapshot(
                     wrap_iv=str(record["wrap_iv"]),
                     wrap_tag=str(record["wrap_tag"]),
                     wrapped_dek=str(record["wrapped_dek"]),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -574,16 +580,12 @@ def restore_database_snapshot(
                     category=str(record["category"]),
                     importance=int(record.get("importance", 3)),
                     source=str(record.get("source", "extraction")),
-                    superseded_by=coerce_optional_int(
-                        record.get("superseded_by")),
+                    superseded_by=coerce_optional_int(record.get("superseded_by")),
                     reference_count=int(record.get("reference_count", 0)),
-                    last_referenced_at=parse_optional_datetime(
-                        record.get("last_referenced_at")),
+                    last_referenced_at=parse_optional_datetime(record.get("last_referenced_at")),
                     embedding_json=record.get("embedding_json"),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -599,13 +601,10 @@ def restore_database_snapshot(
                     time=coerce_optional_str(record.get("time")),
                     topics_json=record.get("topics_json"),
                     summary=str(record["summary"]),
-                    emotional_arc=coerce_optional_str(
-                        record.get("emotional_arc")),
-                    significance_score=int(
-                        record.get("significance_score", 3)),
+                    emotional_arc=coerce_optional_str(record.get("emotional_arc")),
+                    significance_score=int(record.get("significance_score", 3)),
                     turn_count=coerce_optional_int(record.get("turn_count")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
                 )
             )
 
@@ -619,8 +618,7 @@ def restore_database_snapshot(
                     date=str(record["date"]),
                     user_message=str(record["user_message"]),
                     assistant_response=str(record["assistant_response"]),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
                 )
             )
 
@@ -635,12 +633,9 @@ def restore_database_snapshot(
                     done=bool(record.get("done", False)),
                     priority=int(record.get("priority", 2)),
                     due_date=coerce_optional_str(record.get("due_date")),
-                    completed_at=parse_optional_datetime(
-                        record.get("completed_at")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    completed_at=parse_optional_datetime(record.get("completed_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -653,14 +648,10 @@ def restore_database_snapshot(
                     user_id=int(record["user_id"]),
                     status=str(record.get("status", "active")),
                     title=coerce_optional_str(record.get("title")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
-                    last_message_at=parse_optional_datetime(
-                        record.get("last_message_at")),
-                    next_message_sequence=int(
-                        record.get("next_message_sequence", 1)),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
+                    last_message_at=parse_optional_datetime(record.get("last_message_at")),
+                    next_message_sequence=int(record.get("next_message_sequence", 1)),
                 )
             )
 
@@ -678,12 +669,9 @@ def restore_database_snapshot(
                     value=str(record["value"]),
                     note_type=str(record.get("note_type", "observation")),
                     is_active=bool(record.get("is_active", True)),
-                    promoted_to_item_id=coerce_optional_int(
-                        record.get("promoted_to_item_id")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    promoted_to_item_id=coerce_optional_int(record.get("promoted_to_item_id")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -699,10 +687,8 @@ def restore_database_snapshot(
                     version=int(record.get("version", 1)),
                     updated_by=str(record.get("updated_by", "system")),
                     metadata_json=record.get("metadata_json"),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
-                    updated_at=parse_optional_datetime(
-                        record.get("updated_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
+                    updated_at=parse_optional_datetime(record.get("updated_at")),
                 )
             )
 
@@ -716,16 +702,13 @@ def restore_database_snapshot(
                     thread_id=coerce_optional_int(record.get("thread_id")),
                     emotion=str(record["emotion"]),
                     confidence=float(record.get("confidence", 0.5)),
-                    evidence_type=str(record.get(
-                        "evidence_type", "linguistic")),
+                    evidence_type=str(record.get("evidence_type", "linguistic")),
                     evidence=str(record.get("evidence", "")),
                     trajectory=str(record.get("trajectory", "stable")),
-                    previous_emotion=coerce_optional_str(
-                        record.get("previous_emotion")),
+                    previous_emotion=coerce_optional_str(record.get("previous_emotion")),
                     topic=str(record.get("topic", "")),
                     acted_on=bool(record.get("acted_on", False)),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
                 )
             )
 
@@ -743,16 +726,11 @@ def restore_database_snapshot(
                     status=str(record.get("status", "completed")),
                     stop_reason=coerce_optional_str(record.get("stop_reason")),
                     error_text=coerce_optional_str(record.get("error_text")),
-                    started_at=parse_optional_datetime(
-                        record.get("started_at")),
-                    completed_at=parse_optional_datetime(
-                        record.get("completed_at")),
-                    prompt_tokens=coerce_optional_int(
-                        record.get("prompt_tokens")),
-                    completion_tokens=coerce_optional_int(
-                        record.get("completion_tokens")),
-                    total_tokens=coerce_optional_int(
-                        record.get("total_tokens")),
+                    started_at=parse_optional_datetime(record.get("started_at")),
+                    completed_at=parse_optional_datetime(record.get("completed_at")),
+                    prompt_tokens=coerce_optional_int(record.get("prompt_tokens")),
+                    completion_tokens=coerce_optional_int(record.get("completion_tokens")),
+                    total_tokens=coerce_optional_int(record.get("total_tokens")),
                 )
             )
 
@@ -773,8 +751,7 @@ def restore_database_snapshot(
                     tool_calls_json=record.get("tool_calls_json"),
                     usage_json=record.get("usage_json"),
                     error_text=coerce_optional_str(record.get("error_text")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
                 )
             )
 
@@ -789,18 +766,14 @@ def restore_database_snapshot(
                     step_id=coerce_optional_int(record.get("step_id")),
                     sequence_id=int(record["sequence_id"]),
                     role=str(record["role"]),
-                    content_text=coerce_optional_str(
-                        record.get("content_text")),
+                    content_text=coerce_optional_str(record.get("content_text")),
                     content_json=record.get("content_json"),
                     tool_name=coerce_optional_str(record.get("tool_name")),
-                    tool_call_id=coerce_optional_str(
-                        record.get("tool_call_id")),
+                    tool_call_id=coerce_optional_str(record.get("tool_call_id")),
                     tool_args_json=record.get("tool_args_json"),
                     is_in_context=bool(record.get("is_in_context", True)),
-                    token_estimate=coerce_optional_int(
-                        record.get("token_estimate")),
-                    created_at=parse_optional_datetime(
-                        record.get("created_at")),
+                    token_estimate=coerce_optional_int(record.get("token_estimate")),
+                    created_at=parse_optional_datetime(record.get("created_at")),
                 )
             )
 
@@ -892,8 +865,7 @@ def write_data_snapshot(user_files: dict[str, Any], *, user_id: int | None = Non
                 continue
             if safe_path.parts[:2] != ("users", str(user_id)):
                 continue
-            local_relative = Path(
-                *safe_path.parts[2:]) if len(safe_path.parts) > 2 else Path()
+            local_relative = Path(*safe_path.parts[2:]) if len(safe_path.parts) > 2 else Path()
             if not local_relative.parts:
                 continue
             target = user_root / local_relative
@@ -945,7 +917,9 @@ def serialize_user_key_record(user_key: UserKey) -> dict[str, Any]:
 
 
 def serialize_memory_item_record(
-    item: MemoryItem, *, deks: dict[str, bytes] | None = None,
+    item: MemoryItem,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": item.id,
@@ -964,7 +938,9 @@ def serialize_memory_item_record(
 
 
 def serialize_memory_episode_record(
-    ep: MemoryEpisode, *, deks: dict[str, bytes] | None = None,
+    ep: MemoryEpisode,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": ep.id,
@@ -982,20 +958,26 @@ def serialize_memory_episode_record(
 
 
 def serialize_memory_daily_log_record(
-    log: MemoryDailyLog, *, deks: dict[str, bytes] | None = None,
+    log: MemoryDailyLog,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": log.id,
         "user_id": log.user_id,
         "date": log.date,
         "user_message": _decrypt_field_value(log.user_message, deks, table="memory_daily_logs"),
-        "assistant_response": _decrypt_field_value(log.assistant_response, deks, table="memory_daily_logs"),
+        "assistant_response": _decrypt_field_value(
+            log.assistant_response, deks, table="memory_daily_logs"
+        ),
         "created_at": serialize_optional_datetime(log.created_at),
     }
 
 
 def serialize_session_note_record(
-    note: SessionNote, *, deks: dict[str, bytes] | None = None,
+    note: SessionNote,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": note.id,
@@ -1098,7 +1080,9 @@ def serialize_agent_message_record(
 
 
 def serialize_self_model_block_record(
-    block: SelfModelBlock, *, deks: dict[str, bytes] | None = None,
+    block: SelfModelBlock,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": block.id,
@@ -1114,7 +1098,9 @@ def serialize_self_model_block_record(
 
 
 def serialize_emotional_signal_record(
-    signal: EmotionalSignal, *, deks: dict[str, bytes] | None = None,
+    signal: EmotionalSignal,
+    *,
+    deks: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
     return {
         "id": signal.id,
@@ -1164,10 +1150,19 @@ def reset_identity_sequences(db: Session) -> None:
         return
 
     for table_name in (
-        "users", "user_keys", "memory_items", "memory_episodes",
-        "memory_daily_logs", "tasks", "session_notes",
-        "self_model_blocks", "emotional_signals",
-        "agent_threads", "agent_runs", "agent_steps", "agent_messages",
+        "users",
+        "user_keys",
+        "memory_items",
+        "memory_episodes",
+        "memory_daily_logs",
+        "tasks",
+        "session_notes",
+        "self_model_blocks",
+        "emotional_signals",
+        "agent_threads",
+        "agent_runs",
+        "agent_steps",
+        "agent_messages",
     ):
         db.execute(
             text(
@@ -1205,14 +1200,13 @@ def _rebuild_vector_indices(db: Session, snapshot: dict[str, Any]) -> None:
     try:
         from anima_server.services.agent.embeddings import sync_to_vector_store
 
-        user_ids = {int(u["id"]) for u in snapshot.get(
-            "users", []) if isinstance(u, dict)}
+        user_ids = {int(u["id"]) for u in snapshot.get("users", []) if isinstance(u, dict)}
         for uid in user_ids:
             sync_to_vector_store(db, user_id=uid)
-    except Exception:  # noqa: BLE001
+    except Exception:
         import logging
-        logging.getLogger(__name__).debug(
-            "Vector index rebuild skipped during import")
+
+        logging.getLogger(__name__).debug("Vector index rebuild skipped during import")
 
 
 def _read_manifest_snapshot() -> dict[str, Any]:
@@ -1254,40 +1248,63 @@ def _re_encrypt_snapshot_fields(
 
     for item in snapshot.get("memoryItems", []):
         if isinstance(item, dict) and item.get("content"):
-            item["content"] = _re_encrypt_field_value(item["content"], user_id, table="memory_items", field="content")
+            item["content"] = _re_encrypt_field_value(
+                item["content"], user_id, table="memory_items", field="content"
+            )
 
     for ep in snapshot.get("memoryEpisodes", []):
         if isinstance(ep, dict):
             if ep.get("summary"):
-                ep["summary"] = _re_encrypt_field_value(ep["summary"], user_id, table="memory_episodes", field="summary")
+                ep["summary"] = _re_encrypt_field_value(
+                    ep["summary"], user_id, table="memory_episodes", field="summary"
+                )
             if ep.get("emotional_arc"):
-                ep["emotional_arc"] = _re_encrypt_field_value(ep["emotional_arc"], user_id, table="memory_episodes", field="emotional_arc")
+                ep["emotional_arc"] = _re_encrypt_field_value(
+                    ep["emotional_arc"], user_id, table="memory_episodes", field="emotional_arc"
+                )
 
     for log in snapshot.get("memoryDailyLogs", []):
         if isinstance(log, dict):
             if log.get("user_message"):
-                log["user_message"] = _re_encrypt_field_value(log["user_message"], user_id, table="memory_daily_logs", field="user_message")
+                log["user_message"] = _re_encrypt_field_value(
+                    log["user_message"], user_id, table="memory_daily_logs", field="user_message"
+                )
             if log.get("assistant_response"):
-                log["assistant_response"] = _re_encrypt_field_value(log["assistant_response"], user_id, table="memory_daily_logs", field="assistant_response")
+                log["assistant_response"] = _re_encrypt_field_value(
+                    log["assistant_response"],
+                    user_id,
+                    table="memory_daily_logs",
+                    field="assistant_response",
+                )
 
     for note in snapshot.get("sessionNotes", []):
         if isinstance(note, dict) and note.get("value"):
-            note["value"] = _re_encrypt_field_value(note["value"], user_id, table="session_notes", field="value")
+            note["value"] = _re_encrypt_field_value(
+                note["value"], user_id, table="session_notes", field="value"
+            )
 
     for block in snapshot.get("selfModelBlocks", []):
         if isinstance(block, dict) and block.get("content"):
-            block["content"] = _re_encrypt_field_value(block["content"], user_id, table="self_model_blocks", field="content")
+            block["content"] = _re_encrypt_field_value(
+                block["content"], user_id, table="self_model_blocks", field="content"
+            )
 
     for signal in snapshot.get("emotionalSignals", []):
         if isinstance(signal, dict):
             if signal.get("evidence"):
-                signal["evidence"] = _re_encrypt_field_value(signal["evidence"], user_id, table="emotional_signals", field="evidence")
+                signal["evidence"] = _re_encrypt_field_value(
+                    signal["evidence"], user_id, table="emotional_signals", field="evidence"
+                )
             if signal.get("topic"):
-                signal["topic"] = _re_encrypt_field_value(signal["topic"], user_id, table="emotional_signals", field="topic")
+                signal["topic"] = _re_encrypt_field_value(
+                    signal["topic"], user_id, table="emotional_signals", field="topic"
+                )
 
     for msg in snapshot.get("agentMessages", []):
         if isinstance(msg, dict) and msg.get("content_text"):
-            msg["content_text"] = _re_encrypt_field_value(msg["content_text"], user_id, table="agent_messages", field="content_text")
+            msg["content_text"] = _re_encrypt_field_value(
+                msg["content_text"], user_id, table="agent_messages", field="content_text"
+            )
 
 
 def random_bytes(length: int) -> bytes:

@@ -25,8 +25,7 @@ def test_tool_rules_solver_enforces_init_and_child_rules() -> None:
     assert solver.get_allowed_tools(all_tools) == {"think"}
     assert solver.should_force_tool_call() is True
     assert solver.validate_tool_call("current_datetime", all_tools) == (
-        "Tool 'current_datetime' is not allowed yet. "
-        "The first tool call must be one of: think."
+        "Tool 'current_datetime' is not allowed yet. The first tool call must be one of: think."
     )
 
     solver.update_state("think", "planned")

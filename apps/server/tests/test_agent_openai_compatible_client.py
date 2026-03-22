@@ -5,7 +5,6 @@ import json
 import httpx
 import pytest
 from anima_server.services.agent.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-
 from anima_server.services.agent.openai_compatible_client import (
     OpenAICompatibleChatClient,
     OpenAICompatibleStreamChunk,
@@ -159,7 +158,7 @@ async def test_openai_compatible_chat_client_streams_sse_chunks() -> None:
                                         "type": "function",
                                         "function": {
                                             "name": "send_message",
-                                            "arguments": "{\"message\":\"hi\"}",
+                                            "arguments": '{"message":"hi"}',
                                         },
                                     }
                                 ]
@@ -200,7 +199,7 @@ async def test_openai_compatible_chat_client_streams_sse_chunks() -> None:
                     "index": 0,
                     "id": "call-1",
                     "name": "send_message",
-                    "arguments": "{\"message\":\"hi\"}",
+                    "arguments": '{"message":"hi"}',
                 },
             ),
             usage_metadata={

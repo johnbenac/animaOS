@@ -82,6 +82,7 @@ _BLOCK_POLICIES: dict[str, BlockBudgetPolicy] = {
 @dataclass(frozen=True, slots=True)
 class BudgetConfig:
     """Character budgets per tier. total_budget is the hard ceiling."""
+
     total_budget: int = 24000
     tier_0_budget: int = 4000
     tier_1_budget: int = 6000
@@ -192,8 +193,7 @@ def plan_prompt_budget(
             PromptBudgetBlockDecision(
                 label=block.label,
                 tier=policy.tier,
-                status=("kept" if final_chars ==
-                        original_chars else "truncated"),
+                status=("kept" if final_chars == original_chars else "truncated"),
                 original_chars=original_chars,
                 final_chars=final_chars,
                 reason=_decision_reason(
@@ -205,8 +205,7 @@ def plan_prompt_budget(
         )
 
     dropped_chars = sum(
-        max(0, decision.original_chars - decision.final_chars)
-        for decision in decisions
+        max(0, decision.original_chars - decision.final_chars) for decision in decisions
     )
     trace = PromptBudgetTrace(
         total_budget=budget.total_budget,
@@ -215,8 +214,7 @@ def plan_prompt_budget(
         retained_token_estimate=estimate_char_tokens(total_chars),
         dropped_token_estimate=estimate_char_tokens(dropped_chars),
         tier_usage={str(tier): used for tier, used in tier_usage.items()},
-        tier_budgets={str(tier): limit for tier,
-                      limit in tier_budgets.items()},
+        tier_budgets={str(tier): limit for tier, limit in tier_budgets.items()},
         decisions=tuple(decisions),
     )
     return PromptBudgetPlan(

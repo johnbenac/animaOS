@@ -4,13 +4,12 @@ import base64
 import json
 
 import pytest
-from fastapi.testclient import TestClient
-
 from anima_server.db.session import get_user_session_factory
 from anima_server.models import User
 from anima_server.services.storage import get_user_data_dir
 from anima_server.services.vault import decrypt_string, encrypt_string
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(
@@ -30,12 +29,10 @@ def _register_user(
 
 def test_export_vault_requires_unlock_session() -> None:
     with managed_test_client("anima-vault-test-") as client:
-        response = client.post("/api/vault/export",
-                               json={"passphrase": "vault-pass"})
+        response = client.post("/api/vault/export", json={"passphrase": "vault-pass"})
 
         assert response.status_code == 401
-        assert response.json() == {
-            "error": "Session locked. Please sign in again."}
+        assert response.json() == {"error": "Session locked. Please sign in again."}
 
 
 def test_export_and_import_vault_restores_auth_and_files() -> None:
@@ -72,8 +69,7 @@ def test_export_and_import_vault_restores_auth_and_files() -> None:
         import_response = client.post(
             "/api/vault/import",
             headers=headers,
-            json={"passphrase": "vault-pass",
-                  "vault": export_payload["vault"]},
+            json={"passphrase": "vault-pass", "vault": export_payload["vault"]},
         )
 
         assert import_response.status_code == 200
@@ -90,8 +86,7 @@ def test_export_and_import_vault_restores_auth_and_files() -> None:
             assert [record.username for record in users] == ["alice"]
             assert users[0].display_name == "Alice"
 
-        assert (user_dir / "memory" /
-                "entry.md").read_text(encoding="utf-8") == "hello from vault"
+        assert (user_dir / "memory" / "entry.md").read_text(encoding="utf-8") == "hello from vault"
 
         stale_session_response = client.get(
             "/api/auth/me",
@@ -121,8 +116,7 @@ def test_import_vault_rejects_wrong_passphrase() -> None:
         import_response = client.post(
             "/api/vault/import",
             headers={"x-anima-unlock": token},
-            json={"passphrase": "wrong-pass",
-                  "vault": export_response.json()["vault"]},
+            json={"passphrase": "wrong-pass", "vault": export_response.json()["vault"]},
         )
 
         assert import_response.status_code == 400
@@ -152,7 +146,9 @@ def test_import_vault_preserves_original_password_hash() -> None:
         envelope = json.loads(export_response.json()["vault"])
         plaintext = decrypt_string(envelope, "vault-pass")
         payload = json.loads(plaintext)
-        payload["database"]["users"][0]["password_hash"] = "$argon2id$v=19$m=65536,t=3,p=4$invalid$invalid"
+        payload["database"]["users"][0]["password_hash"] = (
+            "$argon2id$v=19$m=65536,t=3,p=4$invalid$invalid"
+        )
         tampered_vault = json.dumps(
             encrypt_string(
                 json.dumps(payload),

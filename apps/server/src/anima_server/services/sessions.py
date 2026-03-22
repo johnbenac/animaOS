@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import ctypes
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-import secrets
 from threading import Lock
 
 SESSION_TTL = timedelta(hours=24)
@@ -65,9 +66,7 @@ class UnlockSessionStore:
     def revoke_user(self, user_id: int) -> None:
         with self._lock:
             matching_tokens = [
-                token
-                for token, session in self._sessions.items()
-                if session.user_id == user_id
+                token for token, session in self._sessions.items() if session.user_id == user_id
             ]
             for token in matching_tokens:
                 session = self._sessions.pop(token, None)
@@ -179,7 +178,7 @@ _sqlcipher_key: bytes | None = None
 
 
 def set_sqlcipher_key(key: bytes) -> None:
-    global _sqlcipher_key  # noqa: PLW0603
+    global _sqlcipher_key
     with _sqlcipher_key_lock:
         _sqlcipher_key = key
 
@@ -190,7 +189,7 @@ def get_sqlcipher_key() -> bytes | None:
 
 
 def clear_sqlcipher_key() -> None:
-    global _sqlcipher_key  # noqa: PLW0603
+    global _sqlcipher_key
     with _sqlcipher_key_lock:
         if _sqlcipher_key is not None:
             _zero_dek(_sqlcipher_key)
@@ -211,7 +210,5 @@ def _zero_dek(dek: bytes) -> None:
     backing the object — this is a defence-in-depth measure, not a
     guarantee against all memory inspection techniques.
     """
-    try:
+    with contextlib.suppress(Exception):
         ctypes.memset(id(dek) + bytes.__basicsize__ - 1, 0, len(dek))
-    except Exception:  # noqa: BLE001
-        pass

@@ -18,12 +18,11 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import SelfModelBlock
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
-SECTIONS = ("identity", "inner_state", "working_memory",
-            "growth_log", "intentions")
+SECTIONS = ("identity", "inner_state", "working_memory", "growth_log", "intentions")
 
 _SEED_IDENTITY = """# Who I Am
 <!-- certainty: low -->
@@ -111,9 +110,7 @@ def get_all_self_model_blocks(
     user_id: int,
 ) -> dict[str, SelfModelBlock]:
     """Get all self-model sections for a user, keyed by section name."""
-    blocks = db.scalars(
-        select(SelfModelBlock).where(SelfModelBlock.user_id == user_id)
-    ).all()
+    blocks = db.scalars(select(SelfModelBlock).where(SelfModelBlock.user_id == user_id)).all()
     return {b.section: b for b in blocks}
 
 
@@ -155,21 +152,26 @@ def set_self_model_block(
         and df(user_id, existing.content, table="self_model_blocks", field="content").strip()
     ):
         # Check if the proposed content is substantially different
-        existing_plaintext = df(user_id, existing.content, table="self_model_blocks", field="content")
+        existing_plaintext = df(
+            user_id, existing.content, table="self_model_blocks", field="content"
+        )
         existing_words = set(existing_plaintext.lower().split())
         new_words = set(content.lower().split())
         if existing_words and new_words:
-            overlap = len(existing_words & new_words) / \
-                max(len(existing_words), len(new_words))
+            overlap = len(existing_words & new_words) / max(len(existing_words), len(new_words))
             if overlap < 0.5:
                 # Too different — log to growth log instead of overwriting
                 logger.info(
                     "Blocked identity rewrite by %s (version %d < %d, overlap %.2f). "
                     "Logging to growth log instead.",
-                    updated_by, existing.version, _IDENTITY_STABILITY_THRESHOLD, overlap,
+                    updated_by,
+                    existing.version,
+                    _IDENTITY_STABILITY_THRESHOLD,
+                    overlap,
                 )
                 append_growth_log_entry(
-                    db, user_id=user_id,
+                    db,
+                    user_id=user_id,
                     entry=f"Identity update proposed by {updated_by} (blocked — too early): {content[:200]}",
                 )
                 return existing
@@ -264,8 +266,7 @@ def _is_duplicate_growth_entry(existing_content: str, new_entry: str) -> bool:
         existing_words = set(entry_text.lower().split())
         if not existing_words:
             continue
-        overlap = len(new_words & existing_words) / \
-            max(len(new_words), len(existing_words))
+        overlap = len(new_words & existing_words) / max(len(new_words), len(existing_words))
         if overlap > 0.7:
             return True
     return False
@@ -287,7 +288,9 @@ def seed_self_model(
         block = SelfModelBlock(
             user_id=user_id,
             section=section,
-            content=ef(user_id, _SEEDS.get(section, ""), table="self_model_blocks", field="content"),
+            content=ef(
+                user_id, _SEEDS.get(section, ""), table="self_model_blocks", field="content"
+            ),
             version=1,
             updated_by="system",
         )
@@ -304,10 +307,7 @@ def ensure_self_model_exists(
     user_id: int,
 ) -> None:
     """Ensure self-model exists for user, seeding if necessary."""
-    count = db.scalar(
-        select(SelfModelBlock.id).where(
-            SelfModelBlock.user_id == user_id).limit(1)
-    )
+    count = db.scalar(select(SelfModelBlock.id).where(SelfModelBlock.user_id == user_id).limit(1))
     if count is None:
         seed_self_model(db, user_id=user_id)
 

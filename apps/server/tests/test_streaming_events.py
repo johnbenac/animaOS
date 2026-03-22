@@ -19,7 +19,6 @@ from anima_server.services.agent.streaming import (
     summarize_usage,
 )
 
-
 # --------------------------------------------------------------------------- #
 # Full event sequence with reasoning + timing
 # --------------------------------------------------------------------------- #
@@ -111,8 +110,7 @@ def test_stream_events_without_reasoning_or_timing() -> None:
             StepTrace(
                 step_index=0,
                 assistant_text="ok",
-                usage=UsageStats(
-                    prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                usage=UsageStats(prompt_tokens=1, completion_tokens=1, total_tokens=2),
             ),
         ],
     )
@@ -218,8 +216,7 @@ def test_build_reasoning_event_without_signature() -> None:
 
 
 def test_build_timing_event_with_values() -> None:
-    timing = StepTiming(step_duration_ms=100.0,
-                        llm_duration_ms=80.0, ttft_ms=30.0)
+    timing = StepTiming(step_duration_ms=100.0, llm_duration_ms=80.0, ttft_ms=30.0)
     event = build_timing_event(0, timing)
     assert event.event == "timing"
     assert event.data["stepDurationMs"] == 100.0
@@ -286,8 +283,7 @@ def test_summarize_usage_omits_reasoning_when_absent() -> None:
         step_traces=[
             StepTrace(
                 step_index=0,
-                usage=UsageStats(prompt_tokens=10,
-                                 completion_tokens=5, total_tokens=15),
+                usage=UsageStats(prompt_tokens=10, completion_tokens=5, total_tokens=15),
             ),
         ],
     )

@@ -16,12 +16,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import anima_server.services.agent.vector_store as vs
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import MemoryItem, User
 from anima_server.services.agent.embeddings import (
@@ -33,8 +29,10 @@ from anima_server.services.agent.memory_store import (
     _CATEGORY_QUERY_WEIGHTS,
     get_memory_items_scored,
 )
-import anima_server.services.agent.vector_store as vs
-
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -66,8 +64,7 @@ def _db_session() -> Generator[Session, None, None]:
 
 
 def _make_user(db: Session) -> User:
-    user = User(username="retrieval_tester",
-                display_name="Tester", password_hash="x")
+    user = User(username="retrieval_tester", display_name="Tester", password_hash="x")
     db.add(user)
     db.flush()
     return user
@@ -164,14 +161,20 @@ class TestReciprocalRankFusion:
 
         # Heavy semantic weight
         merged_sem = _reciprocal_rank_fusion(
-            semantic, keyword, semantic_weight=0.9, keyword_weight=0.1,
+            semantic,
+            keyword,
+            semantic_weight=0.9,
+            keyword_weight=0.1,
         )
         scores_sem = {item_id: score for item_id, score in merged_sem}
         assert scores_sem[1] > scores_sem[2]
 
         # Heavy keyword weight
         merged_kw = _reciprocal_rank_fusion(
-            semantic, keyword, semantic_weight=0.1, keyword_weight=0.9,
+            semantic,
+            keyword,
+            semantic_weight=0.1,
+            keyword_weight=0.9,
         )
         scores_kw = {item_id: score for item_id, score in merged_kw}
         assert scores_kw[2] > scores_kw[1]
@@ -265,8 +268,7 @@ class TestAdaptiveFilter:
 
     def test_recall_mode_returns_max_results(self):
         """When no precision/gap trigger, return up to max_results."""
-        results = self._make_results(
-            [0.5, 0.49, 0.48, 0.47, 0.46, 0.45, 0.44, 0.43])
+        results = self._make_results([0.5, 0.49, 0.48, 0.47, 0.46, 0.45, 0.44, 0.43])
         filtered = adaptive_filter(
             results,
             max_results=6,
@@ -301,15 +303,21 @@ class TestQueryAwareScoring:
 
             # Item A: low importance but embedding close to query
             item_a = _make_item(
-                db, user.id, "likes cooking Italian food",
-                category="fact", importance=2,
+                db,
+                user.id,
+                "likes cooking Italian food",
+                category="fact",
+                importance=2,
                 embedding=[1.0, 0.0, 0.0],
                 created_at=now,
             )
             # Item B: high importance but embedding far from query
             item_b = _make_item(
-                db, user.id, "works as a software engineer",
-                category="fact", importance=5,
+                db,
+                user.id,
+                "works as a software engineer",
+                category="fact",
+                importance=5,
                 embedding=[0.0, 1.0, 0.0],
                 created_at=now,
             )
@@ -319,11 +327,17 @@ class TestQueryAwareScoring:
             query_emb = [0.9, 0.1, 0.0]
 
             scored_with_query = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=query_emb,
             )
             scored_without_query = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
             )
 
             # Without query, item_b (importance=5) should rank first
@@ -339,21 +353,30 @@ class TestQueryAwareScoring:
             now = datetime.now(UTC)
 
             _make_item(
-                db, user.id, "has embedding",
-                category="fact", importance=3,
+                db,
+                user.id,
+                "has embedding",
+                category="fact",
+                importance=3,
                 embedding=[1.0, 0.0, 0.0],
                 created_at=now,
             )
             _make_item(
-                db, user.id, "no embedding",
-                category="fact", importance=5,
+                db,
+                user.id,
+                "no embedding",
+                category="fact",
+                importance=5,
                 embedding=None,
                 created_at=now,
             )
             db.commit()
 
             results = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=[1.0, 0.0, 0.0],
             )
             # Both items should appear
@@ -365,36 +388,41 @@ class TestQueryAwareScoring:
             user = _make_user(db)
             now = datetime.now(UTC)
 
-            _make_item(db, user.id, "fact1", category="fact",
-                       importance=5, created_at=now)
-            _make_item(db, user.id, "fact2", category="fact",
-                       importance=1, created_at=now)
+            _make_item(db, user.id, "fact1", category="fact", importance=5, created_at=now)
+            _make_item(db, user.id, "fact2", category="fact", importance=1, created_at=now)
             db.commit()
 
             results_with = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=None,
             )
             results_without = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
             )
 
-            assert [r.id for r in results_with] == [
-                r.id for r in results_without]
+            assert [r.id for r in results_with] == [r.id for r in results_without]
 
     def test_category_weights_differ(self):
         """Different categories should use different query weights."""
-        assert _CATEGORY_QUERY_WEIGHTS["goal"][0] > _CATEGORY_QUERY_WEIGHTS["goal"][1], \
+        assert _CATEGORY_QUERY_WEIGHTS["goal"][0] > _CATEGORY_QUERY_WEIGHTS["goal"][1], (
             "Goals should weight retrieval more than query"
-        assert _CATEGORY_QUERY_WEIGHTS["relationship"][1] > _CATEGORY_QUERY_WEIGHTS["relationship"][0], \
-            "Relationships should weight query more than retrieval"
-        assert _CATEGORY_QUERY_WEIGHTS["preference"][1] > _CATEGORY_QUERY_WEIGHTS["preference"][0], \
-            "Preferences should weight query more than retrieval"
+        )
+        assert (
+            _CATEGORY_QUERY_WEIGHTS["relationship"][1] > _CATEGORY_QUERY_WEIGHTS["relationship"][0]
+        ), "Relationships should weight query more than retrieval"
+        assert (
+            _CATEGORY_QUERY_WEIGHTS["preference"][1] > _CATEGORY_QUERY_WEIGHTS["preference"][0]
+        ), "Preferences should weight query more than retrieval"
 
     def test_category_weights_sum_to_one(self):
         for cat, (w_r, w_q) in _CATEGORY_QUERY_WEIGHTS.items():
-            assert abs(
-                w_r + w_q - 1.0) < 1e-9, f"Weights for {cat} don't sum to 1.0"
+            assert abs(w_r + w_q - 1.0) < 1e-9, f"Weights for {cat} don't sum to 1.0"
 
 
 # ===================================================================
@@ -433,10 +461,11 @@ class TestBatchEmbeddings:
 
         with (
             patch("anima_server.services.agent.embeddings.settings") as mock_settings,
+            patch("anima_server.services.agent.embeddings.validate_provider_configuration"),
             patch(
-                "anima_server.services.agent.embeddings.validate_provider_configuration"),
-            patch("anima_server.services.agent.embeddings.generate_embedding",
-                  side_effect=mock_generate),
+                "anima_server.services.agent.embeddings.generate_embedding",
+                side_effect=mock_generate,
+            ),
         ):
             mock_settings.agent_provider = "ollama"
             result = await generate_embeddings_batch(["a", "b", "c"])
@@ -459,13 +488,14 @@ class TestBatchEmbeddings:
 
         with (
             patch("anima_server.services.agent.embeddings.settings") as mock_settings,
-            patch(
-                "anima_server.services.agent.embeddings.validate_provider_configuration"),
+            patch("anima_server.services.agent.embeddings.validate_provider_configuration"),
             # For openrouter, the batch function will try HTTP. We mock at the
             # generate_embedding level via the ollama path which is easier to test.
             # Test the actual batch logic via the ollama gather path.
-            patch("anima_server.services.agent.embeddings.generate_embedding",
-                  side_effect=mock_generate),
+            patch(
+                "anima_server.services.agent.embeddings.generate_embedding",
+                side_effect=mock_generate,
+            ),
         ):
             mock_settings.agent_provider = "ollama"
             result = await generate_embeddings_batch(["hello", "world"])
@@ -476,9 +506,8 @@ class TestBatchEmbeddings:
     @pytest.mark.asyncio
     async def test_backfill_uses_batch(self):
         """backfill_embeddings should use batch generation instead of sequential."""
-        from sqlalchemy import text as sa_text
-
         from anima_server.services.agent.embeddings import backfill_embeddings
+        from sqlalchemy import text as sa_text
 
         with _db_session() as db:
             user = _make_user(db)
@@ -524,12 +553,7 @@ class TestBatchEmbeddings:
                 pass
 
             def json(self):
-                return {
-                    "data": [
-                        {"index": i, "embedding": [0.1] * 3}
-                        for i in range(self._count)
-                    ]
-                }
+                return {"data": [{"index": i, "embedding": [0.1] * 3} for i in range(self._count)]}
 
         class FakeClient:
             async def __aenter__(self):
@@ -549,12 +573,12 @@ class TestBatchEmbeddings:
 
         with (
             patch("anima_server.services.agent.embeddings.settings") as mock_settings,
+            patch("anima_server.services.agent.embeddings.validate_provider_configuration"),
             patch(
-                "anima_server.services.agent.embeddings.validate_provider_configuration"),
-            patch("anima_server.services.agent.embeddings.resolve_base_url",
-                  return_value="http://fake"),
-            patch(
-                "anima_server.services.agent.embeddings.build_provider_headers", return_value={}),
+                "anima_server.services.agent.embeddings.resolve_base_url",
+                return_value="http://fake",
+            ),
+            patch("anima_server.services.agent.embeddings.build_provider_headers", return_value={}),
             patch("httpx.AsyncClient", return_value=FakeClient()),
         ):
             mock_settings.agent_provider = "openrouter"
@@ -583,12 +607,12 @@ class TestBatchEmbeddings:
 
         with (
             patch("anima_server.services.agent.embeddings.settings") as mock_settings,
+            patch("anima_server.services.agent.embeddings.validate_provider_configuration"),
             patch(
-                "anima_server.services.agent.embeddings.validate_provider_configuration"),
-            patch("anima_server.services.agent.embeddings.resolve_base_url",
-                  return_value="http://fake"),
-            patch(
-                "anima_server.services.agent.embeddings.build_provider_headers", return_value={}),
+                "anima_server.services.agent.embeddings.resolve_base_url",
+                return_value="http://fake",
+            ),
+            patch("anima_server.services.agent.embeddings.build_provider_headers", return_value={}),
             patch("httpx.AsyncClient", return_value=AlwaysFailClient()),
         ):
             mock_settings.agent_provider = "openrouter"
@@ -609,12 +633,22 @@ class TestSimNormalization:
         with _db_session() as db:
             user = _make_user(db)
             now = datetime.now(UTC)
-            _make_item(db, user.id, "test", category="fact", importance=3,
-                       embedding=[1.0, 0.0, 0.0], created_at=now)
+            _make_item(
+                db,
+                user.id,
+                "test",
+                category="fact",
+                importance=3,
+                embedding=[1.0, 0.0, 0.0],
+                created_at=now,
+            )
             db.commit()
 
             results = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=[1.0, 0.0, 0.0],
             )
             assert len(results) == 1
@@ -625,15 +659,32 @@ class TestSimNormalization:
             user = _make_user(db)
             now = datetime.now(UTC)
             # Orthogonal vectors → cosine sim = 0.0
-            _make_item(db, user.id, "item_a", category="fact", importance=3,
-                       embedding=[1.0, 0.0], created_at=now)
-            _make_item(db, user.id, "item_b", category="fact", importance=3,
-                       embedding=[0.0, 1.0], created_at=now)
+            _make_item(
+                db,
+                user.id,
+                "item_a",
+                category="fact",
+                importance=3,
+                embedding=[1.0, 0.0],
+                created_at=now,
+            )
+            _make_item(
+                db,
+                user.id,
+                "item_b",
+                category="fact",
+                importance=3,
+                embedding=[0.0, 1.0],
+                created_at=now,
+            )
             db.commit()
 
             # Query is [1,0] — sim to item_a=1.0, sim to item_b=0.0
             results = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=[1.0, 0.0],
             )
             # item_a (sim=1.0 → norm=1.0) should rank above item_b (sim=0.0 → norm=0.5)
@@ -645,12 +696,22 @@ class TestSimNormalization:
         with _db_session() as db:
             user = _make_user(db)
             now = datetime.now(UTC)
-            _make_item(db, user.id, "opposite", category="fact", importance=3,
-                       embedding=[-1.0, 0.0], created_at=now)
+            _make_item(
+                db,
+                user.id,
+                "opposite",
+                category="fact",
+                importance=3,
+                embedding=[-1.0, 0.0],
+                created_at=now,
+            )
             db.commit()
 
             results = get_memory_items_scored(
-                db, user_id=user.id, category="fact", limit=10,
+                db,
+                user_id=user.id,
+                category="fact",
+                limit=10,
                 query_embedding=[1.0, 0.0],
             )
             assert len(results) == 1
@@ -673,25 +734,35 @@ class TestHybridSearchIntegration:
 
             # Item found by semantic (close embedding)
             item_sem = _make_item(
-                db, user.id, "enjoys hiking in mountains",
+                db,
+                user.id,
+                "enjoys hiking in mountains",
                 embedding=[1.0, 0.0, 0.0],
             )
             upsert_memory(
-                user.id, item_id=item_sem.id,
-                content=item_sem.content, embedding=[1.0, 0.0, 0.0],
-                category="fact", importance=3,
+                user.id,
+                item_id=item_sem.id,
+                content=item_sem.content,
+                embedding=[1.0, 0.0, 0.0],
+                category="fact",
+                importance=3,
                 db=db,
             )
 
             # Item found by keyword (text overlap) but different embedding
             item_kw = _make_item(
-                db, user.id, "hiking trail near home",
+                db,
+                user.id,
+                "hiking trail near home",
                 embedding=[0.0, 1.0, 0.0],
             )
             upsert_memory(
-                user.id, item_id=item_kw.id,
-                content=item_kw.content, embedding=[0.0, 1.0, 0.0],
-                category="fact", importance=3,
+                user.id,
+                item_id=item_kw.id,
+                content=item_kw.content,
+                embedding=[0.0, 1.0, 0.0],
+                category="fact",
+                importance=3,
                 db=db,
             )
 
@@ -706,8 +777,11 @@ class TestHybridSearchIntegration:
                 side_effect=mock_embed,
             ):
                 result = await hybrid_search(
-                    db, user_id=user.id, query="hiking",
-                    limit=10, similarity_threshold=0.0,
+                    db,
+                    user_id=user.id,
+                    query="hiking",
+                    limit=10,
+                    similarity_threshold=0.0,
                 )
 
                 assert isinstance(result, HybridSearchResult)
@@ -734,7 +808,10 @@ class TestHybridSearchIntegration:
                 side_effect=mock_embed,
             ):
                 result = await hybrid_search(
-                    db, user_id=user.id, query="test", limit=5,
+                    db,
+                    user_id=user.id,
+                    query="test",
+                    limit=5,
                 )
                 assert result.query_embedding == [0.5, 0.5, 0.0]
 
@@ -748,9 +825,12 @@ class TestHybridSearchIntegration:
             user = _make_user(db)
             item = _make_item(db, user.id, "cooking pasta recipe")
             upsert_memory(
-                user.id, item_id=item.id,
-                content=item.content, embedding=[0.1, 0.2, 0.3],
-                category="fact", importance=3,
+                user.id,
+                item_id=item.id,
+                content=item.content,
+                embedding=[0.1, 0.2, 0.3],
+                category="fact",
+                importance=3,
                 db=db,
             )
             db.commit()
@@ -763,8 +843,11 @@ class TestHybridSearchIntegration:
                 side_effect=mock_embed_fail,
             ):
                 result = await hybrid_search(
-                    db, user_id=user.id, query="cooking",
-                    limit=10, similarity_threshold=0.0,
+                    db,
+                    user_id=user.id,
+                    query="cooking",
+                    limit=10,
+                    similarity_threshold=0.0,
                 )
                 assert result.query_embedding is None
                 # Should still find via keyword
@@ -780,7 +863,9 @@ class TestHybridSearchIntegration:
             user = _make_user(db)
             # Items with embedding_json but NOT indexed in vector store
             item = _make_item(
-                db, user.id, "brute force item",
+                db,
+                user.id,
+                "brute force item",
                 embedding=[0.9, 0.1, 0.0],
             )
             db.commit()
@@ -800,8 +885,11 @@ class TestHybridSearchIntegration:
                 ),
             ):
                 result = await hybrid_search(
-                    db, user_id=user.id, query="test",
-                    limit=10, similarity_threshold=0.0,
+                    db,
+                    user_id=user.id,
+                    query="test",
+                    limit=10,
+                    similarity_threshold=0.0,
                 )
                 found_ids = {it.id for it, _ in result.items}
                 assert item.id in found_ids

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryDailyLog, MemoryEpisode
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +49,15 @@ async def maybe_generate_episode(
         today = datetime.now(UTC).date().isoformat()
 
         # Sum actual turn_count from existing episodes to avoid offset overlap
-        consumed_turns = db.scalar(
-            select(func.coalesce(func.sum(MemoryEpisode.turn_count), 0)).where(
-                MemoryEpisode.user_id == user_id,
-                MemoryEpisode.date == today,
+        consumed_turns = (
+            db.scalar(
+                select(func.coalesce(func.sum(MemoryEpisode.turn_count), 0)).where(
+                    MemoryEpisode.user_id == user_id,
+                    MemoryEpisode.date == today,
+                )
             )
-        ) or 0
+            or 0
+        )
 
         logs = list(
             db.scalars(
@@ -87,8 +89,18 @@ async def maybe_generate_episode(
             try:
                 messages = [
                     (
-                        _df(user_id, log.user_message, table="memory_daily_logs", field="user_message"),
-                        _df(user_id, log.assistant_response, table="memory_daily_logs", field="assistant_response"),
+                        _df(
+                            user_id,
+                            log.user_message,
+                            table="memory_daily_logs",
+                            field="user_message",
+                        ),
+                        _df(
+                            user_id,
+                            log.assistant_response,
+                            table="memory_daily_logs",
+                            field="assistant_response",
+                        ),
                     )
                     for log in remaining_logs
                 ]
@@ -113,11 +125,11 @@ async def maybe_generate_episode(
                             result_episode = merged_into
                     db.commit()
                     return result_episode
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("Batch segmentation failed, falling back to sequential")
 
         # --- Sequential path (original behavior) ---
-        episode_logs = remaining_logs[:EPISODE_MIN_TURNS * 2]
+        episode_logs = remaining_logs[: EPISODE_MIN_TURNS * 2]
 
         if settings.agent_provider == "scaffold":
             episode = _create_fallback_episode(
@@ -199,17 +211,23 @@ def _try_merge_episode(
         # --- Merge into *candidate* (the older episode) ---
         # Combine summaries
         existing_summary = df(
-            user_id, candidate.summary,
-            table="memory_episodes", field="summary",
+            user_id,
+            candidate.summary,
+            table="memory_episodes",
+            field="summary",
         )
         new_summary = df(
-            user_id, new_episode.summary,
-            table="memory_episodes", field="summary",
+            user_id,
+            new_episode.summary,
+            table="memory_episodes",
+            field="summary",
         )
         merged_summary = f"{existing_summary}\n\n{new_summary}"
         candidate.summary = ef(
-            user_id, merged_summary,
-            table="memory_episodes", field="summary",
+            user_id,
+            merged_summary,
+            table="memory_episodes",
+            field="summary",
         )
 
         # Union topics (preserve original casing from both sides, deduplicate)
@@ -238,7 +256,10 @@ def _try_merge_episode(
 
         logger.info(
             "Merged episode %d into episode %d (jaccard=%.2f, topics=%s)",
-            new_episode.id, candidate.id, jaccard, merged_topics,
+            new_episode.id,
+            candidate.id,
+            jaccard,
+            merged_topics,
         )
         return candidate
 
@@ -286,7 +307,7 @@ async def _generate_episode_via_llm(
 ) -> MemoryEpisode:
     try:
         parsed = await _call_llm_for_episode(logs, user_id=user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM episode generation failed, using fallback")
         return _create_fallback_episode(
             db,
@@ -337,18 +358,19 @@ async def _call_llm_for_episode(logs: list[MemoryDailyLog], *, user_id: int = 0)
     prompt = EPISODE_GENERATION_PROMPT.format(turns=turns_text)
 
     llm = create_llm()
-    response = await llm.ainvoke([
-        SystemMessage(
-            content="You generate episode summaries. Respond only with JSON."),
-        HumanMessage(content=prompt),
-    ])
+    response = await llm.ainvoke(
+        [
+            SystemMessage(content="You generate episode summaries. Respond only with JSON."),
+            HumanMessage(content=prompt),
+        ]
+    )
     content = getattr(response, "content", "")
     if not isinstance(content, str):
         content = str(content)
     return _parse_json_object(content)
 
 
-from anima_server.services.agent.json_utils import parse_json_object  # noqa: E302
+from anima_server.services.agent.json_utils import parse_json_object
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:

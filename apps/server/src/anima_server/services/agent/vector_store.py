@@ -54,7 +54,7 @@ def _deserialize_f32(data: bytes) -> list[float]:
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if len(a) != len(b) or not a:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0.0 or norm_b == 0.0:
@@ -174,14 +174,16 @@ class OrmVecStore(VectorStore):
             existing.importance = importance
             existing.embedding = blob
         else:
-            self._db.add(MemoryVector(
-                item_id=item_id,
-                user_id=user_id,
-                content=content,
-                category=category,
-                importance=importance,
-                embedding=blob,
-            ))
+            self._db.add(
+                MemoryVector(
+                    item_id=item_id,
+                    user_id=user_id,
+                    content=content,
+                    category=category,
+                    importance=importance,
+                    embedding=blob,
+                )
+            )
         self._db.flush()
 
     def delete(self, user_id: int, *, item_id: int) -> None:
@@ -214,11 +216,18 @@ class OrmVecStore(VectorStore):
         for row in rows:
             emb = _deserialize_f32(row.embedding)
             sim = _cosine_similarity(query_embedding, emb)
-            scored.append((sim, VectorSearchResult(
-                item_id=row.item_id, content=row.content,
-                category=row.category, importance=row.importance,
-                similarity=round(sim, 4),
-            )))
+            scored.append(
+                (
+                    sim,
+                    VectorSearchResult(
+                        item_id=row.item_id,
+                        content=row.content,
+                        category=row.category,
+                        importance=row.importance,
+                        similarity=round(sim, 4),
+                    ),
+                )
+            )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:limit]]
 
@@ -241,11 +250,18 @@ class OrmVecStore(VectorStore):
         for row in rows:
             sim = _text_similarity(query_text, row.content)
             if sim > 0.0:
-                scored.append((sim, VectorSearchResult(
-                    item_id=row.item_id, content=row.content,
-                    category=row.category, importance=row.importance,
-                    similarity=round(sim, 4),
-                )))
+                scored.append(
+                    (
+                        sim,
+                        VectorSearchResult(
+                            item_id=row.item_id,
+                            content=row.content,
+                            category=row.category,
+                            importance=row.importance,
+                            similarity=round(sim, 4),
+                        ),
+                    )
+                )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:limit]]
 
@@ -256,29 +272,35 @@ class OrmVecStore(VectorStore):
     ) -> int:
         from anima_server.models import MemoryVector
 
-        self._db.execute(
-            delete(MemoryVector).where(MemoryVector.user_id == user_id))
+        self._db.execute(delete(MemoryVector).where(MemoryVector.user_id == user_id))
         for item_id, content, embedding, category, importance in items:
             blob = _serialize_f32(embedding)
-            self._db.add(MemoryVector(
-                item_id=item_id,
-                user_id=user_id,
-                content=content,
-                category=category,
-                importance=importance,
-                embedding=blob,
-            ))
+            self._db.add(
+                MemoryVector(
+                    item_id=item_id,
+                    user_id=user_id,
+                    content=content,
+                    category=category,
+                    importance=importance,
+                    embedding=blob,
+                )
+            )
         self._db.flush()
         return len(items)
 
     def count(self, user_id: int) -> int:
         from sqlalchemy import func as sa_func
+
         from anima_server.models import MemoryVector
 
-        return self._db.scalar(
-            select(sa_func.count()).select_from(MemoryVector).where(
-                MemoryVector.user_id == user_id)
-        ) or 0
+        return (
+            self._db.scalar(
+                select(sa_func.count())
+                .select_from(MemoryVector)
+                .where(MemoryVector.user_id == user_id)
+            )
+            or 0
+        )
 
     def reset(self) -> None:
         from anima_server.models import MemoryVector
@@ -318,8 +340,11 @@ class InMemoryVectorStore(VectorStore):
         importance: int = 3,
     ) -> None:
         self._data.setdefault(user_id, {})[item_id] = _VectorRecord(
-            item_id=item_id, content=content, embedding=embedding,
-            category=category, importance=importance,
+            item_id=item_id,
+            content=content,
+            embedding=embedding,
+            category=category,
+            importance=importance,
         )
 
     def delete(self, user_id: int, *, item_id: int) -> None:
@@ -341,11 +366,18 @@ class InMemoryVectorStore(VectorStore):
             if category is not None and record.category != category:
                 continue
             sim = _cosine_similarity(query_embedding, record.embedding)
-            scored.append((sim, VectorSearchResult(
-                item_id=record.item_id, content=record.content,
-                category=record.category, importance=record.importance,
-                similarity=round(sim, 4),
-            )))
+            scored.append(
+                (
+                    sim,
+                    VectorSearchResult(
+                        item_id=record.item_id,
+                        content=record.content,
+                        category=record.category,
+                        importance=record.importance,
+                        similarity=round(sim, 4),
+                    ),
+                )
+            )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:limit]]
 
@@ -364,11 +396,18 @@ class InMemoryVectorStore(VectorStore):
                 continue
             sim = _text_similarity(query_text, record.content)
             if sim > 0.0:
-                scored.append((sim, VectorSearchResult(
-                    item_id=record.item_id, content=record.content,
-                    category=record.category, importance=record.importance,
-                    similarity=round(sim, 4),
-                )))
+                scored.append(
+                    (
+                        sim,
+                        VectorSearchResult(
+                            item_id=record.item_id,
+                            content=record.content,
+                            category=record.category,
+                            importance=record.importance,
+                            similarity=round(sim, 4),
+                        ),
+                    )
+                )
         scored.sort(key=lambda x: x[0], reverse=True)
         return [r for _, r in scored[:limit]]
 
@@ -380,8 +419,11 @@ class InMemoryVectorStore(VectorStore):
         self._data[user_id] = {}
         for item_id, content, embedding, category, importance in items:
             self._data[user_id][item_id] = _VectorRecord(
-                item_id=item_id, content=content, embedding=embedding,
-                category=category, importance=importance,
+                item_id=item_id,
+                content=content,
+                embedding=embedding,
+                category=category,
+                importance=importance,
             )
         return len(items)
 
@@ -435,25 +477,31 @@ def upsert_memory(
     db: Session | None = None,
 ) -> None:
     _get_store(db).upsert(
-        user_id, item_id=item_id, content=content,
-        embedding=embedding, category=category, importance=importance,
+        user_id,
+        item_id=item_id,
+        content=content,
+        embedding=embedding,
+        category=category,
+        importance=importance,
     )
     try:
         from anima_server.services.agent.bm25_index import invalidate_index
+
         invalidate_index(user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
 def delete_memory(user_id: int, *, item_id: int, db: Session | None = None) -> None:
     try:
         _get_store(db).delete(user_id, item_id=item_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Failed to delete item %d from vector store", item_id)
     try:
         from anima_server.services.agent.bm25_index import invalidate_index
+
         invalidate_index(user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -466,7 +514,10 @@ def search_similar(
     db: Session | None = None,
 ) -> list[dict[str, Any]]:
     results = _get_store(db).search_by_vector(
-        user_id, query_embedding=query_embedding, limit=limit, category=category,
+        user_id,
+        query_embedding=query_embedding,
+        limit=limit,
+        category=category,
     )
     return [
         {
@@ -489,7 +540,10 @@ def search_by_text(
     db: Session | None = None,
 ) -> list[dict[str, Any]]:
     results = _get_store(db).search_by_text(
-        user_id, query_text=query_text, limit=limit, category=category,
+        user_id,
+        query_text=query_text,
+        limit=limit,
+        category=category,
     )
     return [
         {
@@ -512,8 +566,9 @@ def rebuild_user_index(
     result = _get_store(db).rebuild(user_id, items)
     try:
         from anima_server.services.agent.bm25_index import invalidate_index
+
         invalidate_index(user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return result
 
@@ -525,6 +580,7 @@ def get_collection(user_id: int, *, db: Session | None = None) -> Any:
     class _CollectionProxy:
         def count(self) -> int:
             return store.count(user_id)
+
     return _CollectionProxy()
 
 

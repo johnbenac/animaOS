@@ -52,7 +52,7 @@ def _build_aad(table: str, user_id: int, field: str) -> bytes | None:
     """
     if not table or not field:
         return None
-    return f"{table}:{user_id}:{field}".encode("utf-8")
+    return f"{table}:{user_id}:{field}".encode()
 
 
 def maybe_encrypt_for_user(

@@ -5,23 +5,21 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import AgentMessage, AgentThread, User
 from anima_server.services.agent.compaction import (
-    CompactionResult,
     SUMMARY_LINE_LIMIT,
     SUMMARY_TEXT_LIMIT,
+    CompactionResult,
     _summarize_row,
     _trim_summary_text,
     compact_thread_context,
     estimate_message_tokens,
     render_summary_text,
 )
-
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # --------------------------------------------------------------------------- #
 # In-memory database helper
@@ -109,16 +107,12 @@ def test_estimate_tokens_text_only() -> None:
 
 
 def test_estimate_tokens_with_tool_name() -> None:
-    tokens = estimate_message_tokens(
-        content_text="result", tool_name="search"
-    )
+    tokens = estimate_message_tokens(content_text="result", tool_name="search")
     assert tokens > 0
 
 
 def test_estimate_tokens_with_json() -> None:
-    tokens = estimate_message_tokens(
-        content_text=None, content_json={"key": "value"}
-    )
+    tokens = estimate_message_tokens(content_text=None, content_json={"key": "value"})
     assert tokens > 0
 
 
@@ -157,7 +151,10 @@ def test_summarize_row_user() -> None:
         user = _make_user(db)
         thread = _make_thread(db, user.id)
         msg = _add_message(
-            db, thread_id=thread.id, sequence_id=1, role="user",
+            db,
+            thread_id=thread.id,
+            sequence_id=1,
+            role="user",
             content_text="Hello there",
         )
         result = _summarize_row(msg, user_id=user.id)
@@ -170,7 +167,10 @@ def test_summarize_row_assistant() -> None:
         user = _make_user(db)
         thread = _make_thread(db, user.id)
         msg = _add_message(
-            db, thread_id=thread.id, sequence_id=1, role="assistant",
+            db,
+            thread_id=thread.id,
+            sequence_id=1,
+            role="assistant",
             content_text="Hi back!",
         )
         result = _summarize_row(msg, user_id=user.id)
@@ -182,8 +182,12 @@ def test_summarize_row_tool_with_name() -> None:
         user = _make_user(db)
         thread = _make_thread(db, user.id)
         msg = _add_message(
-            db, thread_id=thread.id, sequence_id=1, role="tool",
-            content_text="search results", tool_name="search",
+            db,
+            thread_id=thread.id,
+            sequence_id=1,
+            role="tool",
+            content_text="search results",
+            tool_name="search",
         )
         result = _summarize_row(msg, user_id=user.id)
         assert "Tool search:" in result
@@ -194,7 +198,10 @@ def test_summarize_row_empty_content() -> None:
         user = _make_user(db)
         thread = _make_thread(db, user.id)
         msg = _add_message(
-            db, thread_id=thread.id, sequence_id=1, role="user",
+            db,
+            thread_id=thread.id,
+            sequence_id=1,
+            role="user",
             content_text="",
         )
         result = _summarize_row(msg, user_id=user.id)
@@ -215,8 +222,11 @@ def test_render_summary_text_basic() -> None:
         for i in range(3):
             msgs.append(
                 _add_message(
-                    db, thread_id=thread.id, sequence_id=i + 1,
-                    role="user", content_text=f"Message {i}",
+                    db,
+                    thread_id=thread.id,
+                    sequence_id=i + 1,
+                    role="user",
+                    content_text=f"Message {i}",
                 )
             )
 
@@ -232,17 +242,21 @@ def test_render_summary_text_with_existing_summary() -> None:
         thread = _make_thread(db, user.id)
 
         summary_msg = _add_message(
-            db, thread_id=thread.id, sequence_id=1,
-            role="summary", content_text="Earlier summary text",
+            db,
+            thread_id=thread.id,
+            sequence_id=1,
+            role="summary",
+            content_text="Earlier summary text",
         )
         compacted = _add_message(
-            db, thread_id=thread.id, sequence_id=2,
-            role="user", content_text="Hello",
+            db,
+            thread_id=thread.id,
+            sequence_id=2,
+            role="user",
+            content_text="Hello",
         )
 
-        summary = render_summary_text(
-            [summary_msg], [compacted], user_id=user.id
-        )
+        summary = render_summary_text([summary_msg], [compacted], user_id=user.id)
         assert "Earlier summary" in summary
         assert "Hello" in summary
 
@@ -256,8 +270,11 @@ def test_render_summary_text_hidden_count() -> None:
         for i in range(SUMMARY_LINE_LIMIT + 5):
             msgs.append(
                 _add_message(
-                    db, thread_id=thread.id, sequence_id=i + 1,
-                    role="user", content_text=f"msg {i}",
+                    db,
+                    thread_id=thread.id,
+                    sequence_id=i + 1,
+                    role="user",
+                    content_text=f"msg {i}",
                 )
             )
 
@@ -275,8 +292,11 @@ def test_compact_thread_context_no_messages() -> None:
         user = _make_user(db)
         thread = _make_thread(db, user.id)
         result = compact_thread_context(
-            db, thread=thread, run_id=None,
-            trigger_token_limit=100, keep_last_messages=4,
+            db,
+            thread=thread,
+            run_id=None,
+            trigger_token_limit=100,
+            keep_last_messages=4,
         )
         assert result is None
 
@@ -288,15 +308,21 @@ def test_compact_thread_context_under_limit() -> None:
 
         for i in range(3):
             _add_message(
-                db, thread_id=thread.id, sequence_id=i + 1,
-                role="user", content_text="short",
+                db,
+                thread_id=thread.id,
+                sequence_id=i + 1,
+                role="user",
+                content_text="short",
                 token_estimate=5,
             )
 
         # 3 msgs * 5 tokens = 15, well under limit of 10000
         result = compact_thread_context(
-            db, thread=thread, run_id=None,
-            trigger_token_limit=10000, keep_last_messages=2,
+            db,
+            thread=thread,
+            run_id=None,
+            trigger_token_limit=10000,
+            keep_last_messages=2,
         )
         assert result is None
 
@@ -310,7 +336,9 @@ def test_compact_thread_context_triggers_compaction() -> None:
         num_messages = 10
         for i in range(num_messages):
             _add_message(
-                db, thread_id=thread.id, sequence_id=i + 1,
+                db,
+                thread_id=thread.id,
+                sequence_id=i + 1,
                 role="user" if i % 2 == 0 else "assistant",
                 content_text=f"Message content number {i} " * 20,
                 token_estimate=200,
@@ -323,8 +351,11 @@ def test_compact_thread_context_triggers_compaction() -> None:
 
         # Total tokens = 10 * 200 = 2000, trigger limit = 500
         result = compact_thread_context(
-            db, thread=thread, run_id=None,
-            trigger_token_limit=500, keep_last_messages=2,
+            db,
+            thread=thread,
+            run_id=None,
+            trigger_token_limit=500,
+            keep_last_messages=2,
         )
         assert result is not None
         assert isinstance(result, CompactionResult)
@@ -341,14 +372,20 @@ def test_compact_thread_context_too_few_messages() -> None:
 
         for i in range(3):
             _add_message(
-                db, thread_id=thread.id, sequence_id=i + 1,
-                role="user", content_text="short",
+                db,
+                thread_id=thread.id,
+                sequence_id=i + 1,
+                role="user",
+                content_text="short",
                 token_estimate=200,
             )
 
         result = compact_thread_context(
-            db, thread=thread, run_id=None,
-            trigger_token_limit=100, keep_last_messages=5,
+            db,
+            thread=thread,
+            run_id=None,
+            trigger_token_limit=100,
+            keep_last_messages=5,
         )
         assert result is None
 
@@ -362,7 +399,9 @@ def test_compact_thread_context_reserved_prompt_tokens() -> None:
         num_messages = 10
         for i in range(num_messages):
             _add_message(
-                db, thread_id=thread.id, sequence_id=i + 1,
+                db,
+                thread_id=thread.id,
+                sequence_id=i + 1,
                 role="user" if i % 2 == 0 else "assistant",
                 content_text=f"Msg {i} " * 20,
                 token_estimate=100,
@@ -375,8 +414,11 @@ def test_compact_thread_context_reserved_prompt_tokens() -> None:
 
         # 10*100=1000 tokens, trigger=1200 but reserved=500 → effective=700
         result = compact_thread_context(
-            db, thread=thread, run_id=None,
-            trigger_token_limit=1200, keep_last_messages=2,
+            db,
+            thread=thread,
+            run_id=None,
+            trigger_token_limit=1200,
+            keep_last_messages=2,
             reserved_prompt_tokens=500,
         )
         assert result is not None

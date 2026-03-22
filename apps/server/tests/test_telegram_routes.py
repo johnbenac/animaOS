@@ -7,11 +7,14 @@ from conftest import managed_test_client
 
 def _register(client):
     """Register a test user and return (user_id, headers_with_unlock_token)."""
-    resp = client.post("/api/auth/register", json={
-        "username": "tgtest",
-        "password": "testpass123",
-        "name": "TG Test",
-    })
+    resp = client.post(
+        "/api/auth/register",
+        json={
+            "username": "tgtest",
+            "password": "testpass123",
+            "name": "TG Test",
+        },
+    )
     assert resp.status_code in (200, 201), resp.text
     data = resp.json()
     headers = {"x-anima-unlock": data["unlockToken"]}
@@ -25,9 +28,14 @@ class TestTelegramLinkRoutes:
         os.environ.pop("TELEGRAM_LINK_SECRET", None)
         with managed_test_client("tg-link-") as client:
             uid, headers = _register(client)
-            resp = client.post("/api/telegram/link", json={
-                "chatId": 99001, "userId": uid,
-            }, headers=headers)
+            resp = client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99001,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             assert resp.status_code == 201
             data = resp.json()
             assert data["chatId"] == 99001
@@ -37,9 +45,14 @@ class TestTelegramLinkRoutes:
         os.environ.pop("TELEGRAM_LINK_SECRET", None)
         with managed_test_client("tg-lookup-") as client:
             uid, headers = _register(client)
-            client.post("/api/telegram/link", json={
-                "chatId": 99002, "userId": uid,
-            }, headers=headers)
+            client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99002,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             resp = client.get("/api/telegram/link", params={"chatId": 99002}, headers=headers)
             assert resp.status_code == 200
             assert resp.json()["userId"] == uid
@@ -54,9 +67,14 @@ class TestTelegramLinkRoutes:
         os.environ.pop("TELEGRAM_LINK_SECRET", None)
         with managed_test_client("tg-unlink-") as client:
             uid, headers = _register(client)
-            client.post("/api/telegram/link", json={
-                "chatId": 99003, "userId": uid,
-            }, headers=headers)
+            client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99003,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             resp = client.delete("/api/telegram/link", params={"chatId": 99003}, headers=headers)
             assert resp.status_code == 200
             resp = client.get("/api/telegram/link", params={"chatId": 99003}, headers=headers)
@@ -66,12 +84,22 @@ class TestTelegramLinkRoutes:
         os.environ.pop("TELEGRAM_LINK_SECRET", None)
         with managed_test_client("tg-replace-") as client:
             uid, headers = _register(client)
-            client.post("/api/telegram/link", json={
-                "chatId": 99004, "userId": uid,
-            }, headers=headers)
-            resp = client.post("/api/telegram/link", json={
-                "chatId": 99004, "userId": uid,
-            }, headers=headers)
+            client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99004,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
+            resp = client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99004,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             assert resp.status_code == 201
 
     def test_link_requires_secret_when_configured(self):
@@ -79,9 +107,14 @@ class TestTelegramLinkRoutes:
         try:
             with managed_test_client("tg-secret-req-") as client:
                 uid, headers = _register(client)
-                resp = client.post("/api/telegram/link", json={
-                    "chatId": 99005, "userId": uid,
-                }, headers=headers)
+                resp = client.post(
+                    "/api/telegram/link",
+                    json={
+                        "chatId": 99005,
+                        "userId": uid,
+                    },
+                    headers=headers,
+                )
                 assert resp.status_code == 403
         finally:
             os.environ.pop("TELEGRAM_LINK_SECRET", None)
@@ -91,9 +124,15 @@ class TestTelegramLinkRoutes:
         try:
             with managed_test_client("tg-secret-ok-") as client:
                 uid, headers = _register(client)
-                resp = client.post("/api/telegram/link", json={
-                    "chatId": 99006, "userId": uid, "linkSecret": "test-secret-123",
-                }, headers=headers)
+                resp = client.post(
+                    "/api/telegram/link",
+                    json={
+                        "chatId": 99006,
+                        "userId": uid,
+                        "linkSecret": "test-secret-123",
+                    },
+                    headers=headers,
+                )
                 assert resp.status_code == 201
         finally:
             os.environ.pop("TELEGRAM_LINK_SECRET", None)
@@ -103,9 +142,15 @@ class TestTelegramLinkRoutes:
         try:
             with managed_test_client("tg-secret-bad-") as client:
                 uid, headers = _register(client)
-                resp = client.post("/api/telegram/link", json={
-                    "chatId": 99007, "userId": uid, "linkSecret": "wrong",
-                }, headers=headers)
+                resp = client.post(
+                    "/api/telegram/link",
+                    json={
+                        "chatId": 99007,
+                        "userId": uid,
+                        "linkSecret": "wrong",
+                    },
+                    headers=headers,
+                )
                 assert resp.status_code == 403
         finally:
             os.environ.pop("TELEGRAM_LINK_SECRET", None)
@@ -114,9 +159,14 @@ class TestTelegramLinkRoutes:
         os.environ.pop("TELEGRAM_LINK_SECRET", None)
         with managed_test_client("tg-nouser-") as client:
             _, headers = _register(client)
-            resp = client.post("/api/telegram/link", json={
-                "chatId": 99009, "userId": 99999,
-            }, headers=headers)
+            resp = client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99009,
+                    "userId": 99999,
+                },
+                headers=headers,
+            )
             assert resp.status_code == 404
 
     def test_link_replaces_existing_for_same_user(self):
@@ -124,13 +174,23 @@ class TestTelegramLinkRoutes:
         with managed_test_client("tg-replace-user-") as client:
             uid, headers = _register(client)
             # Link user to chat A
-            client.post("/api/telegram/link", json={
-                "chatId": 88001, "userId": uid,
-            }, headers=headers)
+            client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 88001,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             # Link same user to chat B — old link for chat A should be removed
-            resp = client.post("/api/telegram/link", json={
-                "chatId": 88002, "userId": uid,
-            }, headers=headers)
+            resp = client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 88002,
+                    "userId": uid,
+                },
+                headers=headers,
+            )
             assert resp.status_code == 201
             # Chat A should no longer be linked
             resp = client.get("/api/telegram/link", params={"chatId": 88001}, headers=headers)
@@ -142,7 +202,11 @@ class TestTelegramLinkRoutes:
 
     def test_link_requires_auth(self):
         with managed_test_client("tg-noauth-") as client:
-            resp = client.post("/api/telegram/link", json={
-                "chatId": 99008, "userId": 1,
-            })
+            resp = client.post(
+                "/api/telegram/link",
+                json={
+                    "chatId": 99008,
+                    "userId": 1,
+                },
+            )
             assert resp.status_code == 401

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import anima_server.api.routes.db as db_routes
-from fastapi.testclient import TestClient
-
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(client: TestClient) -> dict[str, object]:
@@ -90,9 +89,7 @@ def test_get_table_rows_pagination() -> None:
         headers = {"x-anima-unlock": reg["unlockToken"]}
         _verify_password(client, headers)
 
-        resp = client.get(
-            "/api/db/tables/users?limit=1&offset=0", headers=headers
-        )
+        resp = client.get("/api/db/tables/users?limit=1&offset=0", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["rows"]) <= 1

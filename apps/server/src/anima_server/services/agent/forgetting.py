@@ -5,6 +5,7 @@ Three mechanisms:
 2. Active suppression — superseded memories have derived references flagged for regeneration
 3. User-initiated forgetting — hard delete with derived-reference cleanup and audit trail
 """
+
 from __future__ import annotations
 
 import logging
@@ -33,9 +34,11 @@ SUPERSEDED_DECAY_MULTIPLIER: float = 3.0
 
 # ── Result types ───────────────────────────────────────────────────────
 
+
 @dataclass(slots=True)
 class DerivedReference:
     """A single derived reference found in episodes or self-model blocks."""
+
     table: str  # "memory_episodes" or "self_model_blocks"
     record_id: int
     section: str | None = None  # for self_model_blocks: growth_log, intentions
@@ -44,6 +47,7 @@ class DerivedReference:
 @dataclass(slots=True)
 class DerivedReferences:
     """Collection of derived references citing a memory."""
+
     episodes: list[DerivedReference] = field(default_factory=list)
     self_model_blocks: list[DerivedReference] = field(default_factory=list)
 
@@ -55,6 +59,7 @@ class DerivedReferences:
 @dataclass(slots=True)
 class ForgetResult:
     """Result of a forget operation."""
+
     items_forgotten: int = 0
     derived_refs_affected: int = 0
     audit_log_id: int | None = None
@@ -63,6 +68,7 @@ class ForgetResult:
 @dataclass(slots=True)
 class SuppressionResult:
     """Result of a suppression operation."""
+
     memory_id: int = 0
     superseded_by: int = 0
     derived_refs_flagged: int = 0
@@ -70,6 +76,7 @@ class SuppressionResult:
 
 
 # ── Derived reference detection ───────────────────────────────────────
+
 
 def find_derived_references(
     db: Session,
@@ -100,10 +107,12 @@ def find_derived_references(
     for ep in episodes:
         summary = df(user_id, ep.summary, table="memory_episodes", field="summary")
         if memory_content_lower in summary.lower():
-            refs.episodes.append(DerivedReference(
-                table="memory_episodes",
-                record_id=ep.id,
-            ))
+            refs.episodes.append(
+                DerivedReference(
+                    table="memory_episodes",
+                    record_id=ep.id,
+                )
+            )
 
     # Search self-model blocks (growth_log and intentions sections)
     blocks = list(
@@ -117,11 +126,13 @@ def find_derived_references(
     for block in blocks:
         content = df(user_id, block.content, table="self_model_blocks", field="content")
         if memory_content_lower in content.lower():
-            refs.self_model_blocks.append(DerivedReference(
-                table="self_model_blocks",
-                record_id=block.id,
-                section=block.section,
-            ))
+            refs.self_model_blocks.append(
+                DerivedReference(
+                    table="self_model_blocks",
+                    record_id=block.id,
+                    section=block.section,
+                )
+            )
 
     return refs
 
@@ -167,6 +178,7 @@ def redact_derived_references(
 
 # ── Active suppression ─────────────────────────────────────────────────
 
+
 def suppress_memory(
     db: Session,
     *,
@@ -188,13 +200,16 @@ def suppress_memory(
         return result
 
     from anima_server.services.data_crypto import df
+
     content = df(user_id, memory.content, table="memory_items", field="content")
 
     # Find and flag derived references
     refs = find_derived_references(db, memory_content=content, user_id=user_id)
     if refs.total > 0:
         result.derived_refs_flagged = redact_derived_references(
-            db, refs=refs, strategy="flag_for_regeneration",
+            db,
+            refs=refs,
+            strategy="flag_for_regeneration",
         )
 
     # Record audit log
@@ -214,6 +229,7 @@ def suppress_memory(
 
 
 # ── User-initiated forgetting ─────────────────────────────────────────
+
 
 def forget_memory(
     db: Session,
@@ -239,7 +255,8 @@ def forget_memory(
         return result
 
     from anima_server.services.data_crypto import df
-    content = df(user_id, memory.content, table="memory_items", field="content")
+
+    df(user_id, memory.content, table="memory_items", field="content")
 
     # 1. Walk the full supersession chain (A→B→C: forgetting C must
     #    also remove B and A, otherwise ON DELETE SET NULL resurrects them).
@@ -248,9 +265,7 @@ def forget_memory(
     frontier = [memory_id]
     while frontier:
         preds = list(
-            db.scalars(
-                select(MemoryItem).where(MemoryItem.superseded_by.in_(frontier))
-            ).all()
+            db.scalars(select(MemoryItem).where(MemoryItem.superseded_by.in_(frontier))).all()
         )
         frontier = [p.id for p in preds]
         for pred in preds:
@@ -263,7 +278,9 @@ def forget_memory(
         refs = find_derived_references(db, memory_content=item_content, user_id=user_id)
         if refs.total > 0:
             result.derived_refs_affected += redact_derived_references(
-                db, refs=refs, strategy="flag_for_regeneration",
+                db,
+                refs=refs,
+                strategy="flag_for_regeneration",
             )
 
     # 3. Delete associated claims and evidence for ALL items in the chain
@@ -291,15 +308,17 @@ def forget_memory(
     # 5. Remove ALL chain items from vector store and invalidate BM25
     try:
         from anima_server.services.agent.vector_store import delete_memory
+
         for item_id in chain_ids:
             delete_memory(user_id, item_id=item_id, db=db)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Vector store cleanup failed for chain %s", chain_ids)
 
     try:
         from anima_server.services.agent.bm25_index import invalidate_index
+
         invalidate_index(user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("BM25 index invalidation failed for user %d", user_id)
 
     # 7. Record audit log (no content stored)
@@ -361,7 +380,7 @@ def forget_by_topic(
                 if item is not None and item.superseded_by is None:
                     candidates.append(item)
                     keyword_ids.add(item_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("BM25 search unavailable for topic forget")
 
     return candidates

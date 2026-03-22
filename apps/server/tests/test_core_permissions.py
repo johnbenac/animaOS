@@ -4,7 +4,6 @@ import os
 import stat
 
 import pytest
-
 from anima_server.services.core import ensure_core_manifest, get_manifest_path
 
 

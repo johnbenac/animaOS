@@ -1,12 +1,10 @@
 """Tests for BM25 index -- F1 hybrid search."""
-import pytest
+
 from anima_server.services.agent.bm25_index import (
     BM25Index,
     _tokenize,
-    bm25_search,
-    get_or_build_index,
-    invalidate_index,
     _user_indices,
+    invalidate_index,
 )
 
 
@@ -30,11 +28,13 @@ class TestTokenize:
 class TestBM25Index:
     def test_build_and_search(self):
         idx = BM25Index()
-        idx.build([
-            (1, "User works at Google as a software engineer"),
-            (2, "User prefers PostgreSQL over MySQL"),
-            (3, "User lives in Berlin Germany"),
-        ])
+        idx.build(
+            [
+                (1, "User works at Google as a software engineer"),
+                (2, "User prefers PostgreSQL over MySQL"),
+                (3, "User lives in Berlin Germany"),
+            ]
+        )
         results = idx.search("PostgreSQL", limit=3)
         # PostgreSQL doc should rank first (rare term = high IDF)
         assert results[0][0] == 2
@@ -61,10 +61,12 @@ class TestBM25Index:
 
     def test_add_document(self):
         idx = BM25Index()
-        idx.build([
-            (1, "hello world"),
-            (3, "something else entirely"),
-        ])
+        idx.build(
+            [
+                (1, "hello world"),
+                (3, "something else entirely"),
+            ]
+        )
         idx.add_document(2, "goodbye world")
         assert idx.document_count == 3
         results = idx.search("goodbye")
@@ -87,11 +89,13 @@ class TestBM25Index:
     def test_common_word_low_score(self):
         """Common words should not dominate scoring (IDF weighting)."""
         idx = BM25Index()
-        idx.build([
-            (1, "the cat is on the mat"),
-            (2, "the dog is in the house"),
-            (3, "PostgreSQL database configuration"),
-        ])
+        idx.build(
+            [
+                (1, "the cat is on the mat"),
+                (2, "the dog is in the house"),
+                (3, "PostgreSQL database configuration"),
+            ]
+        )
         results_common = idx.search("the", limit=3)
         results_rare = idx.search("PostgreSQL", limit=3)
         # Rare term should produce a higher top score
@@ -101,11 +105,13 @@ class TestBM25Index:
     def test_scores_are_nonzero(self):
         """Matching documents should have non-zero scores."""
         idx = BM25Index()
-        idx.build([
-            (1, "python programming language"),
-            (2, "java programming language"),
-            (3, "rust systems programming"),
-        ])
+        idx.build(
+            [
+                (1, "python programming language"),
+                (2, "java programming language"),
+                (3, "rust systems programming"),
+            ]
+        )
         results = idx.search("python")
         assert len(results) > 0
         for _, score in results:
@@ -120,11 +126,13 @@ class TestBM25Index:
 
     def test_results_sorted_descending(self):
         idx = BM25Index()
-        idx.build([
-            (1, "python python python"),
-            (2, "python java"),
-            (3, "java java java"),
-        ])
+        idx.build(
+            [
+                (1, "python python python"),
+                (2, "python java"),
+                (3, "java java java"),
+            ]
+        )
         results = idx.search("python")
         for i in range(1, len(results)):
             assert results[i - 1][1] >= results[i][1]

@@ -116,9 +116,7 @@ def _scaffold_turn(
         )
 
     relationship = (
-        user_msgs[1].get("content", "companion").strip()
-        if len(user_msgs) > 1
-        else "companion"
+        user_msgs[1].get("content", "companion").strip() if len(user_msgs) > 1 else "companion"
     )
 
     if turn == 2:
@@ -132,8 +130,7 @@ def _scaffold_turn(
         )
 
     # turn >= 3 — ceremony complete
-    style = user_msgs[2].get("content", "warm").strip() if len(
-        user_msgs) > 2 else "warm"
+    style = user_msgs[2].get("content", "warm").strip() if len(user_msgs) > 2 else "warm"
 
     return CreationTurnResult(
         message=(

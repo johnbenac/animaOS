@@ -3,12 +3,11 @@ streaming retry safety, and proactive context management."""
 
 from __future__ import annotations
 
-import asyncio
+import json as _json
 from collections import deque
 from unittest.mock import patch
 
 import pytest
-
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.executor import ToolExecutor
 from anima_server.services.agent.memory_blocks import MemoryBlock
@@ -24,9 +23,8 @@ from anima_server.services.agent.runtime_types import (
     ToolExecutionResult,
 )
 from anima_server.services.agent.streaming import AgentStreamEvent
-from anima_server.services.agent.tools import inject_inner_thoughts_into_tools, send_message, tool
+from anima_server.services.agent.tools import send_message, tool
 
-import json as _json
 
 def _msg(output: str) -> str:
     """Extract message from tool result JSON envelope."""
@@ -87,6 +85,7 @@ async def test_tool_timeout_returns_error() -> None:
     def slow_tool() -> str:
         """Do something slow."""
         import time
+
         time.sleep(0.5)
         return "done"
 
@@ -144,10 +143,12 @@ async def test_parallel_execution_runs_concurrently() -> None:
         return "result_b"
 
     executor = ToolExecutor([tool_a, tool_b])
-    results = await executor.execute_parallel([
-        (ToolCall(id="c1", name="tool_a", arguments={}), False),
-        (ToolCall(id="c2", name="tool_b", arguments={}), False),
-    ])
+    results = await executor.execute_parallel(
+        [
+            (ToolCall(id="c1", name="tool_a", arguments={}), False),
+            (ToolCall(id="c2", name="tool_b", arguments={}), False),
+        ]
+    )
 
     assert len(results) == 2
     assert _msg(results[0].output) == "result_a"
@@ -165,9 +166,11 @@ async def test_parallel_execution_single_tool() -> None:
         return "only"
 
     executor = ToolExecutor([only_tool])
-    results = await executor.execute_parallel([
-        (ToolCall(id="c1", name="only_tool", arguments={}), False),
-    ])
+    results = await executor.execute_parallel(
+        [
+            (ToolCall(id="c1", name="only_tool", arguments={}), False),
+        ]
+    )
 
     assert len(results) == 1
     assert _msg(results[0].output) == "only"
@@ -181,13 +184,19 @@ async def test_parallel_execution_single_tool() -> None:
 @pytest.mark.asyncio
 async def test_memory_modified_flag_propagated() -> None:
     """When tool sets ctx.memory_modified, it appears on the result."""
-    from anima_server.services.agent.tool_context import ToolContext, set_tool_context, clear_tool_context
     from unittest.mock import MagicMock
+
+    from anima_server.services.agent.tool_context import (
+        ToolContext,
+        clear_tool_context,
+        set_tool_context,
+    )
 
     @tool
     def modify_memory() -> str:
         """Modify memory."""
         from anima_server.services.agent.tool_context import get_tool_context
+
         ctx = get_tool_context()
         ctx.memory_modified = True
         return "modified"
@@ -239,14 +248,18 @@ async def test_memory_refresh_callback_updates_system_prompt() -> None:
 
     # Step 1: tool call that signals memory_modified
     # Step 2: send_message with final response
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            tool_calls=(ToolCall(id="c1", name="modify_tool", arguments={"request_heartbeat": True}),)
-        ),
-        StepExecutionResult(
-            tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "done"}),)
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(id="c1", name="modify_tool", arguments={"request_heartbeat": True}),
+                )
+            ),
+            StepExecutionResult(
+                tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "done"}),)
+            ),
+        ]
+    )
 
     # Custom executor that sets memory_modified
     class MemModifiedExecutor(ToolExecutor):
@@ -283,7 +296,9 @@ async def test_memory_refresh_callback_updates_system_prompt() -> None:
         return (updated_block,)
 
     result = await runtime.invoke(
-        "hi", user_id=1, history=[],
+        "hi",
+        user_id=1,
+        history=[],
         memory_refresher=refresher,
     )
 
@@ -310,19 +325,28 @@ async def test_heartbeat_allows_multi_step() -> None:
         """Search for something."""
         return "found it"
 
-    adapter = QueueAdapter([
-        # Step 1: agent calls lookup with heartbeat=true (wants another step)
-        StepExecutionResult(
-            tool_calls=(ToolCall(
-                id="c1", name="lookup",
-                arguments={"query": "test", "request_heartbeat": True},
-            ),)
-        ),
-        # Step 2: agent sends final message
-        StepExecutionResult(
-            tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "thought it through"}),)
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            # Step 1: agent calls lookup with heartbeat=true (wants another step)
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="lookup",
+                        arguments={"query": "test", "request_heartbeat": True},
+                    ),
+                )
+            ),
+            # Step 2: agent sends final message
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c2", name="send_message", arguments={"message": "thought it through"}
+                    ),
+                )
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -348,15 +372,20 @@ async def test_no_heartbeat_stops_after_tool() -> None:
         """Search for something."""
         return "found it"
 
-    adapter = QueueAdapter([
-        # Step 1: agent calls lookup WITHOUT heartbeat (should stop)
-        StepExecutionResult(
-            tool_calls=(ToolCall(
-                id="c1", name="lookup",
-                arguments={"query": "test"},
-            ),)
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            # Step 1: agent calls lookup WITHOUT heartbeat (should stop)
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="lookup",
+                        arguments={"query": "test"},
+                    ),
+                )
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -383,7 +412,7 @@ async def test_streaming_retry_blocked_after_content_streamed() -> None:
     happen (would cause duplicate output)."""
     adapter = StreamFailAfterContentAdapter(
         deltas=["Hello ", "world"],
-        fail_exc=asyncio.TimeoutError(),
+        fail_exc=TimeoutError(),
     )
     runtime = AgentRuntime(adapter=adapter, tools=[], max_steps=1)
 
@@ -401,7 +430,10 @@ async def test_streaming_retry_blocked_after_content_streamed() -> None:
 
         with pytest.raises(StepFailedError):
             await runtime.invoke(
-                "hi", user_id=1, history=[], event_callback=collect,
+                "hi",
+                user_id=1,
+                history=[],
+                event_callback=collect,
             )
 
     # Should NOT retry — content was already streamed
@@ -418,7 +450,8 @@ async def test_streaming_retry_blocked_after_content_streamed() -> None:
 
 def test_core_memory_tools_registered() -> None:
     """core_memory_append and core_memory_replace are in get_tools()."""
-    from anima_server.services.agent.tools import get_tools, get_core_tools
+    from anima_server.services.agent.tools import get_core_tools, get_tools
+
     tool_names = [getattr(t, "name", "") for t in get_tools()]
     assert "core_memory_append" in tool_names
     assert "core_memory_replace" in tool_names
@@ -431,6 +464,7 @@ def test_core_memory_tools_registered() -> None:
 def test_heartbeat_not_on_terminal_tools() -> None:
     """request_heartbeat should NOT be injected on send_message (terminal)."""
     from anima_server.services.agent.tools import get_tools
+
     tools = get_tools()
     for t in tools:
         name = getattr(t, "name", "")
@@ -441,9 +475,7 @@ def test_heartbeat_not_on_terminal_tools() -> None:
                 "send_message should not have request_heartbeat"
             )
         else:
-            assert "request_heartbeat" in props, (
-                f"{name} should have request_heartbeat"
-            )
+            assert "request_heartbeat" in props, f"{name} should have request_heartbeat"
 
 
 # ---------------------------------------------------------------------------
@@ -455,11 +487,13 @@ def test_heartbeat_not_on_terminal_tools() -> None:
 async def test_coerced_text_tool_call_as_send_message() -> None:
     """When the model emits plain text (no native tool call), it should
     be coerced into a send_message call."""
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text="Here is my answer.",
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text="Here is my answer.",
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -487,14 +521,16 @@ async def test_coerced_function_tag_tool_call() -> None:
         """Look something up."""
         return f"found: {query}"
 
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text='<function=lookup>{"query": "test"}</function>',
-        ),
-        StepExecutionResult(
-            tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "done"}),),
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text='<function=lookup>{"query": "test"}</function>',
+            ),
+            StepExecutionResult(
+                tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "done"}),),
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -585,4 +621,4 @@ def test_parse_function_tag_plain_text_fallback_still_works() -> None:
 
     assert len(results) == 1
     assert results[0].name == "send_message"
-    assert "Hello there!" in list(results[0].arguments.values())[0]
+    assert "Hello there!" in next(iter(results[0].arguments.values()))

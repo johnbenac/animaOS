@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -22,9 +21,7 @@ class ToolContext:
     memory_modified: bool = False
 
 
-_current_context: ContextVar[ToolContext | None] = ContextVar(
-    "agent_tool_context", default=None
-)
+_current_context: ContextVar[ToolContext | None] = ContextVar("agent_tool_context", default=None)
 
 
 def set_tool_context(ctx: ToolContext) -> None:
@@ -38,5 +35,7 @@ def clear_tool_context() -> None:
 def get_tool_context() -> ToolContext:
     ctx = _current_context.get()
     if ctx is None:
-        raise RuntimeError("No tool context set — tools requiring DB access cannot run outside an agent turn")
+        raise RuntimeError(
+            "No tool context set — tools requiring DB access cannot run outside an agent turn"
+        )
     return ctx

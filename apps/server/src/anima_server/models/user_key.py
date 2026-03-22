@@ -10,9 +10,7 @@ from anima_server.db.base import Base
 
 class UserKey(Base):
     __tablename__ = "user_keys"
-    __table_args__ = (
-        UniqueConstraint("user_id", "domain", name="uq_user_keys_user_domain"),
-    )
+    __table_args__ = (UniqueConstraint("user_id", "domain", name="uq_user_keys_user_domain"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
@@ -20,7 +18,9 @@ class UserKey(Base):
         nullable=False,
     )
     domain: Mapped[str] = mapped_column(
-        String(64), nullable=False, server_default="memories",
+        String(64),
+        nullable=False,
+        server_default="memories",
     )
     kdf_salt: Mapped[str] = mapped_column(String(255), nullable=False)
     kdf_time_cost: Mapped[int] = mapped_column(Integer, nullable=False)

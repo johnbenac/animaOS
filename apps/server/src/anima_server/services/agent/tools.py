@@ -6,11 +6,12 @@ The `get_tools()` list is bound to the loop runtime and exposed to the LLM.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import inspect
-from collections.abc import Sequence
-from datetime import datetime, timezone
-from typing import Any, Callable, get_type_hints
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
+from typing import Any, get_type_hints
 
 from anima_server.services.agent.rules import ToolRule, build_default_tool_rules
 from anima_server.services.data_crypto import df, ef
@@ -56,17 +57,19 @@ def _build_args_schema(func: Callable[..., Any]) -> _SimpleSchema:
         properties[name] = prop
         if param.default is inspect.Parameter.empty:
             required.append(name)
-    return _SimpleSchema({
-        "type": "object",
-        "properties": properties,
-        "required": required,
-    })
+    return _SimpleSchema(
+        {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
+    )
 
 
 @tool
 def current_datetime() -> str:
     """Return the current date and time in ISO-8601 format (UTC)."""
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @tool
@@ -87,8 +90,8 @@ def note_to_self(key: str, value: str, note_type: str = "observation") -> str:
     - key="conversation_goal", value="help user plan weekend trip", note_type="plan"
     - key="technical_context", value="user is working on a React app with TypeScript", note_type="context"
     """
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.services.agent.session_memory import write_session_note
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     write_session_note(
@@ -101,6 +104,7 @@ def note_to_self(key: str, value: str, note_type: str = "observation") -> str:
     )
 
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -111,13 +115,14 @@ def note_to_self(key: str, value: str, note_type: str = "observation") -> str:
 @tool
 def dismiss_note(key: str) -> str:
     """Remove a session note that is no longer relevant."""
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.services.agent.session_memory import remove_session_note
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     removed = remove_session_note(ctx.db, thread_id=ctx.thread_id, key=key)
     if removed:
         from anima_server.services.agent.companion import get_companion
+
         companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
@@ -140,21 +145,18 @@ def save_to_memory(key: str, category: str = "fact", importance: str = "3", tags
     save the same information here. The human block is for your holistic understanding;
     save_to_memory is for discrete searchable facts.
     """
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.services.agent.session_memory import promote_session_note
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     imp = 3
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         imp = max(1, min(5, int(importance)))
-    except (ValueError, TypeError):
-        pass
 
     if category not in ("fact", "preference", "goal", "relationship"):
         category = "fact"
 
-    parsed_tags = [t.strip().lower()
-                   for t in tags.split(",") if t.strip()] if tags else None
+    parsed_tags = [t.strip().lower() for t in tags.split(",") if t.strip()] if tags else None
 
     item = promote_session_note(
         ctx.db,
@@ -167,6 +169,7 @@ def save_to_memory(key: str, category: str = "fact", importance: str = "3", tags
     )
     if item is not None:
         from anima_server.services.agent.companion import get_companion
+
         companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
@@ -175,7 +178,9 @@ def save_to_memory(key: str, category: str = "fact", importance: str = "3", tags
 
 
 @tool
-def set_intention(title: str, evidence: str = "", priority: str = "background", deadline: str = "") -> str:
+def set_intention(
+    title: str, evidence: str = "", priority: str = "background", deadline: str = ""
+) -> str:
     """Track an ongoing goal or intention for this user across sessions. Use when you notice
     a recurring need, upcoming deadline, or something you should proactively follow up on.
     Priority: high (deadline/urgent), ongoing (long-term), background (passive awareness).
@@ -183,8 +188,8 @@ def set_intention(title: str, evidence: str = "", priority: str = "background", 
     - title="Help prepare Q2 review", priority="high", deadline="2026-03-20"
     - title="Track career transition progress", priority="ongoing"
     """
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.services.agent.intentions import add_intention
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     if priority not in ("high", "ongoing", "background"):
@@ -199,6 +204,7 @@ def set_intention(title: str, evidence: str = "", priority: str = "background", 
     )
 
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -209,13 +215,14 @@ def set_intention(title: str, evidence: str = "", priority: str = "background", 
 @tool
 def complete_goal(title: str) -> str:
     """Mark a tracked intention/goal as completed when the user has achieved it or it's no longer needed."""
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.services.agent.intentions import complete_intention
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     found = complete_intention(ctx.db, user_id=ctx.user_id, title=title)
     if found:
         from anima_server.services.agent.companion import get_companion
+
         companion = get_companion(ctx.user_id)
         if companion is not None:
             companion.invalidate_memory()
@@ -233,16 +240,14 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     - "remind me to call mom Friday" -> text="Call mom", due_date="2026-03-20", priority="2"
     - "add buy groceries to my list" -> text="Buy groceries", due_date="", priority="2"
     """
-    from anima_server.services.agent.tool_context import get_tool_context
     from anima_server.models.task import Task
     from anima_server.schemas.task import normalize_due_date, normalize_task_text
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     pri = 2
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         pri = max(1, min(5, int(priority)))
-    except (ValueError, TypeError):
-        pass
 
     normalized_text = normalize_task_text(text)
     normalized_due_date = normalize_due_date(due_date)
@@ -257,6 +262,7 @@ def create_task(text: str, due_date: str = "", priority: str = "2") -> str:
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -272,16 +278,16 @@ def list_tasks(include_done: str = "false") -> str:
     """List the user's current tasks. Returns a summary of open tasks (and optionally
     completed ones). Use this when the user asks about their tasks, todos, or what they
     need to do."""
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models.task import Task
     from sqlalchemy import select
+
+    from anima_server.models.task import Task
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     query = select(Task).where(Task.user_id == ctx.user_id)
     if include_done.lower() not in ("true", "yes", "1"):
         query = query.where(Task.done == False)  # noqa: E712
-    query = query.order_by(
-        Task.done, Task.priority.desc(), Task.created_at.desc())
+    query = query.order_by(Task.done, Task.priority.desc(), Task.created_at.desc())
     tasks = list(ctx.db.scalars(query).all())
 
     if not tasks:
@@ -301,15 +307,15 @@ def list_tasks(include_done: str = "false") -> str:
 def complete_task(text: str) -> str:
     """Mark a task as done. Provide the task text (or a close match). Use when the user
     says they finished something or wants to check off a task."""
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models.task import Task
     from sqlalchemy import select
+
+    from anima_server.models.task import Task
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     tasks = list(
         ctx.db.scalars(
-            select(Task)
-            .where(Task.user_id == ctx.user_id, Task.done == False)  # noqa: E712
+            select(Task).where(Task.user_id == ctx.user_id, Task.done == False)  # noqa: E712
         ).all()
     )
     if not tasks:
@@ -328,8 +334,7 @@ def complete_task(text: str) -> str:
         text_words = set(text_lower.split())
         task_words = set(task_lower.split())
         if text_words and task_words:
-            overlap = len(text_words & task_words) / \
-                max(len(text_words), len(task_words))
+            overlap = len(text_words & task_words) / max(len(text_words), len(task_words))
             if overlap > best_score:
                 best_score = overlap
                 best_task = t
@@ -338,11 +343,12 @@ def complete_task(text: str) -> str:
         return f"Could not find a matching task for: {text}"
 
     best_task.done = True
-    best_task.completed_at = datetime.now(timezone.utc)
-    best_task.updated_at = datetime.now(timezone.utc)
+    best_task.completed_at = datetime.now(UTC)
+    best_task.updated_at = datetime.now(UTC)
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -351,7 +357,9 @@ def complete_task(text: str) -> str:
 
 
 @tool
-def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0", count: str = "5") -> str:
+def recall_memory(
+    query: str, category: str = "", tags: str = "", page: str = "0", count: str = "5"
+) -> str:
     """Search your memory for information about the user. Use this when the user asks
     what you remember, or when you need to look up something specific about them.
     Returns matching memories ranked by relevance (semantic + keyword hybrid search).
@@ -366,9 +374,11 @@ def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0
     - "show me more memories" -> query="...", page="1"
     """
     import asyncio
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models import MemoryEpisode
+
     from sqlalchemy import select
+
+    from anima_server.models import MemoryEpisode
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     query_stripped = query.strip()
@@ -379,22 +389,24 @@ def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0
     if cat and cat not in ("fact", "preference", "goal", "relationship"):
         cat = None
 
-    parsed_tags = [t.strip().lower()
-                   for t in tags.split(",") if t.strip()] if tags else None
+    parsed_tags = [t.strip().lower() for t in tags.split(",") if t.strip()] if tags else None
 
     # Use hybrid search (semantic + keyword) via Phase 1 infrastructure
     scored: list[tuple[float, str, str]] = []
-    hybrid_succeeded = False
     try:
         from anima_server.services.agent.embeddings import hybrid_search
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
 
         coro = hybrid_search(
-            ctx.db, user_id=ctx.user_id, query=query_stripped,
-            limit=20, similarity_threshold=0.2,
+            ctx.db,
+            user_id=ctx.user_id,
+            query=query_stripped,
+            limit=20,
+            similarity_threshold=0.2,
             tags=parsed_tags,
         )
         if loop is not None:
@@ -404,17 +416,26 @@ def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0
         for item, score in result.items:
             if cat and item.category != cat:
                 continue
-            scored.append((score, df(ctx.user_id, item.content, table="memory_items", field="content"), item.category))
-        hybrid_succeeded = True
-    except Exception:  # noqa: BLE001
+            scored.append(
+                (
+                    score,
+                    df(ctx.user_id, item.content, table="memory_items", field="content"),
+                    item.category,
+                )
+            )
+    except Exception:
         pass
 
     # Text-based fallback: used when hybrid fails OR returns no items
     if not scored:
         from anima_server.services.agent.memory_store import get_memory_items
+
         query_lower = query_stripped.lower()
         items = get_memory_items(
-            ctx.db, user_id=ctx.user_id, category=cat, limit=100,
+            ctx.db,
+            user_id=ctx.user_id,
+            category=cat,
+            limit=100,
         )
         for item in items:
             plaintext = df(ctx.user_id, item.content, table="memory_items", field="content")
@@ -430,27 +451,27 @@ def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0
                     scored.append((overlap, plaintext, item.category))
 
     # Also search episodes
-    episodes = list(ctx.db.scalars(
-        select(MemoryEpisode)
-        .where(MemoryEpisode.user_id == ctx.user_id)
-        .order_by(MemoryEpisode.created_at.desc())
-        .limit(50)
-    ).all())
+    episodes = list(
+        ctx.db.scalars(
+            select(MemoryEpisode)
+            .where(MemoryEpisode.user_id == ctx.user_id)
+            .order_by(MemoryEpisode.created_at.desc())
+            .limit(50)
+        ).all()
+    )
     query_lower = query_stripped.lower()
     for ep in episodes:
         ep_plaintext = df(ctx.user_id, ep.summary, table="memory_episodes", field="summary")
         summary_lower = ep_plaintext.lower()
         if query_lower in summary_lower:
-            scored.append(
-                (0.9, f"[Episode {ep.date}] {ep_plaintext}", "episode"))
+            scored.append((0.9, f"[Episode {ep.date}] {ep_plaintext}", "episode"))
             continue
         query_words = set(query_lower.split())
         summary_words = set(summary_lower.split())
         if query_words and summary_words:
             overlap = len(query_words & summary_words) / len(query_words)
             if overlap >= 0.5:
-                scored.append(
-                    (overlap, f"[Episode {ep.date}] {ep_plaintext}", "episode"))
+                scored.append((overlap, f"[Episode {ep.date}] {ep_plaintext}", "episode"))
 
     if not scored:
         return f"No memories found matching: {query}"
@@ -486,7 +507,9 @@ def recall_memory(query: str, category: str = "", tags: str = "", page: str = "0
 
 
 @tool
-def recall_conversation(query: str, role: str = "", start_date: str = "", end_date: str = "", limit: str = "10") -> str:
+def recall_conversation(
+    query: str, role: str = "", start_date: str = "", end_date: str = "", limit: str = "10"
+) -> str:
     """Search past conversations for specific exchanges or topics.
     Use this when the user asks about something discussed previously,
     or when you need to recall a specific past conversation.
@@ -504,16 +527,15 @@ def recall_conversation(query: str, role: str = "", start_date: str = "", end_da
         - "conversations from last week" -> query="", start_date="2026-03-09", end_date="2026-03-15"
     """
     import asyncio
-    from anima_server.services.agent.tool_context import get_tool_context
+
     from anima_server.services.agent.conversation_search import search_conversation_history
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
 
     max_results = 10
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         max_results = max(1, min(20, int(limit)))
-    except (ValueError, TypeError):
-        pass
 
     try:
         loop = asyncio.get_running_loop()
@@ -521,29 +543,38 @@ def recall_conversation(query: str, role: str = "", start_date: str = "", end_da
         loop = None
 
     if loop is not None:
-        future = asyncio.run_coroutine_threadsafe(search_conversation_history(
-            ctx.db,
-            user_id=ctx.user_id,
-            query=query.strip(),
-            role_filter=role.strip(),
-            start_date=start_date.strip(),
-            end_date=end_date.strip(),
-            limit=max_results,
-        ), loop)
+        future = asyncio.run_coroutine_threadsafe(
+            search_conversation_history(
+                ctx.db,
+                user_id=ctx.user_id,
+                query=query.strip(),
+                role_filter=role.strip(),
+                start_date=start_date.strip(),
+                end_date=end_date.strip(),
+                limit=max_results,
+            ),
+            loop,
+        )
         hits = future.result(timeout=30)
     else:
-        hits = asyncio.run(search_conversation_history(
-            ctx.db,
-            user_id=ctx.user_id,
-            query=query.strip(),
-            role_filter=role.strip(),
-            start_date=start_date.strip(),
-            end_date=end_date.strip(),
-            limit=max_results,
-        ))
+        hits = asyncio.run(
+            search_conversation_history(
+                ctx.db,
+                user_id=ctx.user_id,
+                query=query.strip(),
+                role_filter=role.strip(),
+                start_date=start_date.strip(),
+                end_date=end_date.strip(),
+                limit=max_results,
+            )
+        )
 
     if not hits:
-        return f"No past conversations found matching: {query}" if query.strip() else "No conversations found in that date range."
+        return (
+            f"No past conversations found matching: {query}"
+            if query.strip()
+            else "No conversations found in that date range."
+        )
 
     lines: list[str] = []
     for hit in hits:
@@ -566,9 +597,10 @@ def update_human_memory(content: str) -> str:
     your overall picture of who this person is, update this block.
     Do NOT duplicate the same information in both this tool and save_to_memory.
     """
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models import SelfModelBlock
     from sqlalchemy import select
+
+    from anima_server.models import SelfModelBlock
+    from anima_server.services.agent.tool_context import get_tool_context
 
     ctx = get_tool_context()
     block = ctx.db.scalar(
@@ -578,13 +610,17 @@ def update_human_memory(content: str) -> str:
         )
     )
     if block is None:
-        ctx.db.add(SelfModelBlock(
-            user_id=ctx.user_id,
-            section="human",
-            content=ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content"),
-            version=1,
-            updated_by="agent_tool",
-        ))
+        ctx.db.add(
+            SelfModelBlock(
+                user_id=ctx.user_id,
+                section="human",
+                content=ef(
+                    ctx.user_id, content.strip(), table="self_model_blocks", field="content"
+                ),
+                version=1,
+                updated_by="agent_tool",
+            )
+        )
     else:
         block.content = ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content")
         block.version += 1
@@ -592,6 +628,7 @@ def update_human_memory(content: str) -> str:
     ctx.db.flush()
 
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -609,9 +646,10 @@ def core_memory_append(label: str, content: str) -> str:
     - core_memory_append("human", "Mentioned they recently adopted a rescue dog named Biscuit.")
     - core_memory_append("persona", "I've noticed I tend to be more playful in evening chats.")
     """
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models import SelfModelBlock
     from sqlalchemy import select
+
+    from anima_server.models import SelfModelBlock
+    from anima_server.services.agent.tool_context import get_tool_context
 
     if label not in ("human", "persona"):
         return f"Invalid label '{label}'. Use 'human' or 'persona'."
@@ -624,22 +662,32 @@ def core_memory_append(label: str, content: str) -> str:
         )
     )
     if block is None:
-        ctx.db.add(SelfModelBlock(
-            user_id=ctx.user_id,
-            section=label,
-            content=ef(ctx.user_id, content.strip(), table="self_model_blocks", field="content"),
-            version=1,
-            updated_by="core_memory_tool",
-        ))
+        ctx.db.add(
+            SelfModelBlock(
+                user_id=ctx.user_id,
+                section=label,
+                content=ef(
+                    ctx.user_id, content.strip(), table="self_model_blocks", field="content"
+                ),
+                version=1,
+                updated_by="core_memory_tool",
+            )
+        )
     else:
         existing_text = df(ctx.user_id, block.content, table="self_model_blocks", field="content")
-        block.content = ef(ctx.user_id, (existing_text.rstrip() + "\n" + content.strip()).strip(), table="self_model_blocks", field="content")
+        block.content = ef(
+            ctx.user_id,
+            (existing_text.rstrip() + "\n" + content.strip()).strip(),
+            table="self_model_blocks",
+            field="content",
+        )
         block.version += 1
         block.updated_by = "core_memory_tool"
     ctx.db.flush()
 
     ctx.memory_modified = True
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -658,9 +706,10 @@ def core_memory_replace(label: str, old_text: str, new_text: str) -> str:
     - core_memory_replace("human", "Works at Google", "Works at Apple (switched jobs March 2026)")
     - core_memory_replace("persona", "I prefer formal language", "I adapt my formality to match the user's style")
     """
-    from anima_server.services.agent.tool_context import get_tool_context
-    from anima_server.models import SelfModelBlock
     from sqlalchemy import select
+
+    from anima_server.models import SelfModelBlock
+    from anima_server.services.agent.tool_context import get_tool_context
 
     if label not in ("human", "persona"):
         return f"Invalid label '{label}'. Use 'human' or 'persona'."
@@ -679,13 +728,19 @@ def core_memory_replace(label: str, old_text: str, new_text: str) -> str:
     if old_text not in existing_text:
         return f"Could not find the exact text to replace in {label} memory."
 
-    block.content = ef(ctx.user_id, existing_text.replace(old_text, new_text, 1), table="self_model_blocks", field="content")
+    block.content = ef(
+        ctx.user_id,
+        existing_text.replace(old_text, new_text, 1),
+        table="self_model_blocks",
+        field="content",
+    )
     block.version += 1
     block.updated_by = "core_memory_tool"
     ctx.db.flush()
 
     ctx.memory_modified = True
     from anima_server.services.agent.companion import get_companion
+
     companion = get_companion(ctx.user_id)
     if companion is not None:
         companion.invalidate_memory()
@@ -715,8 +770,7 @@ def inject_inner_thoughts_into_tools(
     original tool definitions.  Returns the same list with updated schemas.
     """
     description = (
-        "Deep inner monologue, private to you only. "
-        "Use this to reason about the current situation."
+        "Deep inner monologue, private to you only. Use this to reason about the current situation."
     )
     for t in tools:
         schema_obj = getattr(t, "args_schema", None)
@@ -735,7 +789,7 @@ def inject_inner_thoughts_into_tools(
         # Add to required list (first position)
         required = schema.get("required", [])
         if inner_thoughts_key not in required:
-            schema["required"] = [inner_thoughts_key] + list(required)
+            schema["required"] = [inner_thoughts_key, *list(required)]
         # Replace the schema object
         t.args_schema = _SimpleSchema(schema)
     return tools
@@ -791,8 +845,10 @@ def get_core_tools() -> list[Any]:
     """
     return [
         send_message,
-        recall_memory, recall_conversation,
-        core_memory_append, core_memory_replace,
+        recall_memory,
+        recall_conversation,
+        core_memory_append,
+        core_memory_replace,
         save_to_memory,
     ]
 
@@ -800,9 +856,13 @@ def get_core_tools() -> list[Any]:
 def get_extension_tools() -> list[Any]:
     """Return optional extension tools (task management, intentions, etc.)."""
     return [
-        create_task, list_tasks, complete_task,
-        set_intention, complete_goal,
-        note_to_self, dismiss_note,
+        create_task,
+        list_tasks,
+        complete_task,
+        set_intention,
+        complete_goal,
+        note_to_self,
+        dismiss_note,
         update_human_memory,
         current_datetime,
     ]
@@ -822,8 +882,7 @@ def get_tool_summaries(tools: Sequence[Any] | None = None) -> list[str]:
     summaries: list[str] = []
 
     for agent_tool in resolved_tools:
-        name = getattr(agent_tool, "name", "") or getattr(
-            agent_tool, "__name__", "tool")
+        name = getattr(agent_tool, "name", "") or getattr(agent_tool, "__name__", "tool")
         description = getattr(agent_tool, "description", "") or ""
         normalized_description = " ".join(description.strip().split())
         if normalized_description:

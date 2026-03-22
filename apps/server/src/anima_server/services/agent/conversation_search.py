@@ -8,11 +8,10 @@ are excluded to prevent the agent from retrieving its own tool calls.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentThread, MemoryDailyLog
@@ -118,9 +117,7 @@ def _search_messages(
     parsed_end: date | None,
 ) -> list[ConversationHit]:
     """Search AgentMessage rows, excluding tool calls and summaries."""
-    thread = db.scalar(
-        select(AgentThread).where(AgentThread.user_id == user_id)
-    )
+    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
     if thread is None:
         return []
 
@@ -178,13 +175,15 @@ def _search_messages(
             score = 0.5
 
         date_str = msg_date.isoformat() if msg_date else "unknown"
-        hits.append(ConversationHit(
-            source="message",
-            role=row.role,
-            content=content[:500],  # cap length for display
-            date=date_str,
-            score=score,
-        ))
+        hits.append(
+            ConversationHit(
+                source="message",
+                role=row.role,
+                content=content[:500],  # cap length for display
+                date=date_str,
+                score=score,
+            )
+        )
 
     return hits
 
@@ -219,9 +218,24 @@ def _search_daily_logs(
         # Score user_message and assistant_response separately
         entries = []
         if role_filter != "assistant":
-            entries.append(("user", df(user_id, row.user_message, table="memory_daily_logs", field="user_message")))
+            entries.append(
+                (
+                    "user",
+                    df(user_id, row.user_message, table="memory_daily_logs", field="user_message"),
+                )
+            )
         if role_filter != "user":
-            entries.append(("assistant", df(user_id, row.assistant_response, table="memory_daily_logs", field="assistant_response")))
+            entries.append(
+                (
+                    "assistant",
+                    df(
+                        user_id,
+                        row.assistant_response,
+                        table="memory_daily_logs",
+                        field="assistant_response",
+                    ),
+                )
+            )
 
         for role, text in entries:
             text_stripped = (text or "").strip()
@@ -235,12 +249,14 @@ def _search_daily_logs(
                 score = 0.5
 
             date_str = row.date if row.date else "unknown"
-            hits.append(ConversationHit(
-                source="daily_log",
-                role=role,
-                content=text_stripped[:500],
-                date=date_str,
-                score=score,
-            ))
+            hits.append(
+                ConversationHit(
+                    source="daily_log",
+                    role=role,
+                    content=text_stripped[:500],
+                    date=date_str,
+                    score=score,
+                )
+            )
 
     return hits

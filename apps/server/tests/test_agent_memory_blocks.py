@@ -3,15 +3,14 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import AgentMessage, AgentThread, MemoryItem, User
 from anima_server.services.agent.memory_blocks import build_runtime_memory_blocks
 from anima_server.services.agent.persistence import load_thread_history
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @contextmanager
@@ -95,22 +94,24 @@ def test_build_runtime_memory_blocks_includes_facts_and_preferences() -> None:
         session.add(thread)
         session.flush()
 
-        session.add_all([
-            MemoryItem(
-                user_id=user.id,
-                content="Works as a software engineer",
-                category="fact",
-                importance=4,
-                source="extraction",
-            ),
-            MemoryItem(
-                user_id=user.id,
-                content="Likes green tea",
-                category="preference",
-                importance=3,
-                source="extraction",
-            ),
-        ])
+        session.add_all(
+            [
+                MemoryItem(
+                    user_id=user.id,
+                    content="Works as a software engineer",
+                    category="fact",
+                    importance=4,
+                    source="extraction",
+                ),
+                MemoryItem(
+                    user_id=user.id,
+                    content="Likes green tea",
+                    category="preference",
+                    importance=3,
+                    source="extraction",
+                ),
+            ]
+        )
         session.commit()
 
         blocks = build_runtime_memory_blocks(

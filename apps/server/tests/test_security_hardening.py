@@ -9,19 +9,17 @@ Covers:
 - Sidecar nonce middleware enforcement
 - Health endpoint does not expose nonce
 """
+
 from __future__ import annotations
 
 import shutil
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from anima_server.config import settings
 from anima_server.db.session import is_sqlite_mode
-
 from conftest import create_managed_temp_dir, managed_test_client
-
+from fastapi.testclient import TestClient
 
 # --------------------------------------------------------------------------- #
 # Helpers
@@ -82,14 +80,13 @@ def test_is_sqlite_mode_false_for_postgres_url() -> None:
 
 def test_require_sqlite_mode_raises_in_shared_mode() -> None:
     """The dependency must raise HTTPException(403) when not in SQLite mode."""
-    from fastapi import HTTPException
-
     from anima_server.api.deps.db_mode import require_sqlite_mode
+    from fastapi import HTTPException
 
     with patch("anima_server.api.deps.db_mode.is_sqlite_mode", return_value=False):
         try:
             require_sqlite_mode()
-            raise AssertionError("Expected HTTPException")  # noqa: TRY301
+            raise AssertionError("Expected HTTPException")
         except HTTPException as exc:
             assert exc.status_code == 403
             assert "shared-database" in str(exc.detail).lower()
@@ -110,14 +107,13 @@ def test_require_sqlite_mode_passes_in_sqlite_mode() -> None:
 
 def test_get_user_database_url_raises_for_postgres() -> None:
     """Per-user routing must raise HTTPException instead of silently falling back."""
-    from fastapi import HTTPException
-
     from anima_server.db.session import get_user_database_url
+    from fastapi import HTTPException
 
     with patch.object(settings, "database_url", "postgresql://localhost/anima"):
         try:
             get_user_database_url(1)
-            raise AssertionError("Expected HTTPException")  # noqa: TRY301
+            raise AssertionError("Expected HTTPException")
         except HTTPException as exc:
             assert exc.status_code == 403
             assert "tenant isolation" in str(exc.detail).lower()
@@ -211,7 +207,7 @@ def test_vault_import_blocked_in_shared_mode() -> None:
             resp = client.post(
                 "/api/vault/import",
                 headers=headers,
-                json={"passphrase": "testpassphrase", "vault": "{\"version\":2}"},
+                json={"passphrase": "testpassphrase", "vault": '{"version":2}'},
             )
             assert resp.status_code == 403
             assert "shared-database" in resp.json()["error"].lower()
@@ -325,8 +321,10 @@ def test_nonce_middleware_uses_compare_digest() -> None:
         from anima_server import main as main_module
 
         app, original_data_dir, temp_root = _create_test_app()
-        with patch.object(main_module.hmac, "compare_digest", return_value=True) as compare_digest:
-            with TestClient(app) as client:
+        with (
+            patch.object(main_module.hmac, "compare_digest", return_value=True) as compare_digest,
+            TestClient(app) as client,
+        ):
                 resp = client.get(
                     "/api/config/providers",
                     headers={"x-anima-nonce": " test-nonce-enforce "},

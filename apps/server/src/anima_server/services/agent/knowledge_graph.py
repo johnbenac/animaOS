@@ -5,15 +5,15 @@ Entities (people, places, orgs, projects, concepts) and typed relations
 are stored in kg_entities / kg_relations tables. Graph traversal uses
 SQL JOINs (max depth 2) for relational memory retrieval.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import re
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import and_, or_, select, func as sa_func
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from anima_server.config import settings
@@ -67,10 +67,10 @@ def _substring_containment(short: str, long: str) -> bool:
     trivial substrings like "AI" inside "Maine").
     """
     s = short.lower().strip()
-    l = long.lower().strip()
-    if min(len(s), len(l)) < 3:
+    lng = long.lower().strip()
+    if min(len(s), len(lng)) < 3:
         return False
-    return s in l or l in s
+    return s in lng or lng in s
 
 
 def _find_similar_entity(
@@ -91,11 +91,7 @@ def _find_similar_entity(
     name is fully contained inside the other and the Jaccard score is
     above a lower threshold (0.5), the match is accepted.
     """
-    entities = list(
-        db.scalars(
-            select(KGEntity).where(KGEntity.user_id == user_id)
-        ).all()
-    )
+    entities = list(db.scalars(select(KGEntity).where(KGEntity.user_id == user_id)).all())
     if not entities:
         return None
 
@@ -129,7 +125,9 @@ def _find_similar_entity(
     if best_score >= threshold and best_entity is not None:
         logger.debug(
             "Fuzzy entity match: '%s' -> '%s' (score=%.2f)",
-            name, best_entity.name, best_score,
+            name,
+            best_entity.name,
+            best_score,
         )
         return best_entity
 
@@ -137,6 +135,7 @@ def _find_similar_entity(
 
 
 # ── Entity / Relation CRUD ───────────────────────────────────────────
+
 
 def upsert_entity(
     db: Session,
@@ -161,7 +160,9 @@ def upsert_entity(
     if existing is not None:
         existing.mentions = (existing.mentions or 1) + 1
         existing.updated_at = datetime.now(UTC)
-        if description and (not existing.description or len(description) > len(existing.description)):
+        if description and (
+            not existing.description or len(description) > len(existing.description)
+        ):
             existing.description = description
         if entity_type != "unknown" and existing.entity_type == "unknown":
             existing.entity_type = entity_type
@@ -213,7 +214,10 @@ def upsert_relation(
     if source is None or dest is None:
         logger.debug(
             "Cannot create relation: source=%s(%s) dest=%s(%s)",
-            source_name, source is not None, destination_name, dest is not None,
+            source_name,
+            source is not None,
+            destination_name,
+            dest is not None,
         )
         return None
 
@@ -249,6 +253,7 @@ def upsert_relation(
 
 # ── Graph traversal ──────────────────────────────────────────────────
 
+
 def search_graph(
     db: Session,
     *,
@@ -265,12 +270,14 @@ def search_graph(
     """
     # Resolve starting entity IDs
     normalized_names = [normalize_entity_name(n) for n in entity_names]
-    start_entities = list(db.scalars(
-        select(KGEntity).where(
-            KGEntity.user_id == user_id,
-            KGEntity.name_normalized.in_(normalized_names),
-        )
-    ).all())
+    start_entities = list(
+        db.scalars(
+            select(KGEntity).where(
+                KGEntity.user_id == user_id,
+                KGEntity.name_normalized.in_(normalized_names),
+            )
+        ).all()
+    )
 
     if not start_entities:
         return []
@@ -286,15 +293,17 @@ def search_graph(
             break
 
         # Fetch all relations touching current entity IDs (bidirectional)
-        relations = list(db.scalars(
-            select(KGRelation).where(
-                KGRelation.user_id == user_id,
-                or_(
-                    KGRelation.source_id.in_(entity_ids),
-                    KGRelation.destination_id.in_(entity_ids),
-                ),
-            )
-        ).all())
+        relations = list(
+            db.scalars(
+                select(KGRelation).where(
+                    KGRelation.user_id == user_id,
+                    or_(
+                        KGRelation.source_id.in_(entity_ids),
+                        KGRelation.destination_id.in_(entity_ids),
+                    ),
+                )
+            ).all()
+        )
 
         next_ids: set[int] = set()
         new_entity_ids: set[int] = set()
@@ -315,9 +324,9 @@ def search_graph(
 
         # Bulk-fetch new entities
         if new_entity_ids:
-            new_entities = list(db.scalars(
-                select(KGEntity).where(KGEntity.id.in_(new_entity_ids))
-            ).all())
+            new_entities = list(
+                db.scalars(select(KGEntity).where(KGEntity.id.in_(new_entity_ids))).all()
+            )
             for e in new_entities:
                 entity_cache[e.id] = e
 
@@ -351,6 +360,7 @@ def search_graph(
 
 
 # ── BM25 reranking ───────────────────────────────────────────────────
+
 
 def _mention_boost(result: dict[str, Any]) -> float:
     """Compute a logarithmic mention boost for a graph result triple.
@@ -422,12 +432,10 @@ def rerank_graph_results(
     scores = bm25.get_scores(query_tokens)
 
     # Apply mention boost to BM25 scores
-    boosted_scores = [
-        score * _mention_boost(r) for r, score in zip(results, scores)
-    ]
+    boosted_scores = [score * _mention_boost(r) for r, score in zip(results, scores, strict=False)]
 
     scored = sorted(
-        zip(results, boosted_scores),
+        zip(results, boosted_scores, strict=False),
         key=lambda x: x[1],
         reverse=True,
     )
@@ -435,6 +443,7 @@ def rerank_graph_results(
 
 
 # ── Query-to-graph context ───────────────────────────────────────────
+
 
 def graph_context_for_query(
     db: Session,
@@ -453,7 +462,11 @@ def graph_context_for_query(
         return []
 
     raw_results = search_graph(
-        db, user_id=user_id, entity_names=entity_names, max_depth=2, limit=20,
+        db,
+        user_id=user_id,
+        entity_names=entity_names,
+        max_depth=2,
+        limit=20,
     )
     if not raw_results:
         return []
@@ -462,8 +475,16 @@ def graph_context_for_query(
 
     lines: list[str] = []
     for r in ranked:
-        src_desc = f" ({r['source_type']})" if r.get("source_type") and r["source_type"] != "unknown" else ""
-        dst_desc = f" ({r['destination_type']})" if r.get("destination_type") and r["destination_type"] != "unknown" else ""
+        src_desc = (
+            f" ({r['source_type']})"
+            if r.get("source_type") and r["source_type"] != "unknown"
+            else ""
+        )
+        dst_desc = (
+            f" ({r['destination_type']})"
+            if r.get("destination_type") and r["destination_type"] != "unknown"
+            else ""
+        )
         line = f"{r['source']}{src_desc} -> {r['relation']} -> {r['destination']}{dst_desc}"
         # Annotate frequently-mentioned triples so the LLM knows they are well-established
         rel_m = r.get("relation_mentions", 1) or 1
@@ -488,9 +509,7 @@ def _extract_entity_names_from_query(
     query_lower = query.lower()
 
     # Fetch all entity names for this user (personal-scale, <1000 entities)
-    entities = list(db.scalars(
-        select(KGEntity).where(KGEntity.user_id == user_id)
-    ).all())
+    entities = list(db.scalars(select(KGEntity).where(KGEntity.user_id == user_id)).all())
 
     matched: list[str] = []
     for entity in entities:
@@ -610,20 +629,22 @@ async def extract_entities_and_relations(
     resp = assistant_response or ""
 
     try:
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.llm import create_llm
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
         prompt = EXTRACT_ENTITIES_PROMPT.format(
             user_message=msg,
             assistant_response=resp,
         )
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="You extract entities and relationships. Respond only with JSON.",
-            ),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(
+                    content="You extract entities and relationships. Respond only with JSON.",
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if not isinstance(content, str):
             content = str(content)
@@ -644,14 +665,16 @@ async def extract_entities_and_relations(
         valid_entities: list[dict[str, str]] = []
         for e in entities[:5]:
             if isinstance(e, dict) and e.get("name") and e.get("type"):
-                valid_entities.append({
-                    "name": str(e["name"]),
-                    "type": str(e["type"]),
-                    "description": str(e.get("description", "")),
-                })
+                valid_entities.append(
+                    {
+                        "name": str(e["name"]),
+                        "type": str(e["type"]),
+                        "description": str(e.get("description", "")),
+                    }
+                )
 
         # Validate relations
-        entity_names = {e["name"].lower() for e in valid_entities}
+        {e["name"].lower() for e in valid_entities}
         valid_relations: list[dict[str, str]] = []
         for r in relations:
             if (
@@ -660,20 +683,23 @@ async def extract_entities_and_relations(
                 and r.get("relation")
                 and r.get("destination")
             ):
-                valid_relations.append({
-                    "source": str(r["source"]),
-                    "relation": str(r["relation"]),
-                    "destination": str(r["destination"]),
-                })
+                valid_relations.append(
+                    {
+                        "source": str(r["source"]),
+                        "relation": str(r["relation"]),
+                        "destination": str(r["destination"]),
+                    }
+                )
 
         return valid_entities, valid_relations
 
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM entity extraction failed")
         return [], []
 
 
 # ── ID hallucination protection ──────────────────────────────────────
+
 
 def _map_ids_to_sequential(
     items: list[dict[str, Any]],
@@ -702,6 +728,7 @@ def _map_ids_back(
 
 
 # ── Stale relation pruning ───────────────────────────────────────────
+
 
 async def prune_stale_relations(
     db: Session,
@@ -732,25 +759,27 @@ async def prune_stale_relations(
     # Format relations for the prompt
     rel_lines = []
     for r in mapped_relations:
-        rel_lines.append(
-            f"  ID {r['id']}: {r['source']} -> {r['relation']} -> {r['destination']}"
-        )
+        rel_lines.append(f"  ID {r['id']}: {r['source']} -> {r['relation']} -> {r['destination']}")
     rel_text = "\n".join(rel_lines)
     facts_text = "\n".join(f"- {f}" for f in new_facts)
 
     try:
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.llm import create_llm
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
         prompt = PRUNE_RELATIONS_PROMPT.format(
             existing_relations=rel_text,
             new_facts=facts_text,
         )
-        response = await llm.ainvoke([
-            SystemMessage(content="You evaluate knowledge graph relations. Respond only with JSON."),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(
+                    content="You evaluate knowledge graph relations. Respond only with JSON."
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if not isinstance(content, str):
             content = str(content)
@@ -779,12 +808,13 @@ async def prune_stale_relations(
 
         return real_ids
 
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM relation pruning failed")
         return []
 
 
 # ── Full ingestion pipeline ──────────────────────────────────────────
+
 
 async def ingest_conversation_graph(
     db: Session,
@@ -821,7 +851,7 @@ async def ingest_conversation_graph(
                 description=entity_data.get("description", ""),
             )
             entities_upserted += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Failed to upsert entity: %s", entity_data.get("name"))
 
     # 3. Upsert relations
@@ -837,7 +867,7 @@ async def ingest_conversation_graph(
             )
             if result is not None:
                 relations_upserted += 1
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Failed to upsert relation: %s", rel_data)
 
     # 4. Prune stale relations touching this turn's entities
@@ -845,25 +875,29 @@ async def ingest_conversation_graph(
     normalized_names = [normalize_entity_name(n) for n in entity_names]
 
     # Find entity IDs for this turn
-    turn_entities = list(db.scalars(
-        select(KGEntity).where(
-            KGEntity.user_id == user_id,
-            KGEntity.name_normalized.in_(normalized_names),
-        )
-    ).all())
+    turn_entities = list(
+        db.scalars(
+            select(KGEntity).where(
+                KGEntity.user_id == user_id,
+                KGEntity.name_normalized.in_(normalized_names),
+            )
+        ).all()
+    )
     turn_entity_ids = {e.id for e in turn_entities}
 
     if turn_entity_ids:
         # Load existing relations touching these entities
-        existing_rels = list(db.scalars(
-            select(KGRelation).where(
-                KGRelation.user_id == user_id,
-                or_(
-                    KGRelation.source_id.in_(turn_entity_ids),
-                    KGRelation.destination_id.in_(turn_entity_ids),
-                ),
-            )
-        ).all())
+        existing_rels = list(
+            db.scalars(
+                select(KGRelation).where(
+                    KGRelation.user_id == user_id,
+                    or_(
+                        KGRelation.source_id.in_(turn_entity_ids),
+                        KGRelation.destination_id.in_(turn_entity_ids),
+                    ),
+                )
+            ).all()
+        )
 
         if existing_rels:
             # Build relation dicts for pruning with entity names
@@ -875,9 +909,7 @@ async def ingest_conversation_graph(
                 all_entity_ids.add(r.destination_id)
             missing_ids = all_entity_ids - set(entity_map.keys())
             if missing_ids:
-                extra = list(db.scalars(
-                    select(KGEntity).where(KGEntity.id.in_(missing_ids))
-                ).all())
+                extra = list(db.scalars(select(KGEntity).where(KGEntity.id.in_(missing_ids))).all())
                 for e in extra:
                     entity_map[e.id] = e
 
@@ -886,12 +918,14 @@ async def ingest_conversation_graph(
                 src = entity_map.get(r.source_id)
                 dst = entity_map.get(r.destination_id)
                 if src and dst:
-                    rel_dicts.append({
-                        "id": r.id,
-                        "source": src.name,
-                        "relation": r.relation_type,
-                        "destination": dst.name,
-                    })
+                    rel_dicts.append(
+                        {
+                            "id": r.id,
+                            "source": src.name,
+                            "relation": r.relation_type,
+                            "destination": dst.name,
+                        }
+                    )
 
             new_facts = [user_message, assistant_response]
             pruned_ids = await prune_stale_relations(
@@ -912,4 +946,6 @@ async def ingest_conversation_graph(
 
 # ── JSON parsing helpers ─────────────────────────────────────────────
 
-from anima_server.services.agent.json_utils import parse_json_object as _parse_json_object  # noqa: E302
+from anima_server.services.agent.json_utils import (
+    parse_json_object as _parse_json_object,
+)

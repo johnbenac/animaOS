@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from anima_server.services.creation_agent import (
     CREATION_COMPLETE_MARKER,
     CreationTurnResult,
@@ -11,7 +10,6 @@ from anima_server.services.creation_agent import (
     _scaffold_turn,
     handle_creation_turn,
 )
-
 
 # --------------------------------------------------------------------------- #
 # Scaffold turn — Phase 0: greeting
@@ -113,8 +111,8 @@ def test_parse_response_no_marker() -> None:
 
 def test_parse_response_with_marker_and_json() -> None:
     text = (
-        'Wonderful! I am ready.\n'
-        f'{CREATION_COMPLETE_MARKER}'
+        "Wonderful! I am ready.\n"
+        f"{CREATION_COMPLETE_MARKER}"
         '{"agentName": "Nova", "relationship": "companion", "style": "warm"}'
     )
     result = _parse_response(text)

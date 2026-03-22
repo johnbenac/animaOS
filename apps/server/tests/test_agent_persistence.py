@@ -5,13 +5,10 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
-from anima_server.models import AgentMessage, AgentRun, AgentThread, User
+from anima_server.models import AgentMessage, User
 from anima_server.services.agent.persistence import (
+    _deserialize_tool_calls,
     append_message,
     append_user_message,
     clear_threads,
@@ -23,7 +20,6 @@ from anima_server.services.agent.persistence import (
     mark_run_failed,
     persist_agent_result,
     reset_thread,
-    _deserialize_tool_calls,
 )
 from anima_server.services.agent.runtime_types import (
     StepTrace,
@@ -32,7 +28,9 @@ from anima_server.services.agent.runtime_types import (
     UsageStats,
 )
 from anima_server.services.agent.state import AgentResult
-
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # --------------------------------------------------------------------------- #
 # In-memory database helper
@@ -125,12 +123,19 @@ def test_append_user_message() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
         msg = append_user_message(
-            db, thread=thread, run_id=run.id,
-            content="Hello!", sequence_id=1,
+            db,
+            thread=thread,
+            run_id=run.id,
+            content="Hello!",
+            sequence_id=1,
         )
         assert msg.role == "user"
         assert msg.content_text == "Hello!"
@@ -143,8 +148,12 @@ def test_append_message_tool() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         msg = append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=1, role="tool",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=1,
+            role="tool",
             content_text="tool output",
             tool_name="search",
             tool_call_id="c1",
@@ -158,11 +167,15 @@ def test_append_message_updates_thread_timestamps() -> None:
     with _db_session() as db:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
-        original_updated_at = thread.updated_at
 
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=1, role="user", content_text="hi",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=1,
+            role="user",
+            content_text="hi",
         )
         # Thread timestamps should be updated
         assert thread.last_message_at is not None
@@ -187,12 +200,22 @@ def test_load_thread_history_with_messages() -> None:
         thread = get_or_create_thread(db, user.id)
 
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=1, role="user", content_text="Hello",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=1,
+            role="user",
+            content_text="Hello",
         )
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=2, role="assistant", content_text="Hi back",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=2,
+            role="assistant",
+            content_text="Hi back",
         )
         db.commit()
 
@@ -210,8 +233,13 @@ def test_load_thread_history_excludes_out_of_context() -> None:
         thread = get_or_create_thread(db, user.id)
 
         msg = append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=1, role="user", content_text="Hello",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=1,
+            role="user",
+            content_text="Hello",
         )
         # Mark message out of context
         msg.is_in_context = False
@@ -229,12 +257,22 @@ def test_load_thread_history_excludes_summary_role() -> None:
         thread = get_or_create_thread(db, user.id)
 
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=1, role="summary", content_text="Earlier context",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=1,
+            role="summary",
+            content_text="Earlier context",
         )
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=2, role="user", content_text="Hello",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=2,
+            role="user",
+            content_text="Hello",
         )
         db.commit()
 
@@ -255,12 +293,22 @@ def test_count_messages_by_role() -> None:
 
         for i in range(3):
             append_message(
-                db, thread=thread, run_id=None, step_id=None,
-                sequence_id=i + 1, role="user", content_text=f"msg {i}",
+                db,
+                thread=thread,
+                run_id=None,
+                step_id=None,
+                sequence_id=i + 1,
+                role="user",
+                content_text=f"msg {i}",
             )
         append_message(
-            db, thread=thread, run_id=None, step_id=None,
-            sequence_id=4, role="assistant", content_text="reply",
+            db,
+            thread=thread,
+            run_id=None,
+            step_id=None,
+            sequence_id=4,
+            role="assistant",
+            content_text="reply",
         )
         db.commit()
 
@@ -279,8 +327,12 @@ def test_mark_run_failed() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
         mark_run_failed(db, run, "Something went wrong")
         assert run.status == "failed"
@@ -298,8 +350,12 @@ def test_finalize_run_aggregates_tokens() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
 
         result = AgentResult(
@@ -340,12 +396,18 @@ def test_finalize_run_no_usage() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
 
         result = AgentResult(
-            response="done", model="test", provider="test",
+            response="done",
+            model="test",
+            provider="test",
             step_traces=[StepTrace(step_index=0)],
         )
 
@@ -506,8 +568,12 @@ def test_persist_agent_result_simple() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
 
         result = AgentResult(
@@ -535,9 +601,7 @@ def test_persist_agent_result_simple() -> None:
         db.commit()
 
         # Verify the assistant message was persisted
-        messages = db.query(AgentMessage).filter_by(
-            thread_id=thread.id
-        ).all()
+        messages = db.query(AgentMessage).filter_by(thread_id=thread.id).all()
         assert len(messages) == 1
         assert messages[0].role == "assistant"
         assert messages[0].content_text == "Hello!"
@@ -548,13 +612,19 @@ def test_persist_agent_result_with_tool_calls() -> None:
         user = _make_user(db)
         thread = get_or_create_thread(db, user.id)
         run = create_run(
-            db, thread_id=thread.id, user_id=user.id,
-            provider="test", model="test", mode="chat",
+            db,
+            thread_id=thread.id,
+            user_id=user.id,
+            provider="test",
+            model="test",
+            mode="chat",
         )
 
         tc = ToolCall(id="c1", name="search", arguments={"q": "cats"})
         tool_result = ToolExecutionResult(
-            call_id="c1", name="search", output="Found cats",
+            call_id="c1",
+            name="search",
+            output="Found cats",
         )
 
         result = AgentResult(
@@ -580,9 +650,12 @@ def test_persist_agent_result_with_tool_calls() -> None:
         )
         db.commit()
 
-        messages = db.query(AgentMessage).filter_by(
-            thread_id=thread.id
-        ).order_by(AgentMessage.sequence_id).all()
+        messages = (
+            db.query(AgentMessage)
+            .filter_by(thread_id=thread.id)
+            .order_by(AgentMessage.sequence_id)
+            .all()
+        )
 
         # Should have assistant message + tool message
         assert len(messages) == 2

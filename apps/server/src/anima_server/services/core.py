@@ -132,6 +132,7 @@ def _detect_encryption_mode() -> str:
     sqlcipher_available = False
     try:
         import sqlcipher3  # noqa: F401
+
         sqlcipher_available = True
     except ImportError:
         pass
@@ -319,7 +320,7 @@ def acquire_core_lock() -> bool:
                 return False
             # Stale lock — remove
             logger.info("Removing stale core lock (PID %d no longer running)", existing_pid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     lock_data = {
@@ -341,5 +342,5 @@ def release_core_lock() -> None:
         existing = json.loads(lock_path.read_text(encoding="utf-8"))
         if int(existing.get("pid", 0)) == os.getpid():
             lock_path.unlink(missing_ok=True)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass

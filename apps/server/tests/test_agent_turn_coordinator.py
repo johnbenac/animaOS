@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from anima_server.services.agent import turn_coordinator
 
 

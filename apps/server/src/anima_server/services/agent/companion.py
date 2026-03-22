@@ -17,12 +17,13 @@ import logging
 from collections.abc import Sequence
 from threading import Lock
 
+from sqlalchemy.orm import Session
+
 from anima_server.config import settings
 from anima_server.services.agent.memory_blocks import MemoryBlock, build_runtime_memory_blocks
 from anima_server.services.agent.persistence import load_thread_history
 from anima_server.services.agent.runtime import AgentRuntime
 from anima_server.services.agent.state import StoredMessage
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,8 @@ class AnimaCompanion:
         self._user_id = user_id
         self._thread_id: int | None = None
         self._keep_last_messages = (
-            keep_last_messages if keep_last_messages is not None
+            keep_last_messages
+            if keep_last_messages is not None
             else max(1, settings.agent_compaction_keep_last_messages)
         )
 
@@ -114,7 +116,8 @@ class AnimaCompanion:
         self._system_prompt = None
         logger.debug(
             "Memory invalidated (version=%d) for user %s",
-            self._memory_version, self._user_id,
+            self._memory_version,
+            self._user_id,
         )
 
     # -- system prompt ------------------------------------------------
@@ -148,8 +151,7 @@ class AnimaCompanion:
         self._conversation_window.extend(messages)
         cap = self._keep_last_messages
         if len(self._conversation_window) > cap:
-            self._conversation_window = _trim_at_turn_boundary(
-                self._conversation_window, cap)
+            self._conversation_window = _trim_at_turn_boundary(self._conversation_window, cap)
 
     # -- emotional state ----------------------------------------------
 
@@ -210,13 +212,13 @@ class AnimaCompanion:
         self._system_prompt = None
         self._emotional_state = None
         self._thread_id = new_thread_id
-        logger.info("Companion reset for user %s (new thread=%s)",
-                    self._user_id, new_thread_id)
+        logger.info("Companion reset for user %s (new thread=%s)", self._user_id, new_thread_id)
 
     def warm(self, db: Session) -> None:
         """Pre-populate caches.  Call during server startup or first request."""
         if self._thread_id is None:
             from anima_server.services.agent.persistence import get_or_create_thread
+
             thread = get_or_create_thread(db, self._user_id)
             self._thread_id = thread.id
 
@@ -230,13 +232,14 @@ class AnimaCompanion:
         self.set_memory_cache(blocks)
 
         # Load conversation window
-        history = load_thread_history(
-            db, self._thread_id, user_id=self._user_id)
+        history = load_thread_history(db, self._thread_id, user_id=self._user_id)
         self.set_conversation_window(history)
 
         logger.info(
             "Companion warmed for user %s: %d memory blocks, %d history messages",
-            self._user_id, len(blocks), len(self._conversation_window),
+            self._user_id,
+            len(blocks),
+            len(self._conversation_window),
         )
 
     def ensure_memory_loaded(self, db: Session) -> tuple[MemoryBlock, ...]:
@@ -247,6 +250,7 @@ class AnimaCompanion:
 
         if self._thread_id is None:
             from anima_server.services.agent.persistence import get_or_create_thread
+
             thread = get_or_create_thread(db, self._user_id)
             self._thread_id = thread.id
 
@@ -271,14 +275,14 @@ class AnimaCompanion:
         if self._thread_id is None:
             return []
 
-        history = load_thread_history(
-            db, self._thread_id, user_id=self._user_id)
+        history = load_thread_history(db, self._thread_id, user_id=self._user_id)
         self.set_conversation_window(history)
         return self._conversation_window
 
 
 def _trim_at_turn_boundary(
-    messages: list[StoredMessage], cap: int,
+    messages: list[StoredMessage],
+    cap: int,
 ) -> list[StoredMessage]:
     """Trim a message list to approximately *cap* messages at a safe boundary.
 
@@ -316,6 +320,7 @@ def _trim_at_turn_boundary(
 # ------------------------------------------------------------------
 # Module-level singleton management
 # ------------------------------------------------------------------
+
 
 def get_companion(user_id: int | None = None) -> AnimaCompanion | None:
     """Return a companion instance by user_id, or None if not yet created.

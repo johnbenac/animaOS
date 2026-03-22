@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentThread, MemoryEpisode, User
 from anima_server.models.task import Task
-from anima_server.services.data_crypto import df
 from anima_server.services.agent.memory_store import (
     get_current_focus,
     get_memory_items_scored,
     touch_memory_items,
 )
+from anima_server.services.data_crypto import df
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,8 +50,7 @@ def build_runtime_memory_blocks(
         blocks.append(human_core_block)
 
     # User directive (Priority 0 — user-authored customisation)
-    user_directive_block = build_user_directive_memory_block(
-        db, user_id=user_id)
+    user_directive_block = build_user_directive_memory_block(db, user_id=user_id)
     if user_directive_block is not None:
         blocks.append(user_directive_block)
 
@@ -70,18 +69,17 @@ def build_runtime_memory_blocks(
         if semantic_block is not None:
             blocks.append(semantic_block)
 
-    facts_block = build_facts_memory_block(
-        db, user_id=user_id, query_embedding=query_embedding)
+    facts_block = build_facts_memory_block(db, user_id=user_id, query_embedding=query_embedding)
     if facts_block is not None:
         blocks.append(facts_block)
 
     preferences_block = build_preferences_memory_block(
-        db, user_id=user_id, query_embedding=query_embedding)
+        db, user_id=user_id, query_embedding=query_embedding
+    )
     if preferences_block is not None:
         blocks.append(preferences_block)
 
-    goals_block = build_goals_memory_block(
-        db, user_id=user_id, query_embedding=query_embedding)
+    goals_block = build_goals_memory_block(db, user_id=user_id, query_embedding=query_embedding)
     if goals_block is not None:
         blocks.append(goals_block)
 
@@ -90,7 +88,8 @@ def build_runtime_memory_blocks(
         blocks.append(tasks_block)
 
     relationships_block = build_relationships_memory_block(
-        db, user_id=user_id, query_embedding=query_embedding)
+        db, user_id=user_id, query_embedding=query_embedding
+    )
     if relationships_block is not None:
         blocks.append(relationships_block)
 
@@ -103,8 +102,7 @@ def build_runtime_memory_blocks(
     if current_focus_block is not None:
         blocks.append(current_focus_block)
 
-    summary_block = build_thread_summary_block(
-        db, thread_id=thread_id, user_id=user_id)
+    summary_block = build_thread_summary_block(db, thread_id=thread_id, user_id=user_id)
     if summary_block is not None:
         blocks.append(summary_block)
 
@@ -150,12 +148,14 @@ def build_facts_memory_block(
     query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="fact", limit=30, query_embedding=query_embedding)
+        db, user_id=user_id, category="fact", limit=30, query_embedding=query_embedding
+    )
     if not items:
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items
+    )
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -172,12 +172,14 @@ def build_preferences_memory_block(
     query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="preference", limit=20, query_embedding=query_embedding)
+        db, user_id=user_id, category="preference", limit=20, query_embedding=query_embedding
+    )
     if not items:
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items
+    )
     if len(value) > 2000:
         value = value[:2000]
     return MemoryBlock(
@@ -194,12 +196,14 @@ def build_goals_memory_block(
     query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="goal", limit=15, query_embedding=query_embedding)
+        db, user_id=user_id, category="goal", limit=15, query_embedding=query_embedding
+    )
     if not items:
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items
+    )
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -241,8 +245,7 @@ def build_tasks_memory_block(
                 overdue.append(t.text)
         lines.append(line)
 
-    header_parts = [
-        f"{len(open_tasks)} open task{'s' if len(open_tasks) != 1 else ''}"]
+    header_parts = [f"{len(open_tasks)} open task{'s' if len(open_tasks) != 1 else ''}"]
     if overdue:
         header_parts.append(f"{len(overdue)} overdue")
     header = ", ".join(header_parts) + f" (today: {today})"
@@ -265,12 +268,14 @@ def build_relationships_memory_block(
     query_embedding: list[float] | None = None,
 ) -> MemoryBlock | None:
     items = get_memory_items_scored(
-        db, user_id=user_id, category="relationship", limit=15, query_embedding=query_embedding)
+        db, user_id=user_id, category="relationship", limit=15, query_embedding=query_embedding
+    )
     if not items:
         return None
     touch_memory_items(db, items)
     value = "\n".join(
-        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items)
+        f"- {df(user_id, item.content, table='memory_items', field='content')}" for item in items
+    )
     if len(value) > 1500:
         value = value[:1500]
     return MemoryBlock(
@@ -320,7 +325,11 @@ def build_thread_summary_block(
         thread = db.get(AgentThread, thread_id)
         uid = thread.user_id if thread else 0
 
-    summary_text = df(uid, summary_row.content_text, table="agent_messages", field="content_text").strip() if summary_row.content_text else ""
+    summary_text = (
+        df(uid, summary_row.content_text, table="agent_messages", field="content_text").strip()
+        if summary_row.content_text
+        else ""
+    )
     if not summary_text:
         return None
 
@@ -348,7 +357,8 @@ def build_episodes_memory_block(
     for ep in reversed(episodes):
         topics = ", ".join(ep.topics_json or [])
         lines.append(
-            f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (Topics: {topics})")
+            f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (Topics: {topics})"
+        )
     return MemoryBlock(
         label="recent_episodes",
         description="Recent conversation experiences with the user.",
@@ -397,7 +407,11 @@ def build_soul_biography_block(
             SelfModelBlock.section == "soul",
         )
     )
-    value = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
+    value = (
+        df(user_id, block.content, table="self_model_blocks", field="content").strip()
+        if block is not None
+        else ""
+    )
 
     return MemoryBlock(
         label="soul",
@@ -423,7 +437,11 @@ def build_persona_block(
             SelfModelBlock.section == "persona",
         )
     )
-    plaintext = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
+    plaintext = (
+        df(user_id, block.content, table="self_model_blocks", field="content").strip()
+        if block is not None
+        else ""
+    )
     if not plaintext:
         return None
 
@@ -469,7 +487,11 @@ def build_human_core_block(
             SelfModelBlock.section == "human",
         )
     )
-    agent_understanding = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
+    agent_understanding = (
+        df(user_id, block.content, table="self_model_blocks", field="content").strip()
+        if block is not None
+        else ""
+    )
 
     parts: list[str] = []
     if profile_lines:
@@ -502,7 +524,11 @@ def build_user_directive_memory_block(
             SelfModelBlock.section == "user_directive",
         )
     )
-    plaintext = df(user_id, block.content, table="self_model_blocks", field="content").strip() if block is not None else ""
+    plaintext = (
+        df(user_id, block.content, table="self_model_blocks", field="content").strip()
+        if block is not None
+        else ""
+    )
     if not plaintext:
         return None
 
@@ -530,27 +556,32 @@ def build_self_model_memory_blocks(
     result: list[MemoryBlock] = []
 
     section_config = [
-        ("identity", "self_identity",
-         "Who I am to THIS specific user — my role, relational dynamics, and rapport. Distinct from persona (which is my general personality)."),
-        ("inner_state", "self_inner_state",
-         "My current cognitive state — what I'm thinking about, what's unresolved."),
-        ("working_memory", "self_working_memory",
-         "Things I'm holding in mind across sessions."),
-        ("growth_log", "self_growth_log",
-         "How I've evolved — my recent changes and why."),
-        ("intentions", "self_intentions",
-         "My active goals and learned behavioral rules."),
+        (
+            "identity",
+            "self_identity",
+            "Who I am to THIS specific user — my role, relational dynamics, and rapport. Distinct from persona (which is my general personality).",
+        ),
+        (
+            "inner_state",
+            "self_inner_state",
+            "My current cognitive state — what I'm thinking about, what's unresolved.",
+        ),
+        ("working_memory", "self_working_memory", "Things I'm holding in mind across sessions."),
+        ("growth_log", "self_growth_log", "How I've evolved — my recent changes and why."),
+        ("intentions", "self_intentions", "My active goals and learned behavioral rules."),
     ]
 
     for section, label, description in section_config:
         block = blocks_map.get(section)
         text = render_self_model_section(block, user_id=user_id)
         if text:
-            result.append(MemoryBlock(
-                label=label,
-                description=description,
-                value=text,
-            ))
+            result.append(
+                MemoryBlock(
+                    label=label,
+                    description=description,
+                    value=text,
+                )
+            )
 
     return result
 
@@ -605,7 +636,7 @@ def build_knowledge_graph_block(
             description="Relationships between entities in the user's life. Use these naturally for context.",
             value=value,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 

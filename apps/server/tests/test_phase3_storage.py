@@ -12,21 +12,16 @@ from __future__ import annotations
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
-from unittest.mock import patch
 
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from anima_server.db.base import Base
-from anima_server.models import MemoryClaim, MemoryClaimEvidence, MemoryItem, MemoryItemTag, User
-from anima_server.services.agent.vector_store import (
-    InMemoryVectorStore,
-    OrmVecStore,
-)
 import anima_server.services.agent.embeddings as emb
+import pytest
+from anima_server.db.base import Base
+from anima_server.models import MemoryClaimEvidence, MemoryItem, MemoryItemTag, User
+from anima_server.services.agent.claims import (
+    derive_canonical_key,
+    get_active_claims,
+    upsert_claim,
+)
 from anima_server.services.agent.memory_store import (
     add_memory_item,
     add_tags_to_item,
@@ -34,12 +29,14 @@ from anima_server.services.agent.memory_store import (
     get_items_by_tags,
     store_memory_item,
 )
-from anima_server.services.agent.claims import (
-    derive_canonical_key,
-    get_active_claims,
-    upsert_claim,
+from anima_server.services.agent.vector_store import (
+    InMemoryVectorStore,
+    OrmVecStore,
 )
-
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -71,8 +68,7 @@ def _db_session() -> Generator[Session, None, None]:
 
 
 def _make_user(db: Session) -> User:
-    user = User(username="phase3_tester",
-                display_name="Tester", password_hash="x")
+    user = User(username="phase3_tester", display_name="Tester", password_hash="x")
     db.add(user)
     db.flush()
     return user
@@ -108,13 +104,24 @@ class TestOrmVecStore:
     def test_upsert_and_search(self) -> None:
         with _db_session() as db:
             store = OrmVecStore(db)
-            store.upsert(1, item_id=1, content="hiking", embedding=[
-                         1.0, 0.0, 0.0], category="preference", importance=4)
-            store.upsert(1, item_id=2, content="engineer", embedding=[
-                         0.0, 1.0, 0.0], category="fact", importance=5)
+            store.upsert(
+                1,
+                item_id=1,
+                content="hiking",
+                embedding=[1.0, 0.0, 0.0],
+                category="preference",
+                importance=4,
+            )
+            store.upsert(
+                1,
+                item_id=2,
+                content="engineer",
+                embedding=[0.0, 1.0, 0.0],
+                category="fact",
+                importance=5,
+            )
 
-            results = store.search_by_vector(
-                1, query_embedding=[0.9, 0.1, 0.0], limit=5)
+            results = store.search_by_vector(1, query_embedding=[0.9, 0.1, 0.0], limit=5)
             assert len(results) == 2
             assert results[0].item_id == 1
             assert results[0].similarity > 0.8
@@ -122,13 +129,14 @@ class TestOrmVecStore:
     def test_category_filter(self) -> None:
         with _db_session() as db:
             store = OrmVecStore(db)
-            store.upsert(1, item_id=1, content="hiking", embedding=[
-                         1.0, 0.0], category="preference")
-            store.upsert(1, item_id=2, content="engineer",
-                         embedding=[0.0, 1.0], category="fact")
+            store.upsert(
+                1, item_id=1, content="hiking", embedding=[1.0, 0.0], category="preference"
+            )
+            store.upsert(1, item_id=2, content="engineer", embedding=[0.0, 1.0], category="fact")
 
             results = store.search_by_vector(
-                1, query_embedding=[1.0, 0.0], limit=5, category="fact")
+                1, query_embedding=[1.0, 0.0], limit=5, category="fact"
+            )
             assert len(results) == 1
             assert results[0].item_id == 2
 
@@ -156,13 +164,10 @@ class TestOrmVecStore:
     def test_text_search(self) -> None:
         with _db_session() as db:
             store = OrmVecStore(db)
-            store.upsert(
-                1, item_id=1, content="I love hiking in mountains", embedding=[1.0, 0.0])
-            store.upsert(
-                1, item_id=2, content="software engineer at Google", embedding=[0.0, 1.0])
+            store.upsert(1, item_id=1, content="I love hiking in mountains", embedding=[1.0, 0.0])
+            store.upsert(1, item_id=2, content="software engineer at Google", embedding=[0.0, 1.0])
 
-            results = store.search_by_text(
-                1, query_text="hiking mountains", limit=5)
+            results = store.search_by_text(1, query_text="hiking mountains", limit=5)
             assert len(results) >= 1
             assert results[0].item_id == 1
 
@@ -174,8 +179,7 @@ class TestOrmVecStore:
 
             assert store.count(1) == 1
             assert store.count(2) == 1
-            results = store.search_by_vector(
-                1, query_embedding=[1.0, 0.0], limit=10)
+            results = store.search_by_vector(1, query_embedding=[1.0, 0.0], limit=10)
             assert all(r.content == "user1" for r in results)
 
 
@@ -185,11 +189,9 @@ class TestInMemoryVectorStore:
     def test_upsert_and_search(self) -> None:
         store = InMemoryVectorStore()
         store.upsert(1, item_id=1, content="hiking", embedding=[1.0, 0.0, 0.0])
-        store.upsert(1, item_id=2, content="engineer",
-                     embedding=[0.0, 1.0, 0.0])
+        store.upsert(1, item_id=2, content="engineer", embedding=[0.0, 1.0, 0.0])
 
-        results = store.search_by_vector(
-            1, query_embedding=[0.9, 0.1, 0.0], limit=5)
+        results = store.search_by_vector(1, query_embedding=[0.9, 0.1, 0.0], limit=5)
         assert len(results) == 2
         assert results[0].item_id == 1
 
@@ -245,8 +247,7 @@ class TestEmbeddingCache:
         # Manually expire by backdating the timestamp
         with emb._cache_lock:
             vec, _ = emb._embedding_cache[key]
-            emb._embedding_cache[key] = (
-                vec, time.monotonic() - emb._CACHE_TTL_S - 1)
+            emb._embedding_cache[key] = (vec, time.monotonic() - emb._CACHE_TTL_S - 1)
         result = emb._cache_get(key)
         assert result is None
 
@@ -292,8 +293,11 @@ class TestTagSystem:
         with _db_session() as db:
             user = _make_user(db)
             item = add_memory_item(
-                db, user_id=user.id, content="works at Google",
-                category="fact", tags=["work", "career"],
+                db,
+                user_id=user.id,
+                content="works at Google",
+                category="fact",
+                tags=["work", "career"],
             )
             assert item is not None
             assert set(item.tags_json) == {"work", "career"}
@@ -305,8 +309,11 @@ class TestTagSystem:
         with _db_session() as db:
             user = _make_user(db)
             result = store_memory_item(
-                db, user_id=user.id, content="loves hiking",
-                category="preference", tags=["hobby", "outdoors"],
+                db,
+                user_id=user.id,
+                content="loves hiking",
+                category="preference",
+                tags=["hobby", "outdoors"],
             )
             assert result.action == "added"
             assert result.item is not None
@@ -316,8 +323,7 @@ class TestTagSystem:
         with _db_session() as db:
             user = _make_user(db)
             item = _make_item(db, user.id, "test item")
-            add_tags_to_item(db, item_id=item.id,
-                             user_id=user.id, tags=["a", "b"])
+            add_tags_to_item(db, item_id=item.id, user_id=user.id, tags=["a", "b"])
             tags = db.query(MemoryItemTag).filter_by(item_id=item.id).all()
             assert {t.tag for t in tags} == {"a", "b"}
 
@@ -328,14 +334,11 @@ class TestTagSystem:
             i2 = _make_item(db, user.id, "item2")
             i3 = _make_item(db, user.id, "item3")
             add_tags_to_item(db, item_id=i1.id, user_id=user.id, tags=["work"])
-            add_tags_to_item(db, item_id=i2.id,
-                             user_id=user.id, tags=["hobby"])
-            add_tags_to_item(db, item_id=i3.id, user_id=user.id,
-                             tags=["work", "hobby"])
+            add_tags_to_item(db, item_id=i2.id, user_id=user.id, tags=["hobby"])
+            add_tags_to_item(db, item_id=i3.id, user_id=user.id, tags=["work", "hobby"])
 
             # "any" mode: items with either tag
-            items = get_items_by_tags(db, user_id=user.id, tags=[
-                "work"], match_mode="any")
+            items = get_items_by_tags(db, user_id=user.id, tags=["work"], match_mode="any")
             ids = {i.id for i in items}
             assert i1.id in ids
             assert i3.id in ids
@@ -346,13 +349,13 @@ class TestTagSystem:
             user = _make_user(db)
             i1 = _make_item(db, user.id, "item1")
             i2 = _make_item(db, user.id, "item2")
-            add_tags_to_item(db, item_id=i1.id, user_id=user.id,
-                             tags=["work", "career"])
+            add_tags_to_item(db, item_id=i1.id, user_id=user.id, tags=["work", "career"])
             add_tags_to_item(db, item_id=i2.id, user_id=user.id, tags=["work"])
 
             # "all" mode: items with all specified tags
-            items = get_items_by_tags(db, user_id=user.id, tags=[
-                "work", "career"], match_mode="all")
+            items = get_items_by_tags(
+                db, user_id=user.id, tags=["work", "career"], match_mode="all"
+            )
             ids = {i.id for i in items}
             assert i1.id in ids
             assert i2.id not in ids
@@ -362,10 +365,8 @@ class TestTagSystem:
             user = _make_user(db)
             i1 = _make_item(db, user.id, "item1")
             i2 = _make_item(db, user.id, "item2")
-            add_tags_to_item(db, item_id=i1.id, user_id=user.id,
-                             tags=["alpha", "beta"])
-            add_tags_to_item(db, item_id=i2.id, user_id=user.id,
-                             tags=["beta", "gamma"])
+            add_tags_to_item(db, item_id=i1.id, user_id=user.id, tags=["alpha", "beta"])
+            add_tags_to_item(db, item_id=i2.id, user_id=user.id, tags=["beta", "gamma"])
 
             all_tags = get_all_tags(db, user_id=user.id)
             assert set(all_tags) == {"alpha", "beta", "gamma"}
@@ -390,7 +391,7 @@ class TestClaimsLayer:
     def test_derive_canonical_key_preference(self) -> None:
         result = derive_canonical_key("likes coffee", "preference")
         assert result is not None
-        ns, slot, polarity = result
+        ns, slot, _polarity = result
         assert ns == "preference"
         assert slot == "likes"
 
@@ -402,8 +403,12 @@ class TestClaimsLayer:
         with _db_session() as db:
             user = _make_user(db)
             claim = upsert_claim(
-                db, user_id=user.id, content="works as a doctor",
-                category="fact", importance=5, extractor="llm",
+                db,
+                user_id=user.id,
+                content="works as a doctor",
+                category="fact",
+                importance=5,
+                extractor="llm",
                 evidence_text="I'm a doctor",
             )
             assert claim is not None
@@ -411,8 +416,7 @@ class TestClaimsLayer:
             assert claim.status == "active"
             assert claim.value_text == "works as a doctor"
             # Evidence row
-            evidence = db.query(MemoryClaimEvidence).filter_by(
-                claim_id=claim.id).all()
+            evidence = db.query(MemoryClaimEvidence).filter_by(claim_id=claim.id).all()
             assert len(evidence) == 1
             assert evidence[0].source_text == "I'm a doctor"
 
@@ -420,12 +424,18 @@ class TestClaimsLayer:
         with _db_session() as db:
             user = _make_user(db)
             old = upsert_claim(
-                db, user_id=user.id, content="works as a doctor",
-                category="fact", importance=5,
+                db,
+                user_id=user.id,
+                content="works as a doctor",
+                category="fact",
+                importance=5,
             )
             new = upsert_claim(
-                db, user_id=user.id, content="works as a lawyer",
-                category="fact", importance=5,
+                db,
+                user_id=user.id,
+                content="works as a lawyer",
+                category="fact",
+                importance=5,
             )
             db.refresh(old)
             assert old.status == "superseded"
@@ -437,41 +447,43 @@ class TestClaimsLayer:
         with _db_session() as db:
             user = _make_user(db)
             c1 = upsert_claim(
-                db, user_id=user.id, content="works as a doctor",
-                category="fact", evidence_text="source1",
+                db,
+                user_id=user.id,
+                content="works as a doctor",
+                category="fact",
+                evidence_text="source1",
             )
             c2 = upsert_claim(
-                db, user_id=user.id, content="works as a doctor",
-                category="fact", evidence_text="source2",
+                db,
+                user_id=user.id,
+                content="works as a doctor",
+                category="fact",
+                evidence_text="source2",
             )
             # Same claim returned
             assert c1.id == c2.id
-            evidence = db.query(MemoryClaimEvidence).filter_by(
-                claim_id=c1.id).all()
+            evidence = db.query(MemoryClaimEvidence).filter_by(claim_id=c1.id).all()
             assert len(evidence) == 2
 
     def test_get_active_claims(self) -> None:
         with _db_session() as db:
             user = _make_user(db)
-            upsert_claim(db, user_id=user.id,
-                         content="works as a doctor", category="fact")
-            upsert_claim(db, user_id=user.id,
-                         content="lives in NYC", category="fact")
-            upsert_claim(db, user_id=user.id,
-                         content="likes coffee", category="preference")
+            upsert_claim(db, user_id=user.id, content="works as a doctor", category="fact")
+            upsert_claim(db, user_id=user.id, content="lives in NYC", category="fact")
+            upsert_claim(db, user_id=user.id, content="likes coffee", category="preference")
 
             all_claims = get_active_claims(db, user_id=user.id)
             assert len(all_claims) == 3
 
-            fact_claims = get_active_claims(
-                db, user_id=user.id, namespace="fact")
+            fact_claims = get_active_claims(db, user_id=user.id, namespace="fact")
             assert len(fact_claims) == 2
 
     def test_generic_claim_for_unmatched_content(self) -> None:
         with _db_session() as db:
             user = _make_user(db)
             claim = upsert_claim(
-                db, user_id=user.id,
+                db,
+                user_id=user.id,
                 content="has two cats named Luna and Moshi",
                 category="fact",
             )

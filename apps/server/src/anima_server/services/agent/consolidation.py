@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from threading import Lock
 from typing import Any
 
 from anima_server.config import settings
+from anima_server.services.agent.claims import upsert_claim
 from anima_server.services.agent.memory_store import (
     add_daily_log,
     set_current_focus,
     store_memory_item,
     supersede_memory_item,
 )
-from anima_server.services.agent.claims import upsert_claim
 from anima_server.services.data_crypto import df
 
 logger = logging.getLogger(__name__)
@@ -112,13 +111,11 @@ class MemoryConsolidationResult:
 
 _FACT_EXTRACTORS: tuple[PatternExtractor, ...] = (
     PatternExtractor(
-        pattern=re.compile(
-            r"\bI am (?P<value>\d{1,3}) years old\b", re.IGNORECASE),
+        pattern=re.compile(r"\bI am (?P<value>\d{1,3}) years old\b", re.IGNORECASE),
         formatter=lambda value: f"Age: {value}",
     ),
     PatternExtractor(
-        pattern=re.compile(
-            r"\bmy birthday is (?P<value>[^.?!\n]+)", re.IGNORECASE),
+        pattern=re.compile(r"\bmy birthday is (?P<value>[^.?!\n]+)", re.IGNORECASE),
         formatter=lambda value: f"Birthday: {value}",
     ),
     PatternExtractor(
@@ -158,8 +155,7 @@ _CURRENT_FOCUS_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bmy current focus is (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bmy main focus is (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bmy main priority is (?P<value>[^.?!\n]+)", re.IGNORECASE),
-    re.compile(
-        r"\bI(?:'m| am) focused on (?P<value>[^.?!\n]+)", re.IGNORECASE),
+    re.compile(r"\bI(?:'m| am) focused on (?P<value>[^.?!\n]+)", re.IGNORECASE),
     re.compile(r"\bI need to focus on (?P<value>[^.?!\n]+)", re.IGNORECASE),
 )
 
@@ -200,11 +196,10 @@ def consolidate_turn_memory(
             if write_result.action == "added":
                 result.facts_added.append(fact)
             elif write_result.action == "superseded":
-                result.conflicts_resolved.append(
-                    f"{write_result.matched_item.content} -> {fact}"
-                )
+                result.conflicts_resolved.append(f"{write_result.matched_item.content} -> {fact}")
                 try:
                     from anima_server.services.agent.forgetting import suppress_memory
+
                     if write_result.matched_item and write_result.item:
                         suppress_memory(
                             db,
@@ -212,7 +207,7 @@ def consolidate_turn_memory(
                             superseded_by=write_result.item.id,
                             user_id=user_id,
                         )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Suppression failed for regex-superseded fact")
 
         for pref in extracted.preferences:
@@ -227,11 +222,10 @@ def consolidate_turn_memory(
             if write_result.action == "added":
                 result.preferences_added.append(pref)
             elif write_result.action == "superseded":
-                result.conflicts_resolved.append(
-                    f"{write_result.matched_item.content} -> {pref}"
-                )
+                result.conflicts_resolved.append(f"{write_result.matched_item.content} -> {pref}")
                 try:
                     from anima_server.services.agent.forgetting import suppress_memory
+
                     if write_result.matched_item and write_result.item:
                         suppress_memory(
                             db,
@@ -239,12 +233,11 @@ def consolidate_turn_memory(
                             superseded_by=write_result.item.id,
                             user_id=user_id,
                         )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Suppression failed for regex-superseded pref")
 
         if extracted.current_focus:
-            set_current_focus(db, user_id=user_id,
-                              focus=extracted.current_focus)
+            set_current_focus(db, user_id=user_id, focus=extracted.current_focus)
             result.current_focus_updated = extracted.current_focus
 
         db.commit()
@@ -286,7 +279,7 @@ async def consolidate_turn_memory_with_llm(
                 assistant_response=assistant_response,
                 db=_pcdb,
             )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("predict_calibrate_extraction failed, falling back to direct extraction")
 
     if pc_items is not None:
@@ -312,19 +305,17 @@ async def consolidate_turn_memory_with_llm(
                     user_id=user_id,
                     emotion=str(emotion_data["emotion"]),
                     confidence=float(emotion_data.get("confidence", 0.5)),
-                    evidence_type=str(emotion_data.get(
-                        "evidence_type", "linguistic")),
+                    evidence_type=str(emotion_data.get("evidence_type", "linguistic")),
                     evidence=str(emotion_data.get("evidence", "")),
                     trajectory=str(emotion_data.get("trajectory", "stable")),
                 )
                 _edb.commit()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Failed to record emotional signal from extraction")
 
     if not llm_items:
         return result
-    regex_contents = {c.lower()
-                      for c in result.facts_added + result.preferences_added}
+    regex_contents = {c.lower() for c in result.facts_added + result.preferences_added}
 
     with factory() as db:
         for llm_item in llm_items:
@@ -367,7 +358,7 @@ async def consolidate_turn_memory_with_llm(
                         memory_item_id=write_result.item.id if write_result.item else None,
                         evidence_text=user_message,
                     )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Claim dual-write failed for: %s", content)
                 continue
 
@@ -387,7 +378,7 @@ async def consolidate_turn_memory_with_llm(
                             superseded_by=write_result.item.id,
                             user_id=user_id,
                         )
-                except Exception:  # noqa: BLE001
+                except Exception:
                     logger.debug("Suppression failed for superseded item")
                 # Dual-write: supersede the structured claim too
                 try:
@@ -402,9 +393,8 @@ async def consolidate_turn_memory_with_llm(
                         memory_item_id=write_result.item.id if write_result.item else None,
                         evidence_text=user_message,
                     )
-                except Exception:  # noqa: BLE001
-                    logger.debug(
-                        "Claim dual-write (supersede) failed for: %s", content)
+                except Exception:
+                    logger.debug("Claim dual-write (supersede) failed for: %s", content)
                 continue
 
             if write_result.action == "duplicate":
@@ -440,7 +430,7 @@ async def consolidate_turn_memory_with_llm(
                                 superseded_by=updated_item.id,
                                 user_id=user_id,
                             )
-                        except Exception:  # noqa: BLE001
+                        except Exception:
                             logger.debug("Suppression failed for similar-update item")
                         result.conflicts_resolved.append(
                             f"{df(user_id, matched_item.content, table='memory_items', field='content')} -> {content}"
@@ -458,9 +448,8 @@ async def consolidate_turn_memory_with_llm(
                                 memory_item_id=updated_item.id,
                                 evidence_text=user_message,
                             )
-                        except Exception:  # noqa: BLE001
-                            logger.debug(
-                                "Claim dual-write (update) failed for: %s", content)
+                        except Exception:
+                            logger.debug("Claim dual-write (update) failed for: %s", content)
                 elif batch_result.action == "DIFFERENT":
                     create_result = store_memory_item(
                         db,
@@ -481,12 +470,13 @@ async def consolidate_turn_memory_with_llm(
                                 importance=importance,
                                 source_kind="extraction",
                                 extractor="llm",
-                                memory_item_id=create_result.item.id if create_result.item else None,
+                                memory_item_id=create_result.item.id
+                                if create_result.item
+                                else None,
                                 evidence_text=user_message,
                             )
-                        except Exception:  # noqa: BLE001
-                            logger.debug(
-                                "Claim dual-write (different) failed for: %s", content)
+                        except Exception:
+                            logger.debug("Claim dual-write (different) failed for: %s", content)
 
         db.commit()
 
@@ -509,19 +499,20 @@ async def extract_memories_via_llm(
         return LLMExtractionResult()
 
     try:
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.llm import create_llm
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
         prompt = EXTRACTION_PROMPT.format(
             user_message=user_message,
             assistant_response=assistant_response,
         )
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="You extract memories and emotions. Respond only with JSON."),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content="You extract memories and emotions. Respond only with JSON."),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if not isinstance(content, str):
             content = str(content)
@@ -542,7 +533,7 @@ async def extract_memories_via_llm(
         # Fallback: try as plain array (backward compat)
         result.memories = _parse_json_array(content)
         return result
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM memory extraction failed")
         return LLMExtractionResult()
 
@@ -557,24 +548,25 @@ async def resolve_conflict(
         return "DIFFERENT"
 
     try:
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.llm import create_llm
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
         prompt = CONFLICT_CHECK_PROMPT.format(
             existing=existing_content,
             new_content=new_content,
         )
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="Respond with exactly one word: UPDATE or DIFFERENT"),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content="Respond with exactly one word: UPDATE or DIFFERENT"),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "").strip().upper()
         if content in ("UPDATE", "DIFFERENT"):
             return content
         return "DIFFERENT"
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM conflict resolution failed")
         return "DIFFERENT"
 
@@ -582,6 +574,7 @@ async def resolve_conflict(
 @dataclass(frozen=True, slots=True)
 class BatchConflictResult:
     """Result of batch conflict resolution: UPDATE with a real DB id, or DIFFERENT."""
+
     action: str  # "UPDATE" or "DIFFERENT"
     matched_id: int | None = None  # real DB id of the existing memory to update
 
@@ -632,19 +625,20 @@ async def resolve_conflict_batch(
         return BatchConflictResult(action="DIFFERENT")
 
     try:
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
         from anima_server.services.agent.llm import create_llm
+        from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
         prompt = BATCH_CONFLICT_CHECK_PROMPT.format(
             existing_memories=existing_memories_block,
             new_content=new_content,
         )
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="Respond with exactly: UPDATE <id> or DIFFERENT"),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(content="Respond with exactly: UPDATE <id> or DIFFERENT"),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "").strip().upper()
 
         # Parse "UPDATE <int>"
@@ -657,7 +651,8 @@ async def resolve_conflict_batch(
             # LLM returned an integer outside our range — treat as DIFFERENT
             logger.warning(
                 "LLM returned out-of-range id %d (max %d) in batch conflict resolution",
-                chosen_int, len(int_to_real) - 1,
+                chosen_int,
+                len(int_to_real) - 1,
             )
             return BatchConflictResult(action="DIFFERENT")
 
@@ -668,21 +663,22 @@ async def resolve_conflict_batch(
         logger.debug("Unrecognised batch conflict response: %s", content)
         return BatchConflictResult(action="DIFFERENT")
 
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("LLM batch conflict resolution failed")
         return BatchConflictResult(action="DIFFERENT")
 
 
-from anima_server.services.agent.json_utils import (  # noqa: E302
+from anima_server.services.agent.json_utils import (
     parse_json_array as _parse_json_array,
+)
+from anima_server.services.agent.json_utils import (
     parse_json_object as _parse_json_object,
 )
 
 
 def extract_turn_memory(user_message: str) -> ExtractedTurnMemory:
     facts = tuple(extract_pattern_items(user_message, _FACT_EXTRACTORS))
-    preferences = tuple(extract_pattern_items(
-        user_message, _PREFERENCE_EXTRACTORS))
+    preferences = tuple(extract_pattern_items(user_message, _PREFERENCE_EXTRACTORS))
     current_focus = extract_current_focus(user_message)
     return ExtractedTurnMemory(
         facts=facts,
@@ -764,18 +760,18 @@ async def run_background_memory_consolidation(
 
         # Invalidate companion memory cache so the next turn sees fresh data.
         from anima_server.services.agent.companion import get_companion
+
         companion = get_companion(user_id)
         if companion is not None:
             companion.invalidate_memory()
 
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Background memory consolidation failed for user %s", user_id)
+    except Exception:
+        logger.exception("Background memory consolidation failed for user %s", user_id)
 
     # Opportunistic embedding backfill for items without embeddings
     try:
         await _backfill_user_embeddings(user_id, db_factory=db_factory)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Embedding backfill skipped for user %s", user_id)
 
 
@@ -820,7 +816,7 @@ def schedule_background_memory_consolidation(
         should_run_sleeptime,
     )
 
-    turn = bump_turn_counter(user_id)
+    bump_turn_counter(user_id)
     run_full_orchestrator = should_run_sleeptime(user_id)
 
     if run_full_orchestrator:
@@ -864,5 +860,5 @@ def _on_background_task_done(task: asyncio.Task[None]) -> None:
         task.result()
     except asyncio.CancelledError:
         return
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Background memory consolidation task failed")

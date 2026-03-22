@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from anima_server.config import settings
 from anima_server.db.session import (
@@ -148,7 +148,9 @@ def register_account(
     return serialize_user(user), deks
 
 
-def authenticate_account(username: str, password: str) -> tuple[dict[str, object], dict[str, bytes]]:
+def authenticate_account(
+    username: str, password: str
+) -> tuple[dict[str, object], dict[str, bytes]]:
     normalized = normalize_username(username)
     if not normalized:
         raise ValueError("Invalid credentials")
@@ -189,8 +191,7 @@ def _migrate_legacy_shared_database_locked() -> None:
             if bind is None or not inspect(bind).has_table("users"):
                 return
 
-            users = list(legacy_db.scalars(
-                select(User).order_by(User.id)).all())
+            users = list(legacy_db.scalars(select(User).order_by(User.id)).all())
             if not users:
                 return
 
@@ -245,12 +246,13 @@ def make_legacy_database_path() -> Path | None:
     prefix = "sqlite:///"
     if not settings.database_url.startswith(prefix):
         return None
-    return Path(settings.database_url[len(prefix):]).expanduser().resolve()
+    return Path(settings.database_url[len(prefix) :]).expanduser().resolve()
 
 
 def _legacy_backup_path(shared_db_path: Path) -> Path:
     candidate = shared_db_path.with_name(
-        f"{shared_db_path.stem}.legacy-shared{shared_db_path.suffix}")
+        f"{shared_db_path.stem}.legacy-shared{shared_db_path.suffix}"
+    )
     if not candidate.exists():
         return candidate
 
@@ -279,23 +281,26 @@ def _maybe_generate_sqlcipher_key(password: str, user_id: int) -> None:
     if settings.core_passphrase.strip():
         return  # env var mode — no need for wrapped key
 
+    import os
+
     from anima_server.services.crypto import KEY_LENGTH, wrap_dek
     from anima_server.services.sessions import set_sqlcipher_key
-    import os
 
     raw_key = os.urandom(KEY_LENGTH)
     wrapped = wrap_dek(password, raw_key, user_id, "sqlcipher")
-    store_wrapped_sqlcipher_key({
-        "user_id": user_id,
-        "kdf_salt": wrapped.kdf_salt,
-        "kdf_time_cost": wrapped.kdf_time_cost,
-        "kdf_memory_cost_kib": wrapped.kdf_memory_cost_kib,
-        "kdf_parallelism": wrapped.kdf_parallelism,
-        "kdf_key_length": wrapped.kdf_key_length,
-        "wrap_iv": wrapped.wrap_iv,
-        "wrap_tag": wrapped.wrap_tag,
-        "wrapped_key": wrapped.wrapped_dek,
-    })
+    store_wrapped_sqlcipher_key(
+        {
+            "user_id": user_id,
+            "kdf_salt": wrapped.kdf_salt,
+            "kdf_time_cost": wrapped.kdf_time_cost,
+            "kdf_memory_cost_kib": wrapped.kdf_memory_cost_kib,
+            "kdf_parallelism": wrapped.kdf_parallelism,
+            "kdf_key_length": wrapped.kdf_key_length,
+            "wrap_iv": wrapped.wrap_iv,
+            "wrap_tag": wrapped.wrap_tag,
+            "wrapped_key": wrapped.wrapped_dek,
+        }
+    )
     set_sqlcipher_key(raw_key)
 
 

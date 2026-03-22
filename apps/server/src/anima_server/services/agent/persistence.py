@@ -10,12 +10,11 @@ from anima_server.models import AgentMessage, AgentRun, AgentStep, AgentThread
 from anima_server.services.agent.compaction import estimate_message_tokens
 from anima_server.services.agent.runtime_types import StepTrace, ToolCall, UsageStats
 from anima_server.services.agent.state import AgentResult, StoredMessage
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 
 def get_or_create_thread(db: Session, user_id: int) -> AgentThread:
-    thread = db.scalar(select(AgentThread).where(
-        AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
     if thread is not None:
         return thread
 
@@ -28,7 +27,9 @@ def get_or_create_thread(db: Session, user_id: int) -> AgentThread:
     return thread
 
 
-def load_thread_history(db: Session, thread_id: int, *, user_id: int | None = None) -> list[StoredMessage]:
+def load_thread_history(
+    db: Session, thread_id: int, *, user_id: int | None = None
+) -> list[StoredMessage]:
     rows = db.scalars(
         select(AgentMessage)
         .where(
@@ -66,8 +67,7 @@ def list_transcript_messages(
     user_id: int,
     limit: int,
 ) -> list[AgentMessage]:
-    thread = db.scalar(select(AgentThread).where(
-        AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
     if thread is None:
         return []
 
@@ -79,8 +79,7 @@ def list_transcript_messages(
             AgentMessage.role.in_(("user", "assistant", "system", "tool")),
             AgentMessage.content_text.is_not(None),
             AgentMessage.content_text != "",
-            or_(AgentMessage.run_id.is_(None),
-                AgentRun.status.notin_(("failed", "cancelled"))),
+            or_(AgentMessage.run_id.is_(None), AgentRun.status.notin_(("failed", "cancelled"))),
         )
         .order_by(desc(AgentMessage.sequence_id))
         .limit(limit)
@@ -92,16 +91,15 @@ def list_transcript_messages(
     # 2. Tool-result rows from internal tools (note_to_self,
     #    etc.) — only send_message results are user-visible responses.
     return [
-        row for row in rows
+        row
+        for row in rows
         if not (
             row.role == "assistant"
             and isinstance(row.content_json, dict)
             and "tool_calls" in row.content_json
         )
         and not (
-            row.role == "tool"
-            and row.tool_name is not None
-            and row.tool_name != "send_message"
+            row.role == "tool" and row.tool_name is not None and row.tool_name != "send_message"
         )
     ]
 
@@ -168,8 +166,7 @@ def persist_agent_result(
 
         if trace.assistant_text or trace.tool_calls:
             if sequence_id is None:
-                raise RuntimeError(
-                    "Missing reserved message sequence for assistant output.")
+                raise RuntimeError("Missing reserved message sequence for assistant output.")
             # Use extracted inner thinking as content (thinking kwarg
             # value stored as assistant message content), but only when
             # the step contains exclusively non-terminal tool calls.
@@ -184,8 +181,7 @@ def persist_agent_result(
                     (
                         tr.inner_thinking.strip()
                         for tr in trace.tool_results
-                        if tr.inner_thinking
-                        and tr.inner_thinking.strip()
+                        if tr.inner_thinking and tr.inner_thinking.strip()
                     ),
                     None,
                 )
@@ -209,9 +205,7 @@ def persist_agent_result(
                 sequence_id=sequence_id,
                 role="assistant",
                 content_text=content_text,
-                content_json={
-                    "tool_calls": [asdict(tool_call) for tool_call in trace.tool_calls]
-                }
+                content_json={"tool_calls": [asdict(tool_call) for tool_call in trace.tool_calls]}
                 if trace.tool_calls
                 else None,
             )
@@ -219,8 +213,7 @@ def persist_agent_result(
 
         for tool_result in trace.tool_results:
             if sequence_id is None:
-                raise RuntimeError(
-                    "Missing reserved message sequence for tool output.")
+                raise RuntimeError("Missing reserved message sequence for tool output.")
             append_message(
                 db,
                 thread=thread,
@@ -280,7 +273,7 @@ def save_approval_checkpoint(
     *,
     thread: AgentThread,
     run: AgentRun,
-    tool_call: "ToolCall",
+    tool_call: ToolCall,
     step_id: int | None,
     sequence_id: int,
 ) -> AgentMessage:
@@ -302,8 +295,7 @@ def save_approval_checkpoint(
         content_json={"tool_calls": [asdict(tool_call)]},
         tool_name=tool_call.name,
         tool_call_id=tool_call.id,
-        tool_args_json=tool_call.arguments if isinstance(
-            tool_call.arguments, dict) else {},
+        tool_args_json=tool_call.arguments if isinstance(tool_call.arguments, dict) else {},
     )
 
     run.status = "awaiting_approval"
@@ -347,8 +339,7 @@ def clear_approval_checkpoint(
 
 
 def reset_thread(db: Session, user_id: int) -> None:
-    thread = db.scalar(select(AgentThread).where(
-        AgentThread.user_id == user_id))
+    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
     if thread is None:
         return
 
@@ -438,8 +429,7 @@ def create_step(
             "assistant_text": trace.assistant_text,
             "tool_results": [asdict(result) for result in trace.tool_results],
         },
-        tool_calls_json=[asdict(tool_call)
-                         for tool_call in trace.tool_calls] or None,
+        tool_calls_json=[asdict(tool_call) for tool_call in trace.tool_calls] or None,
         usage_json=_serialize_usage(trace.usage),
     )
     db.add(step)

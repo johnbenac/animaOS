@@ -4,6 +4,7 @@ Replaces Jaccard-based _text_similarity() with BM25Okapi for the keyword
 leg of hybrid search. Indices are per-user, cached in process memory,
 and invalidated on content mutations.
 """
+
 from __future__ import annotations
 
 import logging
@@ -91,9 +92,7 @@ def get_or_build_index(user_id: int, *, db: Session) -> BM25Index:
     from anima_server.models import MemoryVector
 
     rows = db.execute(
-        select(MemoryVector.item_id, MemoryVector.content).where(
-            MemoryVector.user_id == user_id
-        )
+        select(MemoryVector.item_id, MemoryVector.content).where(MemoryVector.user_id == user_id)
     ).all()
 
     index = BM25Index()

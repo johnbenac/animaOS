@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import platform
 from collections.abc import Generator
+from pathlib import Path
 from threading import RLock
 
 from fastapi import HTTPException, Request, status
@@ -10,8 +11,6 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import Session, sessionmaker
-
-from pathlib import Path
 
 from anima_server.config import settings
 from anima_server.db.url import ensure_database_directory
@@ -58,7 +57,7 @@ def _make_engine(database_url: str | None = None) -> Engine:
                 raise RuntimeError(
                     "ANIMA_CORE_REQUIRE_ENCRYPTION is enabled but sqlcipher3 is not installed. "
                     "Install sqlcipher3 to enable database encryption: pip install sqlcipher3"
-                )
+                ) from None
             logger.warning(
                 "sqlcipher3 not installed - falling back to unencrypted SQLite. "
                 "Install sqlcipher3 to enable database encryption."
@@ -98,10 +97,8 @@ def _make_engine(database_url: str | None = None) -> Engine:
                 raise RuntimeError(
                     "ANIMA_CORE_REQUIRE_ENCRYPTION is enabled but sqlcipher3 is not installed. "
                     "Install sqlcipher3 to enable database encryption: pip install sqlcipher3"
-                )
-            logger.warning(
-                "sqlcipher3 not installed - falling back to unencrypted SQLite."
-            )
+                ) from None
+            logger.warning("sqlcipher3 not installed - falling back to unencrypted SQLite.")
             raw_key = None
 
     if raw_key is not None:

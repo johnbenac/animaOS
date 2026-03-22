@@ -5,14 +5,13 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from anima_server.db.base import Base
+from anima_server.models import MemoryDailyLog, MemoryEpisode, User
+from anima_server.services.agent.episodes import maybe_generate_episode
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from anima_server.db.base import Base
-from anima_server.models import MemoryDailyLog, MemoryEpisode, User
-from anima_server.services.agent.episodes import maybe_generate_episode
 
 
 @contextmanager
@@ -60,20 +59,22 @@ async def test_maybe_generate_episode_requires_minimum_turns() -> None:
         )
 
         today = datetime.now(UTC).date().isoformat()
-        session.add_all([
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message="Hello",
-                assistant_response="Hi there!",
-            ),
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message="How are you?",
-                assistant_response="I'm great!",
-            ),
-        ])
+        session.add_all(
+            [
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message="Hello",
+                    assistant_response="Hi there!",
+                ),
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message="How are you?",
+                    assistant_response="I'm great!",
+                ),
+            ]
+        )
         session.commit()
 
         result = await maybe_generate_episode(
@@ -104,26 +105,28 @@ async def test_maybe_generate_episode_creates_episode_with_enough_turns() -> Non
         )
 
         today = datetime.now(UTC).date().isoformat()
-        session.add_all([
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message="I'm working on a project.",
-                assistant_response="Tell me more about it!",
-            ),
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message="It's an AI companion.",
-                assistant_response="Sounds fascinating.",
-            ),
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message="I want it to remember things.",
-                assistant_response="Memory is crucial for companionship.",
-            ),
-        ])
+        session.add_all(
+            [
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message="I'm working on a project.",
+                    assistant_response="Tell me more about it!",
+                ),
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message="It's an AI companion.",
+                    assistant_response="Sounds fascinating.",
+                ),
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message="I want it to remember things.",
+                    assistant_response="Memory is crucial for companionship.",
+                ),
+            ]
+        )
         session.commit()
 
         result = await maybe_generate_episode(
@@ -162,15 +165,17 @@ async def test_maybe_generate_episode_skips_already_episoded_turns() -> None:
         )
 
         today = datetime.now(UTC).date().isoformat()
-        session.add_all([
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message=f"Message {i}",
-                assistant_response=f"Response {i}",
-            )
-            for i in range(4)
-        ])
+        session.add_all(
+            [
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message=f"Message {i}",
+                    assistant_response=f"Response {i}",
+                )
+                for i in range(4)
+            ]
+        )
         session.commit()
 
         first = await maybe_generate_episode(

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 
 import pytest
-
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.executor import ToolExecutor, unpack_inner_thoughts_from_kwargs
 from anima_server.services.agent.rules import (
     TerminalToolRule,
-    build_default_tool_rules,
 )
 from anima_server.services.agent.runtime import AgentRuntime
 from anima_server.services.agent.runtime_types import (
@@ -93,6 +90,7 @@ def test_inner_thought_not_in_default_tools() -> None:
 def test_no_init_tool_rule() -> None:
     """build_default_tool_rules has no InitToolRule (no inner_thought to gate)."""
     from anima_server.services.agent.rules import InitToolRule
+
     tools = get_tools()
     rules = get_tool_rules(tools)
     init_rules = [r for r in rules if isinstance(r, InitToolRule)]
@@ -147,6 +145,7 @@ async def test_executor_strips_thinking_before_dispatch() -> None:
     result = await executor.execute(tc)
 
     import json as _json
+
     assert result.is_error is False
     assert _json.loads(result.output)["message"] == "public"
     assert result.inner_thinking == "private reasoning"
@@ -160,14 +159,19 @@ async def test_executor_strips_thinking_before_dispatch() -> None:
 @pytest.mark.asyncio
 async def test_direct_send_message_without_init_tool() -> None:
     """Model can call send_message directly — no init tool gate."""
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            tool_calls=(ToolCall(
-                id="c1", name="send_message",
-                arguments={"thinking": "Simple greeting", "message": "Hey!"},
-            ),)
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="send_message",
+                        arguments={"thinking": "Simple greeting", "message": "Hey!"},
+                    ),
+                )
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -194,20 +198,31 @@ async def test_tool_then_respond_with_thinking() -> None:
 
     inject_inner_thoughts_into_tools([lookup])
 
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            tool_calls=(ToolCall(
-                id="c1", name="lookup",
-                arguments={"thinking": "Need to search for this.", "request_heartbeat": True},
-            ),)
-        ),
-        StepExecutionResult(
-            tool_calls=(ToolCall(
-                id="c2", name="send_message",
-                arguments={"thinking": "Got the answer.", "message": "Found it!"},
-            ),)
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="lookup",
+                        arguments={
+                            "thinking": "Need to search for this.",
+                            "request_heartbeat": True,
+                        },
+                    ),
+                )
+            ),
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="c2",
+                        name="send_message",
+                        arguments={"thinking": "Got the answer.", "message": "Found it!"},
+                    ),
+                )
+            ),
+        ]
+    )
 
     runtime = AgentRuntime(
         adapter=adapter,
@@ -231,6 +246,7 @@ async def test_tool_then_respond_with_thinking() -> None:
 def test_system_prompt_contains_cognitive_loop() -> None:
     """The system prompt includes the updated cognitive loop instructions."""
     from anima_server.services.agent.system_prompt import build_system_prompt
+
     prompt = build_system_prompt()
     assert "Cognitive Loop:" in prompt
     assert "thinking" in prompt
@@ -241,6 +257,7 @@ def test_system_prompt_contains_cognitive_loop() -> None:
 def test_system_prompt_contains_memory_architecture() -> None:
     """The system prompt includes memory architecture guidance."""
     from anima_server.services.agent.system_prompt import build_system_prompt
+
     prompt = build_system_prompt()
     assert "Memory Architecture:" in prompt
     assert "core_memory_append" in prompt
@@ -256,17 +273,19 @@ def test_system_prompt_contains_memory_architecture() -> None:
 def test_history_reinjection_round_trip() -> None:
     """StoredMessage with content (inner thought) + non-terminal tool_calls
     re-injects thinking into tool call args and clears content when replayed."""
-    from anima_server.services.agent.messages import to_runtime_message, AIMessage
+    from anima_server.services.agent.messages import AIMessage, to_runtime_message
     from anima_server.services.agent.state import StoredMessage
 
     stored = StoredMessage(
         role="assistant",
         content="User seems happy today.",
-        tool_calls=(ToolCall(
-            id="c1",
-            name="note_to_self",
-            arguments={"key": "mood", "value": "happy"},
-        ),),
+        tool_calls=(
+            ToolCall(
+                id="c1",
+                name="note_to_self",
+                arguments={"key": "mood", "value": "happy"},
+            ),
+        ),
     )
 
     result = to_runtime_message(stored)
@@ -283,17 +302,19 @@ def test_history_reinjection_round_trip() -> None:
 def test_history_no_reinjection_for_send_message() -> None:
     """Assistant messages with send_message (terminal) keep content as-is.
     The content is real assistant text, not inner thinking."""
-    from anima_server.services.agent.messages import to_runtime_message, AIMessage
+    from anima_server.services.agent.messages import AIMessage, to_runtime_message
     from anima_server.services.agent.state import StoredMessage
 
     stored = StoredMessage(
         role="assistant",
         content="Some assistant text",
-        tool_calls=(ToolCall(
-            id="c1",
-            name="send_message",
-            arguments={"message": "Hey!"},
-        ),),
+        tool_calls=(
+            ToolCall(
+                id="c1",
+                name="send_message",
+                arguments={"message": "Hey!"},
+            ),
+        ),
     )
 
     result = to_runtime_message(stored)
@@ -306,7 +327,7 @@ def test_history_no_reinjection_for_send_message() -> None:
 
 def test_history_no_reinjection_without_tool_calls() -> None:
     """Assistant messages without tool_calls keep content as-is."""
-    from anima_server.services.agent.messages import to_runtime_message, AIMessage
+    from anima_server.services.agent.messages import AIMessage, to_runtime_message
     from anima_server.services.agent.state import StoredMessage
 
     stored = StoredMessage(
@@ -328,8 +349,8 @@ def test_history_no_reinjection_without_tool_calls() -> None:
 
 def test_extract_inner_thoughts_from_thinking_kwarg() -> None:
     """_extract_inner_thoughts extracts thinking from tool call arguments."""
-    from anima_server.services.agent.service import _extract_inner_thoughts
     from anima_server.services.agent.runtime_types import StepTrace, ToolExecutionResult
+    from anima_server.services.agent.service import _extract_inner_thoughts
     from anima_server.services.agent.state import AgentResult
 
     result = AgentResult(
@@ -341,14 +362,21 @@ def test_extract_inner_thoughts_from_thinking_kwarg() -> None:
         step_traces=[
             StepTrace(
                 step_index=0,
-                tool_calls=(ToolCall(
-                    id="c1", name="send_message",
-                    arguments={"thinking": "User seems happy today.", "message": "Hey!"},
-                ),),
-                tool_results=(ToolExecutionResult(
-                    call_id="c1", name="send_message", output="Hey!",
-                    inner_thinking="User seems happy today.",
-                ),),
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="send_message",
+                        arguments={"thinking": "User seems happy today.", "message": "Hey!"},
+                    ),
+                ),
+                tool_results=(
+                    ToolExecutionResult(
+                        call_id="c1",
+                        name="send_message",
+                        output="Hey!",
+                        inner_thinking="User seems happy today.",
+                    ),
+                ),
             ),
         ],
     )

@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-import math
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import MemoryDailyLog, MemoryItem, MemoryItemTag
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 # Decay half-life in days — after this many days, recency score halves
 _DECAY_HALF_LIFE_DAYS = 14.0
@@ -26,11 +25,36 @@ _CATEGORY_QUERY_WEIGHTS: dict[str, tuple[float, float]] = {
 }
 _DEFAULT_QUERY_WEIGHTS: tuple[float, float] = (0.5, 0.5)
 _WORD_RE = re.compile(r"[a-z0-9']+")
-_TOKEN_STOPWORDS = frozenset({
-    "a", "an", "the", "i", "me", "my", "am", "is", "are", "was", "were",
-    "as", "at", "in", "to", "for", "of", "on", "with", "and",
-    "now", "today", "currently", "actually", "really", "very",
-})
+_TOKEN_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "i",
+        "me",
+        "my",
+        "am",
+        "is",
+        "are",
+        "was",
+        "were",
+        "as",
+        "at",
+        "in",
+        "to",
+        "for",
+        "of",
+        "on",
+        "with",
+        "and",
+        "now",
+        "today",
+        "currently",
+        "actually",
+        "really",
+        "very",
+    }
+)
 _FACT_SLOT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^age:\s*(?P<value>.+)$", re.IGNORECASE), "age"),
     (re.compile(r"^birthday:\s*(?P<value>.+)$", re.IGNORECASE), "birthday"),
@@ -43,8 +67,7 @@ _FACT_SLOT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"^gender:\s*(?P<value>.+)$", re.IGNORECASE), "gender"),
 )
 _PREFERENCE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"^(?:likes|love(?:s)?|enjoy(?:s)?)\s+(?P<value>.+)$",
-     re.IGNORECASE), "positive"),
+    (re.compile(r"^(?:likes|love(?:s)?|enjoy(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
     (re.compile(r"^prefers?\s+(?P<value>.+)$", re.IGNORECASE), "positive"),
     (re.compile(r"^(?:dislikes?|hate(?:s)?)\s+(?P<value>.+)$", re.IGNORECASE), "negative"),
 )
@@ -83,7 +106,12 @@ def add_memory_item(
 
     existing = get_memory_items(db, user_id=user_id, category=category)
     for item in existing:
-        if _classify_memory_relation(df(user_id, item.content, table="memory_items", field="content"), content, category) == "duplicate":
+        if (
+            _classify_memory_relation(
+                df(user_id, item.content, table="memory_items", field="content"), content, category
+            )
+            == "duplicate"
+        ):
             return None
 
     memory_item = MemoryItem(
@@ -292,7 +320,8 @@ def get_memory_items_scored(
         from anima_server.services.agent.embeddings import _parse_embedding, cosine_similarity
 
         w_retrieval, w_query = _CATEGORY_QUERY_WEIGHTS.get(
-            category or "", _DEFAULT_QUERY_WEIGHTS,
+            category or "",
+            _DEFAULT_QUERY_WEIGHTS,
         )
         blended: list[tuple[float, MemoryItem]] = []
         for base_score, item in scored:
@@ -363,7 +392,7 @@ def touch_memory_items(
         from anima_server.services.agent.heat_scoring import update_heat_on_access
 
         update_heat_on_access(db, items, now=ref_now)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -398,7 +427,7 @@ def supersede_memory_item(
         from anima_server.services.agent.vector_store import delete_memory
 
         delete_memory(old_item.user_id, item_id=old_item_id, db=db)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return new_item
@@ -415,7 +444,9 @@ def add_daily_log(
         user_id=user_id,
         date=datetime.now(UTC).date().isoformat(),
         user_message=ef(user_id, user_message, table="memory_daily_logs", field="user_message"),
-        assistant_response=ef(user_id, assistant_response, table="memory_daily_logs", field="assistant_response"),
+        assistant_response=ef(
+            user_id, assistant_response, table="memory_daily_logs", field="assistant_response"
+        ),
     )
     db.add(log)
     db.flush()
@@ -457,7 +488,8 @@ def set_current_focus(
     )
     if existing is not None:
         relation = _classify_memory_relation(
-            df(user_id, existing.content, table="memory_items", field="content"), focus, "focus")
+            df(user_id, existing.content, table="memory_items", field="content"), focus, "focus"
+        )
         if relation == "duplicate":
             return existing
         return supersede_memory_item(
@@ -488,14 +520,22 @@ def find_similar_items(
 ) -> list[MemoryItem]:
     existing = get_memory_items(db, user_id=user_id, category=category)
     return [
-        item for item in existing
-        if _similarity(df(user_id, item.content, table="memory_items", field="content"), content) > threshold
-        and _classify_memory_relation(df(user_id, item.content, table="memory_items", field="content"), content, category) != "duplicate"
+        item
+        for item in existing
+        if _similarity(df(user_id, item.content, table="memory_items", field="content"), content)
+        > threshold
+        and _classify_memory_relation(
+            df(user_id, item.content, table="memory_items", field="content"), content, category
+        )
+        != "duplicate"
     ]
 
 
 def _is_duplicate(existing_content: str, new_content: str) -> bool:
-    return _clean_memory_text(existing_content).casefold() == _clean_memory_text(new_content).casefold()
+    return (
+        _clean_memory_text(existing_content).casefold()
+        == _clean_memory_text(new_content).casefold()
+    )
 
 
 def _classify_memory_relation(
@@ -520,15 +560,15 @@ def _classify_memory_relation(
     if category == "preference":
         existing_pref = _extract_preference_signal(normalized_existing)
         new_pref = _extract_preference_signal(normalized_new)
-        if (
-            existing_pref is not None
-            and new_pref is not None
-            and existing_pref[0] == new_pref[0]
-        ):
+        if existing_pref is not None and new_pref is not None and existing_pref[0] == new_pref[0]:
             return "duplicate" if existing_pref[1] == new_pref[1] else "update"
 
     if category == "focus":
-        return "duplicate" if _normalize_subject(normalized_existing) == _normalize_subject(normalized_new) else "update"
+        return (
+            "duplicate"
+            if _normalize_subject(normalized_existing) == _normalize_subject(normalized_new)
+            else "update"
+        )
 
     return "different"
 
@@ -549,11 +589,7 @@ def _clean_memory_text(value: str) -> str:
 
 
 def _tokenize(value: str) -> list[str]:
-    return [
-        token
-        for token in _WORD_RE.findall(value.lower())
-        if token not in _TOKEN_STOPWORDS
-    ]
+    return [token for token in _WORD_RE.findall(value.lower()) if token not in _TOKEN_STOPWORDS]
 
 
 def _normalize_subject(value: str) -> str:
@@ -608,11 +644,13 @@ def _sync_tags(
             )
         )
         if existing is None:
-            db.add(MemoryItemTag(
-                tag=tag_value,
-                item_id=item.id,
-                user_id=user_id,
-            ))
+            db.add(
+                MemoryItemTag(
+                    tag=tag_value,
+                    item_id=item.id,
+                    user_id=user_id,
+                )
+            )
     db.flush()
 
 
@@ -655,20 +693,16 @@ def get_items_by_tags(
         return []
 
     # Query junction table for item IDs matching the tags
-    tag_query = (
-        select(MemoryItemTag.item_id)
-        .where(
-            MemoryItemTag.user_id == user_id,
-            MemoryItemTag.tag.in_(clean_tags),
-        )
+    tag_query = select(MemoryItemTag.item_id).where(
+        MemoryItemTag.user_id == user_id,
+        MemoryItemTag.tag.in_(clean_tags),
     )
 
     if match_mode == "all":
         from sqlalchemy import func as sa_func
-        tag_query = (
-            tag_query
-            .group_by(MemoryItemTag.item_id)
-            .having(sa_func.count(MemoryItemTag.tag.distinct()) >= len(clean_tags))
+
+        tag_query = tag_query.group_by(MemoryItemTag.item_id).having(
+            sa_func.count(MemoryItemTag.tag.distinct()) >= len(clean_tags)
         )
 
     item_ids = [row[0] for row in db.execute(tag_query.distinct()).all()]

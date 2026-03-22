@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(client: TestClient) -> dict[str, object]:

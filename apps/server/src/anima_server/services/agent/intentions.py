@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
@@ -160,7 +160,7 @@ def complete_intention(
             return False
         content = "\n".join(lines)
     else:
-        content = content[:match.start(2)] + "Status: Completed" + content[match.end(2):]
+        content = content[: match.start(2)] + "Status: Completed" + content[match.end(2) :]
 
     set_self_model_block(
         db,

@@ -2,9 +2,9 @@ import hmac
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -14,18 +14,19 @@ from .api.routes.chat import router as chat_router
 from .api.routes.config import router as config_router
 from .api.routes.consciousness import router as consciousness_router
 from .api.routes.core import router as core_router
+from .api.routes.db import router as db_router
 from .api.routes.forgetting import router as forgetting_router
+from .api.routes.graph import router as graph_router
 from .api.routes.memory import router as memory_router
 from .api.routes.soul import router as soul_router
 from .api.routes.tasks import router as tasks_router
-from .api.routes.users import router as users_router
-from .api.routes.db import router as db_router
-from .api.routes.graph import router as graph_router
 from .api.routes.telegram import router as telegram_router
+from .api.routes.users import router as users_router
 from .api.routes.vault import router as vault_router
 from .config import settings
-from .services.core import acquire_core_lock, ensure_core_manifest, is_provisioned
 from .db.user_store import ensure_per_user_databases_ready
+from .services.core import acquire_core_lock, ensure_core_manifest, is_provisioned
+
 
 def get_cors_origins() -> list[str]:
     origins = [
@@ -33,12 +34,15 @@ def get_cors_origins() -> list[str]:
         "https://tauri.localhost",
     ]
     if settings.app_env == "development":
-        origins.extend([
-            "http://localhost:1420",
-            "http://localhost:5173",
-            "http://tauri.localhost",
-        ])
+        origins.extend(
+            [
+                "http://localhost:1420",
+                "http://localhost:5173",
+                "http://tauri.localhost",
+            ]
+        )
     return origins
+
 
 # Paths exempt from sidecar-nonce validation.
 _NONCE_EXEMPT_PATHS = frozenset({"/health", "/api/health"})
@@ -61,9 +65,7 @@ class SidecarNonceMiddleware(BaseHTTPMiddleware):
     def __init__(self, app) -> None:
         super().__init__(app)
         if not settings.sidecar_nonce and settings.app_env != "development":
-            logger.warning(
-                "Sidecar nonce is not configured in non-development environment"
-            )
+            logger.warning("Sidecar nonce is not configured in non-development environment")
 
     # type: ignore[override]
     async def dispatch(self, request: Request, call_next):
@@ -80,10 +82,12 @@ class SidecarNonceMiddleware(BaseHTTPMiddleware):
 
 
 def create_app() -> FastAPI:
-    if settings.core_require_encryption and not settings.sidecar_nonce and settings.app_env != "development":
-        raise RuntimeError(
-            "Sidecar nonce must be configured when encryption is required."
-        )
+    if (
+        settings.core_require_encryption
+        and not settings.sidecar_nonce
+        and settings.app_env != "development"
+    ):
+        raise RuntimeError("Sidecar nonce must be configured when encryption is required.")
     if not settings.sidecar_nonce and settings.app_env != "development":
         logger.warning("Sidecar nonce is not configured in non-development environment")
     ensure_core_manifest()

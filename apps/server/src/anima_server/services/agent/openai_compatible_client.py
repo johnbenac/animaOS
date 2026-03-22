@@ -71,7 +71,7 @@ class OpenAICompatibleChatClient:
         *,
         tool_choice: str | None = None,
         **_: Any,
-    ) -> "OpenAICompatibleChatClient":
+    ) -> OpenAICompatibleChatClient:
         resolved_tool_choice = _serialize_tool_choice(tool_choice, tools)
         new_client = OpenAICompatibleChatClient(
             provider=self.provider,
@@ -156,11 +156,8 @@ class OpenAICompatibleChatClient:
                     delta = {}
 
                 yield OpenAICompatibleStreamChunk(
-                    content_delta=_coerce_response_content(
-                        delta.get("content")),
-                    tool_call_deltas=_normalize_stream_tool_call_deltas(
-                        delta.get("tool_calls")
-                    ),
+                    content_delta=_coerce_response_content(delta.get("content")),
+                    tool_call_deltas=_normalize_stream_tool_call_deltas(delta.get("tool_calls")),
                     usage_metadata=_extract_usage_metadata(body),
                     done=choice.get("finish_reason") is not None or body.get("done") is True,
                 )
@@ -224,8 +221,7 @@ def _serialize_message(message: Any) -> dict[str, object]:
         "role": "assistant",
         "content": _serialize_content(getattr(message, "content", "")),
     }
-    tool_calls = _normalize_request_tool_calls(
-        getattr(message, "tool_calls", ()))
+    tool_calls = _normalize_request_tool_calls(getattr(message, "tool_calls", ()))
     if tool_calls:
         payload["tool_calls"] = tool_calls
     return payload
@@ -305,8 +301,7 @@ def _normalize_response_tool_calls(raw_tool_calls: object) -> tuple[dict[str, ob
         name = str(function.get("name", "")).strip()
         if not name:
             continue
-        arguments, parse_error, raw_arguments = _parse_tool_arguments(
-            function.get("arguments"))
+        arguments, parse_error, raw_arguments = _parse_tool_arguments(function.get("arguments"))
         payload: dict[str, object] = {
             "id": str(raw_tool_call.get("id") or f"tool-call-{index}"),
             "name": name,
@@ -374,7 +369,9 @@ def _extract_usage_metadata(payload: object) -> dict[str, object] | None:
     return usage or None
 
 
-def _parse_tool_arguments(raw_arguments: object) -> tuple[dict[str, object], str | None, str | None]:
+def _parse_tool_arguments(
+    raw_arguments: object,
+) -> tuple[dict[str, object], str | None, str | None]:
     if isinstance(raw_arguments, dict):
         return dict(raw_arguments), None, None
     if not isinstance(raw_arguments, str) or not raw_arguments.strip():
@@ -416,8 +413,7 @@ def _serialize_tool_choice(
 def _serialize_tool(tool: Any) -> dict[str, object]:
     name = _tool_name(tool)
     if not name:
-        raise ValueError(
-            "Tool name is required for OpenAI-compatible serialization.")
+        raise ValueError("Tool name is required for OpenAI-compatible serialization.")
     description = _tool_description(tool)
     parameters = _tool_parameters(tool)
     function_payload: dict[str, object] = {

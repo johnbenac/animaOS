@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Sequence
 import json
 import logging
 import time
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any
 
 from anima_server.config import settings
@@ -13,19 +13,19 @@ from anima_server.services.agent.llm import (
     resolve_base_url,
     wrap_llm_error,
 )
-from anima_server.services.agent.output_filter import (
-    ReasoningTraceFilter,
-    strip_reasoning_traces,
-)
 from anima_server.services.agent.messages import (
     message_content,
     message_tool_calls,
     message_usage_payload,
 )
+from anima_server.services.agent.output_filter import (
+    ReasoningTraceFilter,
+    strip_reasoning_traces,
+)
 from anima_server.services.agent.runtime_types import (
     LLMRequest,
-    StepStreamEvent,
     StepExecutionResult,
+    StepStreamEvent,
     ToolCall,
     UsageStats,
 )
@@ -49,7 +49,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
         self._base_url = resolve_base_url(provider)
 
     @classmethod
-    def create(cls) -> "OpenAICompatibleAdapter":
+    def create(cls) -> OpenAICompatibleAdapter:
         return cls(
             create_llm(),
             provider=settings.agent_provider,
@@ -72,8 +72,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             and not result.tool_calls
         ):
             logger.warning(
-                "Empty response with tool_choice='required'; "
-                "retrying with tool_choice='auto'"
+                "Empty response with tool_choice='required'; retrying with tool_choice='auto'"
             )
             auto_request = _downgrade_tool_choice(request, mode="auto")
             result = await self._invoke_once(auto_request)
@@ -84,10 +83,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             and not result.assistant_text.strip()
             and not result.tool_calls
         ):
-            logger.warning(
-                "Still empty with tool_choice='auto'; "
-                "retrying without tools"
-            )
+            logger.warning("Still empty with tool_choice='auto'; retrying without tools")
             no_tools_request = _downgrade_tool_choice(request, mode="none")
             result = await self._invoke_once(no_tools_request)
 
@@ -110,10 +106,8 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
                 base_url=self._base_url,
             ) from exc
 
-        visible_text, tag_reasoning = strip_reasoning_traces(
-            message_content(response))
-        native_reasoning, native_signature = _extract_native_reasoning(
-            response)
+        visible_text, tag_reasoning = strip_reasoning_traces(message_content(response))
+        native_reasoning, native_signature = _extract_native_reasoning(response)
         reasoning_content = native_reasoning or tag_reasoning
         reasoning_signature = native_signature
 
@@ -222,10 +216,7 @@ class OpenAICompatibleAdapter(BaseLLMAdapter):
             and not result.assistant_text.strip()
             and not result.tool_calls
         ):
-            logger.warning(
-                "Still empty with tool_choice='auto'; "
-                "retrying without tools"
-            )
+            logger.warning("Still empty with tool_choice='auto'; retrying without tools")
             no_tools_request = _downgrade_tool_choice(request, mode="none")
             result = await self._stream_once(no_tools_request)
             # Emit recovered text as a content delta so the runtime sees it.
@@ -347,8 +338,7 @@ def _normalize_tool_calls(raw_tool_calls: Sequence[Any]) -> tuple[ToolCall, ...]
             raw_arguments = raw_tool_call.get("raw_arguments")
         else:
             name = str(getattr(raw_tool_call, "name", "")).strip()
-            call_id = str(getattr(raw_tool_call, "id", None)
-                          or f"tool-call-{index}")
+            call_id = str(getattr(raw_tool_call, "id", None) or f"tool-call-{index}")
             arguments = getattr(raw_tool_call, "args", {})
             parse_error = getattr(raw_tool_call, "parse_error", None)
             raw_arguments = getattr(raw_tool_call, "raw_arguments", None)
@@ -356,18 +346,20 @@ def _normalize_tool_calls(raw_tool_calls: Sequence[Any]) -> tuple[ToolCall, ...]
         if not name:
             continue
 
-        normalized_arguments: dict[str, object] = arguments if isinstance(
-            arguments, dict) else {}
+        normalized_arguments: dict[str, object] = arguments if isinstance(arguments, dict) else {}
         normalized_parse_error = (
-            str(parse_error).strip() if isinstance(
-                parse_error, str) and parse_error.strip() else None
-        )
-        normalized_raw_arguments = (
-            str(raw_arguments)[:500]
-            if isinstance(raw_arguments, str) and raw_arguments
+            str(parse_error).strip()
+            if isinstance(parse_error, str) and parse_error.strip()
             else None
         )
-        if normalized_parse_error is None and arguments not in ({}, None) and not isinstance(arguments, dict):
+        normalized_raw_arguments = (
+            str(raw_arguments)[:500] if isinstance(raw_arguments, str) and raw_arguments else None
+        )
+        if (
+            normalized_parse_error is None
+            and arguments not in ({}, None)
+            and not isinstance(arguments, dict)
+        ):
             normalized_parse_error = "Tool-call arguments must be a JSON object."
             normalized_raw_arguments = str(arguments)[:500]
 
@@ -393,28 +385,23 @@ def _normalize_usage(message: Any) -> UsageStats | None:
     reasoning_tokens: int | None = None
     completion_details = raw_usage.get("completion_tokens_details")
     if isinstance(completion_details, dict):
-        reasoning_tokens = _coerce_optional_int(
-            completion_details.get("reasoning_tokens"))
+        reasoning_tokens = _coerce_optional_int(completion_details.get("reasoning_tokens"))
     if reasoning_tokens is None:
-        reasoning_tokens = _coerce_optional_int(
-            raw_usage.get("thoughts_token_count"))
+        reasoning_tokens = _coerce_optional_int(raw_usage.get("thoughts_token_count"))
 
     cached_input_tokens: int | None = None
     prompt_details = raw_usage.get("prompt_tokens_details")
     if isinstance(prompt_details, dict):
-        cached_input_tokens = _coerce_optional_int(
-            prompt_details.get("cached_tokens"))
+        cached_input_tokens = _coerce_optional_int(prompt_details.get("cached_tokens"))
     if cached_input_tokens is None:
-        cached_input_tokens = _coerce_optional_int(
-            raw_usage.get("cache_read_input_tokens"))
+        cached_input_tokens = _coerce_optional_int(raw_usage.get("cache_read_input_tokens"))
 
     return UsageStats(
         prompt_tokens=_coerce_optional_int(
             raw_usage.get("input_tokens") or raw_usage.get("prompt_tokens")
         ),
         completion_tokens=_coerce_optional_int(
-            raw_usage.get("output_tokens") or raw_usage.get(
-                "completion_tokens")
+            raw_usage.get("output_tokens") or raw_usage.get("completion_tokens")
         ),
         total_tokens=_coerce_optional_int(raw_usage.get("total_tokens")),
         reasoning_tokens=reasoning_tokens,
@@ -436,8 +423,7 @@ def _extract_native_reasoning(response: Any) -> tuple[str | None, str | None]:
     if isinstance(reasoning, str) and reasoning.strip():
         signature = getattr(response, "reasoning_content_signature", None)
         return reasoning.strip(), (
-            signature if isinstance(
-                signature, str) and signature.strip() else None
+            signature if isinstance(signature, str) and signature.strip() else None
         )
     # Anthropic: redacted reasoning
     redacted = getattr(response, "redacted_reasoning_content", None)
@@ -466,9 +452,7 @@ def _finalize_stream_tool_calls(
             continue
         call_id = state.get("id")
         arguments_text = "".join(
-            part
-            for part in state.get("arguments_parts", ())
-            if isinstance(part, str)
+            part for part in state.get("arguments_parts", ()) if isinstance(part, str)
         )
         try:
             arguments = _parse_stream_arguments(arguments_text)
@@ -480,8 +464,7 @@ def _finalize_stream_tool_calls(
             arguments = {}
         normalized.append(
             ToolCall(
-                id=call_id if isinstance(
-                    call_id, str) and call_id else f"tool-call-{index}",
+                id=call_id if isinstance(call_id, str) and call_id else f"tool-call-{index}",
                 name=name.strip(),
                 arguments=arguments,
                 parse_error=parse_error,

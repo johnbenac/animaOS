@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+
 # Disable encryption requirement for tests (must be set before settings import).
 os.environ.setdefault("ANIMA_CORE_REQUIRE_ENCRYPTION", "false")
 
@@ -12,13 +13,12 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-
 from anima_server.config import settings
 from anima_server.db import dispose_cached_engines
 from anima_server.services.agent import invalidate_agent_runtime_cache
 from anima_server.services.agent.vector_store import reset_vector_store
 from anima_server.services.sessions import clear_sqlcipher_key, unlock_session_store
+from fastapi.testclient import TestClient
 
 
 def _resolve_test_temp_root() -> Path:

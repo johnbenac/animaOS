@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import platform
-import threading
-from dataclasses import dataclass
-from collections.abc import Callable
-from typing import TypeVar
 import base64
 import logging
 import os
+import platform
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TypeVar
 
 from argon2.low_level import Type, hash_secret_raw
 from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
 
 _T = TypeVar("_T")
 _LARGE_STACK = 8 * 1024 * 1024  # 8 MiB
@@ -40,7 +40,7 @@ SQLCIPHER_HKDF_INFO = b"anima-sqlcipher-v1"
 logger = logging.getLogger(__name__)
 
 
-def _run_with_large_stack(fn: Callable[[], _T]) -> _T:
+def _run_with_large_stack[T](fn: Callable[[], _T]) -> _T:
     """Run *fn* in a thread with an 8 MiB stack on Windows.
 
     On Windows, anyio worker threads (used by FastAPI TestClient and potentially
@@ -59,7 +59,7 @@ def _run_with_large_stack(fn: Callable[[], _T]) -> _T:
     def _worker() -> None:
         try:
             result.append(fn())
-        except BaseException as exc:  # noqa: BLE001
+        except BaseException as exc:
             error.append(exc)
 
     _lock = threading.Lock()
@@ -129,7 +129,7 @@ def derive_sqlcipher_key(passphrase: str, salt: bytes) -> bytes:
 
 
 def _build_dek_wrap_aad(user_id: int, domain: str) -> bytes:
-    return f"dek-wrap:user={user_id}:domain={domain}".encode("utf-8")
+    return f"dek-wrap:user={user_id}:domain={domain}".encode()
 
 
 def create_wrapped_dek(
@@ -227,7 +227,9 @@ def encrypt_text_with_dek(plaintext: str, dek: bytes, *, aad: bytes | None = Non
 
 def decrypt_text_with_dek(serialized: str, dek: bytes, *, aad: bytes | None = None) -> str:
     # Plaintext passthrough — not encrypted
-    if not serialized.startswith(f"{ENCRYPTED_TEXT_PREFIX}:") and not serialized.startswith(f"{ENCRYPTED_TEXT_PREFIX_AAD}:"):
+    if not serialized.startswith(f"{ENCRYPTED_TEXT_PREFIX}:") and not serialized.startswith(
+        f"{ENCRYPTED_TEXT_PREFIX_AAD}:"
+    ):
         return serialized
     prefix, iv_b64, tag_b64, ciphertext_b64 = serialized.split(":", 3)
     if prefix not in (ENCRYPTED_TEXT_PREFIX, ENCRYPTED_TEXT_PREFIX_AAD):

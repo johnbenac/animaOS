@@ -1,15 +1,12 @@
 """Tests for F5 — Async sleep-time agent orchestrator."""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine, event, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import BackgroundTaskRun
 from anima_server.services.agent.sleep_agent import (
@@ -23,9 +20,12 @@ from anima_server.services.agent.sleep_agent import (
     should_run_sleeptime,
     update_last_processed_message_id,
 )
-
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ── Fixtures ─────────────────────────────────────────────────────────
+
 
 @pytest.fixture(autouse=True)
 def _clear_turn_counters():
@@ -63,6 +63,7 @@ def db_factory(db_engine):
 
 # ── Turn counting ────────────────────────────────────────────────────
 
+
 class TestBumpTurnCounter:
     def test_increments_from_zero(self):
         assert bump_turn_counter(1) == 1
@@ -94,11 +95,12 @@ class TestShouldRunSleeptime:
     def test_true_at_multiples(self):
         for i in range(1, 10):
             bump_turn_counter(1)
-            expected = (i % SLEEPTIME_FREQUENCY == 0)
+            expected = i % SLEEPTIME_FREQUENCY == 0
             assert should_run_sleeptime(1) is expected, f"Failed at turn {i}"
 
 
 # ── _issue_background_task ───────────────────────────────────────────
+
 
 class TestIssueBackgroundTask:
     @pytest.mark.asyncio()
@@ -148,6 +150,7 @@ class TestIssueBackgroundTask:
     @pytest.mark.asyncio()
     async def test_non_dict_result(self, db_factory):
         """When task_fn returns a non-dict, result_json should be None."""
+
         async def _string_task(*, user_id, db_factory=None):
             return "just a string"
 
@@ -167,6 +170,7 @@ class TestIssueBackgroundTask:
 
 # ── Task failure isolation ───────────────────────────────────────────
 
+
 class TestTaskFailureIsolation:
     @pytest.mark.asyncio()
     async def test_one_failure_does_not_cancel_others(self, db_factory):
@@ -183,15 +187,21 @@ class TestTaskFailureIsolation:
 
         results = await asyncio.gather(
             _issue_background_task(
-                user_id=1, task_type="good1", task_fn=_good_task,
+                user_id=1,
+                task_type="good1",
+                task_fn=_good_task,
                 db_factory=db_factory,
             ),
             _issue_background_task(
-                user_id=1, task_type="bad1", task_fn=_bad_task,
+                user_id=1,
+                task_type="bad1",
+                task_fn=_bad_task,
                 db_factory=db_factory,
             ),
             _issue_background_task(
-                user_id=1, task_type="good2", task_fn=_good_task,
+                user_id=1,
+                task_type="good2",
+                task_fn=_good_task,
                 db_factory=db_factory,
             ),
             return_exceptions=True,
@@ -214,6 +224,7 @@ class TestTaskFailureIsolation:
 
 # ── force=True ───────────────────────────────────────────────────────
 
+
 class TestForceMode:
     @pytest.mark.asyncio()
     async def test_force_bypasses_heat_gate(self, db_factory):
@@ -221,36 +232,44 @@ class TestForceMode:
         with (
             patch(
                 "anima_server.services.agent.sleep_agent._task_consolidation",
-                new_callable=AsyncMock, return_value={},
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_embedding_backfill",
-                new_callable=AsyncMock, return_value={},
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_graph_ingestion",
-                new_callable=AsyncMock, return_value={},
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_heat_decay",
-                new_callable=AsyncMock, return_value={},
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_episode_gen",
-                new_callable=AsyncMock, return_value={},
+                new_callable=AsyncMock,
+                return_value={},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_contradiction_scan",
-                new_callable=AsyncMock, return_value={},
-            ) as mock_contra,
+                new_callable=AsyncMock,
+                return_value={},
+            ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_profile_synthesis",
-                new_callable=AsyncMock, return_value={},
-            ) as mock_profile,
+                new_callable=AsyncMock,
+                return_value={},
+            ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_deep_monologue",
-                new_callable=AsyncMock, return_value={},
-            ) as mock_monologue,
+                new_callable=AsyncMock,
+                return_value={},
+            ),
             patch(
                 "anima_server.services.agent.sleep_tasks._should_run_deep_monologue",
                 return_value=True,
@@ -277,6 +296,7 @@ class TestForceMode:
 
 # ── Heat gating ──────────────────────────────────────────────────────
 
+
 class TestHeatGating:
     def test_no_items_means_no_expensive(self, db_factory):
         with db_factory() as db:
@@ -284,6 +304,7 @@ class TestHeatGating:
 
 
 # ── Restart cursor ───────────────────────────────────────────────────
+
 
 class TestRestartCursor:
     def test_no_runs_returns_none(self, db_factory):
@@ -349,7 +370,10 @@ class TestRestartCursor:
             db.commit()
 
         update_last_processed_message_id(
-            1, thread_id=None, message_id=50, messages_processed=7,
+            1,
+            thread_id=None,
+            message_id=50,
+            messages_processed=7,
             db_factory=db_factory,
         )
 
@@ -359,6 +383,7 @@ class TestRestartCursor:
 
 # ── Orchestrator integration ─────────────────────────────────────────
 
+
 class TestRunSleeptimeAgents:
     @pytest.mark.asyncio()
     async def test_parallel_tasks_all_run(self, db_factory):
@@ -366,23 +391,28 @@ class TestRunSleeptimeAgents:
         with (
             patch(
                 "anima_server.services.agent.sleep_agent._task_consolidation",
-                new_callable=AsyncMock, return_value={"ok": True},
+                new_callable=AsyncMock,
+                return_value={"ok": True},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_embedding_backfill",
-                new_callable=AsyncMock, return_value={"ok": True},
+                new_callable=AsyncMock,
+                return_value={"ok": True},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_graph_ingestion",
-                new_callable=AsyncMock, return_value={"ok": True},
+                new_callable=AsyncMock,
+                return_value={"ok": True},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_heat_decay",
-                new_callable=AsyncMock, return_value={"ok": True},
+                new_callable=AsyncMock,
+                return_value={"ok": True},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._task_episode_gen",
-                new_callable=AsyncMock, return_value={"ok": True},
+                new_callable=AsyncMock,
+                return_value={"ok": True},
             ),
             patch(
                 "anima_server.services.agent.sleep_agent._should_run_expensive",
@@ -406,7 +436,13 @@ class TestRunSleeptimeAgents:
 
         assert len(run_ids) == 5
         task_types = {r.split(":")[0] for r in run_ids}
-        assert task_types == {"consolidation", "embedding_backfill", "graph_ingestion", "heat_decay", "episode_gen"}
+        assert task_types == {
+            "consolidation",
+            "embedding_backfill",
+            "graph_ingestion",
+            "heat_decay",
+            "episode_gen",
+        }
 
         with db_factory() as db:
             runs = list(db.scalars(select(BackgroundTaskRun)).all())
@@ -415,6 +451,7 @@ class TestRunSleeptimeAgents:
 
 
 # ── BackgroundTaskRun model ──────────────────────────────────────────
+
 
 class TestBackgroundTaskRunModel:
     def test_default_status(self, db_factory):

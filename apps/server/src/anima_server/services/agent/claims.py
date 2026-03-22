@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from anima_server.models import MemoryClaim, MemoryClaimEvidence, MemoryItem
-from anima_server.services.data_crypto import ef, df
+from anima_server.models import MemoryClaim, MemoryClaimEvidence
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +94,23 @@ def upsert_claim(
 
     if existing is not None:
         # Same value — just add evidence if new
-        if df(user_id, existing.value_text, table="memory_items", field="content").strip().lower() == content.strip().lower():
+        if (
+            df(user_id, existing.value_text, table="memory_items", field="content").strip().lower()
+            == content.strip().lower()
+        ):
             if evidence_text:
-                db.add(MemoryClaimEvidence(
-                    claim_id=existing.id,
-                    source_text=ef(user_id, evidence_text, table="memory_claim_evidence", field="source_text"),
-                    source_kind=source_kind,
-                ))
+                db.add(
+                    MemoryClaimEvidence(
+                        claim_id=existing.id,
+                        source_text=ef(
+                            user_id,
+                            evidence_text,
+                            table="memory_claim_evidence",
+                            field="source_text",
+                        ),
+                        source_kind=source_kind,
+                    )
+                )
                 db.flush()
             return existing
 
@@ -132,11 +142,15 @@ def upsert_claim(
         db.flush()
 
     if evidence_text:
-        db.add(MemoryClaimEvidence(
-            claim_id=new_claim.id,
-            source_text=ef(user_id, evidence_text, table="memory_claim_evidence", field="source_text"),
-            source_kind=source_kind,
-        ))
+        db.add(
+            MemoryClaimEvidence(
+                claim_id=new_claim.id,
+                source_text=ef(
+                    user_id, evidence_text, table="memory_claim_evidence", field="source_text"
+                ),
+                source_kind=source_kind,
+            )
+        )
         db.flush()
 
     return new_claim

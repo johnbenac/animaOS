@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/core", tags=["core"])
 def _sqlcipher_available() -> bool:
     try:
         import sqlcipher3  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -29,7 +30,7 @@ def _read_encryption_mode() -> str:
         try:
             manifest = json.loads(path.read_text(encoding="utf-8"))
             return str(manifest.get("encryption_mode", "none"))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     return "none"
 

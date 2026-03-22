@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
-
 from anima_server.services.storage import get_user_data_dir
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(client: TestClient) -> dict[str, object]:

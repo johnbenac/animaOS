@@ -78,21 +78,15 @@ async def create_ai_chat(payload: CreateAIChatRequest) -> dict[str, object]:
     from anima_server.services.agent.llm import LLMConfigError, LLMInvocationError
     from anima_server.services.creation_agent import handle_creation_turn
 
-    llm_messages = [
-        {"role": m.role, "content": m.content} for m in payload.messages
-    ]
+    llm_messages = [{"role": m.role, "content": m.content} for m in payload.messages]
 
     try:
         result = await handle_creation_turn(llm_messages, payload.ownerName)
     except LLMConfigError:
-        raise HTTPException(
-            status_code=503, detail="AI provider is not configured."
-        ) from None
+        raise HTTPException(status_code=503, detail="AI provider is not configured.") from None
     except LLMInvocationError as exc:
         logger.exception("AI provider invocation failed", exc_info=exc)
-        raise HTTPException(
-            status_code=503, detail="AI provider error occurred"
-        ) from None
+        raise HTTPException(status_code=503, detail="AI provider error occurred") from None
 
     return {
         "message": result.message,
@@ -131,14 +125,11 @@ def register(
             raise HTTPException(status_code=403, detail=detail) from None
         if detail == "Username already taken":
             raise HTTPException(status_code=409, detail=detail) from None
-        raise HTTPException(
-            status_code=422, detail=detail) from None
+        raise HTTPException(status_code=422, detail=detail) from None
     except RuntimeError as exc:
-        raise HTTPException(
-            status_code=503, detail=str(exc)) from None
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
-    response["unlockToken"] = unlock_session_store.create(
-        int(response["id"]), deks)
+    response["unlockToken"] = unlock_session_store.create(int(response["id"]), deks)
     return response
 
 
@@ -161,7 +152,7 @@ def login(
         retry_after = _record_failed_login_attempt(username, now)
         if retry_after is not None:
             return _rate_limited_login_response(retry_after)
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid credentials") from None
 
     _FAILED_LOGIN_ATTEMPTS.pop(username, None)
     return {
@@ -203,8 +194,7 @@ def change_password(
 ) -> dict[str, object]:
     session = unlock_session_store.resolve(read_unlock_token(request))
     if session is None:
-        raise HTTPException(
-            status_code=401, detail="Session locked. Please sign in again.")
+        raise HTTPException(status_code=401, detail="Session locked. Please sign in again.")
 
     user = get_user_by_id(db, session.user_id)
     if user is None:
@@ -219,7 +209,7 @@ def change_password(
             current_deks=session.deks,
         )
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Invalid credentials") from None
 
     # Re-wrap SQLCipher key with new password (unified passphrase mode)
     _rewrap_sqlcipher_key_if_unified(payload.newPassword)
@@ -232,10 +222,15 @@ def change_password(
 def _rewrap_sqlcipher_key_if_unified(new_password: str) -> None:
     """Re-wrap the SQLCipher key with a new password in unified mode."""
     from anima_server.config import settings
+
     if settings.core_passphrase.strip():
         return
 
-    from anima_server.services.core import get_owner_user_id, get_wrapped_sqlcipher_key, store_wrapped_sqlcipher_key
+    from anima_server.services.core import (
+        get_owner_user_id,
+        get_wrapped_sqlcipher_key,
+        store_wrapped_sqlcipher_key,
+    )
     from anima_server.services.sessions import get_sqlcipher_key
 
     raw_key = get_sqlcipher_key()
@@ -250,14 +245,16 @@ def _rewrap_sqlcipher_key_if_unified(new_password: str) -> None:
 
     owner_user_id = get_owner_user_id() or 0
     wrapped = wrap_dek(new_password, raw_key, owner_user_id, "sqlcipher")
-    store_wrapped_sqlcipher_key({
-        "user_id": owner_user_id,
-        "kdf_salt": wrapped.kdf_salt,
-        "kdf_time_cost": wrapped.kdf_time_cost,
-        "kdf_memory_cost_kib": wrapped.kdf_memory_cost_kib,
-        "kdf_parallelism": wrapped.kdf_parallelism,
-        "kdf_key_length": wrapped.kdf_key_length,
-        "wrap_iv": wrapped.wrap_iv,
-        "wrap_tag": wrapped.wrap_tag,
-        "wrapped_key": wrapped.wrapped_dek,
-    })
+    store_wrapped_sqlcipher_key(
+        {
+            "user_id": owner_user_id,
+            "kdf_salt": wrapped.kdf_salt,
+            "kdf_time_cost": wrapped.kdf_time_cost,
+            "kdf_memory_cost_kib": wrapped.kdf_memory_cost_kib,
+            "kdf_parallelism": wrapped.kdf_parallelism,
+            "kdf_key_length": wrapped.kdf_key_length,
+            "wrap_iv": wrapped.wrap_iv,
+            "wrap_tag": wrapped.wrap_tag,
+            "wrapped_key": wrapped.wrapped_dek,
+        }
+    )

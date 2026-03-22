@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from anima_server.services.agent.executor import ToolExecutor, _stringify_output
-from anima_server.services.agent.runtime_types import ToolCall, ToolExecutionResult
+from anima_server.services.agent.runtime_types import ToolCall
 from anima_server.services.agent.tools import tool
 
 
@@ -15,7 +14,7 @@ def _extract_message(output: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Helpers – fake tool objects
+# Helpers - fake tool objects
 # --------------------------------------------------------------------------- #
 
 

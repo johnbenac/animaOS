@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
 
 from anima_server.services.agent.runtime_types import (
     LLMRequest,
@@ -14,7 +14,7 @@ class BaseLLMAdapter(ABC):
     provider: str
     model: str
 
-    def prepare(self) -> None:
+    def prepare(self) -> None:  # noqa: B027
         """Validate adapter readiness before the runtime starts."""
 
     @abstractmethod

@@ -13,7 +13,7 @@ class TestExtractThinkingFromCompleteJSON:
     def test_extract_thinking_from_complete_json(self) -> None:
         ext = ThinkingExtractor()
         full = json.dumps({"thinking": "I should greet the user", "message": "Hello!"})
-        main_delta, thinking_delta = ext.process_fragment(full)
+        _main_delta, thinking_delta = ext.process_fragment(full)
 
         assert thinking_delta == "I should greet the user"
         assert ext.thinking == "I should greet the user"
@@ -32,7 +32,7 @@ class TestExtractThinkingFromFragments:
         full = json.dumps({"thinking": "step by step", "action": "search"})
 
         # Split into small fragments of varying sizes.
-        fragments = [full[i:i + 5] for i in range(0, len(full), 5)]
+        fragments = [full[i : i + 5] for i in range(0, len(full), 5)]
         all_main: list[str] = []
         all_thinking: list[str] = []
 
@@ -107,7 +107,7 @@ class TestNoThinkingKey:
     def test_no_thinking_key(self) -> None:
         ext = ThinkingExtractor()
         text = '{"message": "Hello!", "action": "greet"}'
-        main_delta, thinking_delta = ext.process_fragment(text)
+        _main_delta, thinking_delta = ext.process_fragment(text)
 
         assert thinking_delta == ""
         assert ext.thinking == ""
@@ -199,7 +199,7 @@ class TestEdgeCases:
         ext = ThinkingExtractor()
         ext.process_fragment('{"thinking": "a')
         ext.process_fragment('b", "x": ')
-        ext.process_fragment('1}')
+        ext.process_fragment("1}")
 
         assert ext.thinking == "ab"
         main = json.loads(ext.main_json)

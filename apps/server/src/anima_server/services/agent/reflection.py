@@ -5,7 +5,6 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from threading import Lock
-from typing import Any
 
 from anima_server.config import settings
 
@@ -92,9 +91,8 @@ async def run_reflection(
             removed = expire_working_memory_items(db, user_id=user_id)
             if removed:
                 db.commit()
-                logger.info(
-                    "Expired %d working memory items for user %s", removed, user_id)
-    except Exception:  # noqa: BLE001
+                logger.info("Expired %d working memory items for user %s", removed, user_id)
+    except Exception:
         logger.exception("Working memory expiry failed for user %s", user_id)
 
     # 1. Quick inner monologue (post-conversation reflection)
@@ -114,7 +112,7 @@ async def run_reflection(
                 reflection.emotional_signal_recorded,
                 reflection.quick_take[:80] if reflection.quick_take else "",
             )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Quick reflection failed for user %s", user_id)
 
     # 2. Full sleep-time maintenance via the orchestrator (force=True
@@ -133,9 +131,10 @@ async def run_reflection(
         if run_ids:
             logger.info(
                 "Sleep-time agents for user %s completed: %s",
-                user_id, run_ids,
+                user_id,
+                run_ids,
             )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Reflection failed for user %s", user_id)
 
     # Companion cache invalidation is handled inside run_sleeptime_agents.

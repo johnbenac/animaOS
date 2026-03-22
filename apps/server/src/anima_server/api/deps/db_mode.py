@@ -1,4 +1,5 @@
 """FastAPI dependency that gates endpoints to SQLite (per-user) mode only."""
+
 from __future__ import annotations
 
 from fastapi import HTTPException, status

@@ -1,29 +1,35 @@
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
-from anima_server.services.agent.tools import tool
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import AgentMessage, AgentThread, User
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.memory_blocks import MemoryBlock
 from anima_server.services.agent.messages import is_assistant_message, to_runtime_message
 from anima_server.services.agent.persistence import load_thread_history
-from anima_server.services.agent.rules import InitToolRule, RequiresApprovalToolRule, TerminalToolRule
+from anima_server.services.agent.rules import (
+    InitToolRule,
+    RequiresApprovalToolRule,
+    TerminalToolRule,
+)
 from anima_server.services.agent.runtime import AgentRuntime
-from anima_server.services.agent.runtime_types import LLMRequest, StepExecutionResult, StopReason, ToolCall
+from anima_server.services.agent.runtime_types import (
+    LLMRequest,
+    StepExecutionResult,
+    StopReason,
+    ToolCall,
+)
 from anima_server.services.agent.state import StoredMessage
-from anima_server.services.agent.tools import current_datetime, send_message
 from anima_server.services.agent.streaming import AgentStreamEvent
+from anima_server.services.agent.tools import current_datetime, send_message, tool
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 class QueueAdapter(BaseLLMAdapter):
@@ -165,7 +171,9 @@ async def test_runtime_returns_rule_violation_to_next_step() -> None:
     assert result.tools_used == []
     assert len(result.step_traces) == 2
     assert result.step_traces[0].tool_results[0].is_error is True
-    assert "The first tool call must be one of: think." in result.step_traces[0].tool_results[0].output
+    assert (
+        "The first tool call must be one of: think." in result.step_traces[0].tool_results[0].output
+    )
     assert [tool.name for tool in adapter.requests[0].available_tools] == ["think"]
     assert adapter.requests[0].force_tool_call is True
     assert [tool.name for tool in adapter.requests[1].available_tools] == ["think"]

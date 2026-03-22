@@ -6,6 +6,7 @@ unified, frequency-gated, heat-threshold-aware async orchestrator.
 Background tasks are structured and explicit — not autonomous agents.
 Each task opens its own DB session via ``db_factory()``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ _turn_counters: dict[int, int] = {}  # user_id -> turn_count
 
 # ── Turn counting ────────────────────────────────────────────────────
 
+
 def bump_turn_counter(user_id: int) -> int:
     """Increment and return the turn counter for a user."""
     _turn_counters[user_id] = _turn_counters.get(user_id, 0) + 1
@@ -43,6 +45,7 @@ def should_run_sleeptime(user_id: int) -> bool:
 
 
 # ── Heat gating ──────────────────────────────────────────────────────
+
 
 def _should_run_expensive(
     db: Any,
@@ -79,13 +82,15 @@ async def _commit_with_retry(
         try:
             db_session.commit()
             return True
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "database is locked" not in str(exc):
                 raise
             logger.debug(
-                "%s failed (attempt %d/%d, database locked), "
-                "retrying in %.1fs",
-                label, attempt, len(_DB_LOCKED_RETRY_DELAYS), delay,
+                "%s failed (attempt %d/%d, database locked), retrying in %.1fs",
+                label,
+                attempt,
+                len(_DB_LOCKED_RETRY_DELAYS),
+                delay,
             )
             db_session.rollback()
             await asyncio.sleep(delay)
@@ -93,7 +98,7 @@ async def _commit_with_retry(
     try:
         db_session.commit()
         return True
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning("%s failed after all retries", label)
         db_session.rollback()
         return False
@@ -162,7 +167,9 @@ async def _issue_background_task(
         error_message = str(exc)
         logger.exception(
             "Background task %s (run %s) failed for user %s",
-            task_type, run_id, user_id,
+            task_type,
+            run_id,
+            user_id,
         )
 
     # Always update final status (with retry)
@@ -176,16 +183,15 @@ async def _issue_background_task(
                     run.result_json = result_json
                 if error_message is not None:
                     run.error_message = error_message
-                await _commit_with_retry(
-                    db, label=f"{task_type}:finalize")
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Failed to update task run %s status", run_id)
+                await _commit_with_retry(db, label=f"{task_type}:finalize")
+    except Exception:
+        logger.exception("Failed to update task run %s status", run_id)
 
     return f"{task_type}:{run_id}"
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────
+
 
 async def run_sleeptime_agents(
     *,
@@ -223,16 +229,24 @@ async def run_sleeptime_agents(
     # concurrent commits even with WAL mode and busy_timeout.
 
     for task_type, task_fn, extra_kwargs in [
-        ("consolidation", _task_consolidation, {
-            "user_message": user_message,
-            "assistant_response": assistant_response,
-            "thread_id": thread_id,
-        }),
+        (
+            "consolidation",
+            _task_consolidation,
+            {
+                "user_message": user_message,
+                "assistant_response": assistant_response,
+                "thread_id": thread_id,
+            },
+        ),
         ("embedding_backfill", _task_embedding_backfill, {}),
-        ("graph_ingestion", _task_graph_ingestion, {
-            "user_message": user_message,
-            "assistant_response": assistant_response,
-        }),
+        (
+            "graph_ingestion",
+            _task_graph_ingestion,
+            {
+                "user_message": user_message,
+                "assistant_response": assistant_response,
+            },
+        ),
         ("heat_decay", _task_heat_decay, {}),
         ("episode_gen", _task_episode_gen, {}),
     ]:
@@ -245,7 +259,7 @@ async def run_sleeptime_agents(
                 **extra_kwargs,
             )
             run_ids.append(r)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error("Background task %s failed: %s", task_type, exc)
 
     # ── Sequential group (heat-gated) ────────────────────────────
@@ -254,10 +268,11 @@ async def run_sleeptime_agents(
     if not run_expensive:
         try:
             from anima_server.db.session import SessionLocal
+
             factory = db_factory or SessionLocal
             with factory() as db:
                 run_expensive = _should_run_expensive(db, user_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Heat check failed, skipping expensive tasks")
 
     if run_expensive:
@@ -269,7 +284,7 @@ async def run_sleeptime_agents(
                 db_factory=db_factory,
             )
             run_ids.append(rid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("Contradiction scan task failed")
 
         try:
@@ -280,7 +295,7 @@ async def run_sleeptime_agents(
                 db_factory=db_factory,
             )
             run_ids.append(rid)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("Profile synthesis task failed")
 
     # ── Time-gated: deep monologue ───────────────────────────────
@@ -296,16 +311,17 @@ async def run_sleeptime_agents(
                 db_factory=db_factory,
             )
             run_ids.append(rid)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Deep monologue task failed")
 
     # Invalidate companion memory cache so the next turn sees fresh data.
     try:
         from anima_server.services.agent.companion import get_companion
+
         companion = get_companion(user_id)
         if companion is not None:
             companion.invalidate_memory()
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Companion cache invalidation failed for user %s", user_id)
 
     return run_ids
@@ -332,6 +348,7 @@ def _strip_inner_reasoning(text: str) -> str:
 
 
 # ── Task implementations (thin wrappers) ─────────────────────────────
+
 
 async def _task_consolidation(
     *,
@@ -389,7 +406,7 @@ async def _task_embedding_backfill(
 
     try:
         await _backfill_user_embeddings(user_id, db_factory=db_factory)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Embedding backfill skipped for user %s", user_id)
 
 
@@ -494,6 +511,7 @@ async def _task_deep_monologue(
 
 # ── Restart cursor ───────────────────────────────────────────────────
 
+
 def get_last_processed_message_id(
     user_id: int,
     thread_id: int | None = None,
@@ -505,9 +523,10 @@ def get_last_processed_message_id(
     Reads from the most recent completed BackgroundTaskRun where
     task_type='consolidation' and result_json.thread_id matches.
     """
+    from sqlalchemy import desc, select
+
     from anima_server.db.session import SessionLocal
     from anima_server.models import BackgroundTaskRun
-    from sqlalchemy import select, desc
 
     factory = db_factory or SessionLocal
     with factory() as db:
@@ -542,9 +561,10 @@ def update_last_processed_message_id(
     db_factory: Callable[..., object] | None = None,
 ) -> None:
     """Persist the consolidation restart cursor in the most recent run."""
+    from sqlalchemy import desc, select
+
     from anima_server.db.session import SessionLocal
     from anima_server.models import BackgroundTaskRun
-    from sqlalchemy import desc, select
 
     factory = db_factory or SessionLocal
     with factory() as db:

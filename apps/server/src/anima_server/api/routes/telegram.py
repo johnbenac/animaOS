@@ -13,7 +13,6 @@ from anima_server.models import TelegramLink, User
 from anima_server.schemas.telegram import (
     TelegramLinkRequest,
     TelegramLinkResponse,
-    TelegramUnlinkRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,12 +29,11 @@ def link_telegram(
     require_unlocked_session(request)
 
     link_secret = os.environ.get("TELEGRAM_LINK_SECRET")
-    if link_secret:
-        if not payload.linkSecret or payload.linkSecret != link_secret:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid link secret.",
-            )
+    if link_secret and (not payload.linkSecret or payload.linkSecret != link_secret):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid link secret.",
+        )
 
     user = db.get(User, payload.userId)
     if user is None:
@@ -47,8 +45,7 @@ def link_telegram(
     # Remove existing links for this chat_id or user_id (one-to-one mapping)
     for existing in db.scalars(
         select(TelegramLink).where(
-            (TelegramLink.chat_id == payload.chatId)
-            | (TelegramLink.user_id == payload.userId)
+            (TelegramLink.chat_id == payload.chatId) | (TelegramLink.user_id == payload.userId)
         )
     ).all():
         db.delete(existing)
@@ -69,9 +66,7 @@ def lookup_telegram(
 ) -> TelegramLinkResponse:
     require_unlocked_session(request)
 
-    link = db.scalar(
-        select(TelegramLink).where(TelegramLink.chat_id == chatId)
-    )
+    link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chatId))
     if link is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -88,9 +83,7 @@ def unlink_telegram(
 ) -> dict[str, str]:
     require_unlocked_session(request)
 
-    link = db.scalar(
-        select(TelegramLink).where(TelegramLink.chat_id == chatId)
-    )
+    link = db.scalar(select(TelegramLink).where(TelegramLink.chat_id == chatId))
     if link:
         db.delete(link)
         db.commit()

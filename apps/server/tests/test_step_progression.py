@@ -6,10 +6,9 @@ import asyncio
 from collections import deque
 
 import pytest
-
+from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.adapters.openai_compatible import OpenAICompatibleAdapter
 from anima_server.services.agent.openai_compatible_client import OpenAICompatibleStreamChunk
-from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.rules import TerminalToolRule
 from anima_server.services.agent.runtime import AgentRuntime
 from anima_server.services.agent.runtime_types import (
@@ -17,13 +16,11 @@ from anima_server.services.agent.runtime_types import (
     StepExecutionResult,
     StepFailedError,
     StepProgression,
-    StopReason,
     ToolCall,
     UsageStats,
 )
 from anima_server.services.agent.streaming import AgentStreamEvent
 from anima_server.services.agent.tools import send_message
-
 
 # --------------------------------------------------------------------------- #
 # Helpers — test adapter
@@ -111,13 +108,15 @@ async def test_llm_failure_raises_step_failed_error() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_content_passed_through_to_step_trace() -> None:
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text="answer",
-            reasoning_content="<think>deep thought</think>",
-            reasoning_signature="sig-123",
-        ),
-    ])
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text="answer",
+                reasoning_content="<think>deep thought</think>",
+                reasoning_signature="sig-123",
+            ),
+        ]
+    )
     runtime = AgentRuntime(adapter=adapter, max_steps=1)
 
     result = await runtime.invoke("hello", user_id=1, history=[])
@@ -130,19 +129,21 @@ async def test_reasoning_content_passed_through_to_step_trace() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_event_emitted_via_callback() -> None:
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            tool_calls=(
-                ToolCall(
-                    id="call-1",
-                    name="send_message",
-                    arguments={"message": "hi"},
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="send_message",
+                        arguments={"message": "hi"},
+                    ),
                 ),
+                reasoning_content="internal reasoning",
+                reasoning_signature="sig-abc",
             ),
-            reasoning_content="internal reasoning",
-            reasoning_signature="sig-abc",
-        ),
-    ])
+        ]
+    )
     runtime = AgentRuntime(
         adapter=adapter,
         tools=[send_message],
@@ -170,17 +171,19 @@ async def test_reasoning_event_emitted_via_callback() -> None:
 
 @pytest.mark.asyncio
 async def test_step_timing_populated_in_traces() -> None:
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            tool_calls=(
-                ToolCall(
-                    id="call-1",
-                    name="send_message",
-                    arguments={"message": "hi"},
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                tool_calls=(
+                    ToolCall(
+                        id="call-1",
+                        name="send_message",
+                        arguments={"message": "hi"},
+                    ),
                 ),
-            ),
-        )
-    ])
+            )
+        ]
+    )
     runtime = AgentRuntime(
         adapter=adapter,
         tools=[send_message],
@@ -317,18 +320,20 @@ async def test_step_state_and_empty_warning_emitted_via_callback() -> None:
 
 @pytest.mark.asyncio
 async def test_reasoning_tokens_in_usage() -> None:
-    adapter = QueueAdapter([
-        StepExecutionResult(
-            assistant_text="ok",
-            usage=UsageStats(
-                prompt_tokens=10,
-                completion_tokens=5,
-                total_tokens=15,
-                reasoning_tokens=3,
-                cached_input_tokens=2,
+    adapter = QueueAdapter(
+        [
+            StepExecutionResult(
+                assistant_text="ok",
+                usage=UsageStats(
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    total_tokens=15,
+                    reasoning_tokens=3,
+                    cached_input_tokens=2,
+                ),
             ),
-        ),
-    ])
+        ]
+    )
     runtime = AgentRuntime(adapter=adapter, max_steps=1)
 
     result = await runtime.invoke("hello", user_id=1, history=[])

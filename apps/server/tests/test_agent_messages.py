@@ -25,7 +25,6 @@ from anima_server.services.agent.messages import (
 from anima_server.services.agent.runtime_types import ToolCall
 from anima_server.services.agent.state import StoredMessage
 
-
 # --------------------------------------------------------------------------- #
 # Message constructors
 # --------------------------------------------------------------------------- #
@@ -142,9 +141,7 @@ def test_build_conversation_messages_structure() -> None:
         StoredMessage(role="user", content="first"),
         StoredMessage(role="assistant", content="reply"),
     ]
-    messages = build_conversation_messages(
-        history, "second", system_prompt="Be nice."
-    )
+    messages = build_conversation_messages(history, "second", system_prompt="Be nice.")
     assert len(messages) == 4
     assert isinstance(messages[0], SystemMessage)
     assert messages[0].content == "Be nice."
@@ -155,9 +152,7 @@ def test_build_conversation_messages_structure() -> None:
 
 
 def test_build_conversation_messages_empty_history() -> None:
-    messages = build_conversation_messages(
-        [], "hello", system_prompt="prompt"
-    )
+    messages = build_conversation_messages([], "hello", system_prompt="prompt")
     assert len(messages) == 2
     assert isinstance(messages[0], SystemMessage)
     assert isinstance(messages[1], HumanMessage)
@@ -180,9 +175,7 @@ def test_build_conversation_messages_prunes_stale_tool_rule_violations() -> None
         ),
     ]
 
-    messages = build_conversation_messages(
-        history, "second", system_prompt="Be nice."
-    )
+    messages = build_conversation_messages(history, "second", system_prompt="Be nice.")
 
     assert len(messages) == 4
     assert isinstance(messages[1], HumanMessage)

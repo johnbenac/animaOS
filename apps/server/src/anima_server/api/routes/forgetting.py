@@ -1,4 +1,5 @@
 """API routes for intentional forgetting — F7."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status

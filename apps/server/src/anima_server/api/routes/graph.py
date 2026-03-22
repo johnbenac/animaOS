@@ -1,4 +1,5 @@
 """Knowledge Graph API routes."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -27,13 +28,13 @@ async def get_graph_overview(
     """Get knowledge graph statistics."""
     require_unlocked_user(request, user_id)
 
-    entity_count = db.scalar(
-        select(func.count(KGEntity.id)).where(KGEntity.user_id == user_id)
-    ) or 0
+    entity_count = (
+        db.scalar(select(func.count(KGEntity.id)).where(KGEntity.user_id == user_id)) or 0
+    )
 
-    relation_count = db.scalar(
-        select(func.count(KGRelation.id)).where(KGRelation.user_id == user_id)
-    ) or 0
+    relation_count = (
+        db.scalar(select(func.count(KGRelation.id)).where(KGRelation.user_id == user_id)) or 0
+    )
 
     # Get entity type distribution
     type_counts = {}
@@ -99,13 +100,10 @@ async def list_entities(
     if search:
         normalized = normalize_entity_name(search)
         query = query.where(
-            KGEntity.name_normalized.contains(normalized)
-            | KGEntity.name.ilike(f"%{search}%")
+            KGEntity.name_normalized.contains(normalized) | KGEntity.name.ilike(f"%{search}%")
         )
 
-    total = db.scalar(
-        select(func.count(KGEntity.id)).where(KGEntity.user_id == user_id)
-    ) or 0
+    total = db.scalar(select(func.count(KGEntity.id)).where(KGEntity.user_id == user_id)) or 0
 
     entities = list(
         db.scalars(
@@ -121,7 +119,9 @@ async def list_entities(
                 "name": e.name,
                 "normalized": e.name_normalized,
                 "type": e.entity_type,
-                "description": df(user_id, e.description, table="kg_entities", field="description") if e.description else None,
+                "description": df(user_id, e.description, table="kg_entities", field="description")
+                if e.description
+                else None,
                 "mentions": e.mentions,
                 "createdAt": e.created_at,
                 "updatedAt": e.updated_at,
@@ -183,7 +183,9 @@ async def get_entity(
         "name": entity.name,
         "normalized": entity.name_normalized,
         "type": entity.entity_type,
-        "description": df(user_id, entity.description, table="kg_entities", field="description") if entity.description else None,
+        "description": df(user_id, entity.description, table="kg_entities", field="description")
+        if entity.description
+        else None,
         "mentions": entity.mentions,
         "createdAt": entity.created_at,
         "updatedAt": entity.updated_at,
@@ -194,8 +196,12 @@ async def get_entity(
                 "mentions": r.mentions,
                 "target": {
                     "id": r.destination_id,
-                    "name": entity_cache.get(r.destination_id, type("obj", (), {"name": "?"})()).name,
-                    "type": entity_cache.get(r.destination_id, type("obj", (), {"entity_type": "unknown"})()).entity_type,
+                    "name": entity_cache.get(
+                        r.destination_id, type("obj", (), {"name": "?"})()
+                    ).name,
+                    "type": entity_cache.get(
+                        r.destination_id, type("obj", (), {"entity_type": "unknown"})()
+                    ).entity_type,
                 },
             }
             for r in outgoing
@@ -208,7 +214,9 @@ async def get_entity(
                 "source": {
                     "id": r.source_id,
                     "name": entity_cache.get(r.source_id, type("obj", (), {"name": "?"})()).name,
-                    "type": entity_cache.get(r.source_id, type("obj", (), {"entity_type": "unknown"})()).entity_type,
+                    "type": entity_cache.get(
+                        r.source_id, type("obj", (), {"entity_type": "unknown"})()
+                    ).entity_type,
                 },
             }
             for r in incoming
@@ -260,12 +268,18 @@ async def list_relations(
                 "source": {
                     "id": r.source_id,
                     "name": entity_cache.get(r.source_id, type("obj", (), {"name": "?"})()).name,
-                    "type": entity_cache.get(r.source_id, type("obj", (), {"entity_type": "unknown"})()).entity_type,
+                    "type": entity_cache.get(
+                        r.source_id, type("obj", (), {"entity_type": "unknown"})()
+                    ).entity_type,
                 },
                 "target": {
                     "id": r.destination_id,
-                    "name": entity_cache.get(r.destination_id, type("obj", (), {"name": "?"})()).name,
-                    "type": entity_cache.get(r.destination_id, type("obj", (), {"entity_type": "unknown"})()).entity_type,
+                    "name": entity_cache.get(
+                        r.destination_id, type("obj", (), {"name": "?"})()
+                    ).name,
+                    "type": entity_cache.get(
+                        r.destination_id, type("obj", (), {"entity_type": "unknown"})()
+                    ).entity_type,
                 },
             }
             for r in relations
@@ -291,8 +305,7 @@ async def search_graph_endpoint(
         db.scalars(
             select(KGEntity).where(
                 KGEntity.user_id == user_id,
-                KGEntity.name_normalized.contains(normalized)
-                | KGEntity.name.ilike(f"%{q}%"),
+                KGEntity.name_normalized.contains(normalized) | KGEntity.name.ilike(f"%{q}%"),
             )
         ).all()
     )

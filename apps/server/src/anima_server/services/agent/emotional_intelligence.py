@@ -11,25 +11,37 @@ This module provides:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import EmotionalSignal
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_EMOTIONS = frozenset({
-    "frustrated", "excited", "anxious", "calm",
-    "stressed", "relieved", "curious", "disappointed",
-})
+PRIMARY_EMOTIONS = frozenset(
+    {
+        "frustrated",
+        "excited",
+        "anxious",
+        "calm",
+        "stressed",
+        "relieved",
+        "curious",
+        "disappointed",
+    }
+)
 
-SECONDARY_EMOTIONS = frozenset({
-    "vulnerable", "proud", "overwhelmed", "playful",
-})
+SECONDARY_EMOTIONS = frozenset(
+    {
+        "vulnerable",
+        "proud",
+        "overwhelmed",
+        "playful",
+    }
+)
 
 ALL_EMOTIONS = PRIMARY_EMOTIONS | SECONDARY_EMOTIONS
 
@@ -175,17 +187,12 @@ def synthesize_emotional_context(
     # Determine dominant emotion
     emotion_counts: dict[str, float] = {}
     for s in signals[:5]:
-        emotion_counts[s.emotion] = emotion_counts.get(
-            s.emotion, 0) + s.confidence
+        emotion_counts[s.emotion] = emotion_counts.get(s.emotion, 0) + s.confidence
 
-    dominant = max(
-        emotion_counts, key=emotion_counts.get) if emotion_counts else "calm"
+    dominant = max(emotion_counts, key=emotion_counts.get) if emotion_counts else "calm"
 
     # Check trajectory
-    if len(signals) >= 2:
-        recent_trajectory = signals[0].trajectory
-    else:
-        recent_trajectory = "stable"
+    recent_trajectory = signals[0].trajectory if len(signals) >= 2 else "stable"
 
     header = f"Dominant recent emotion: {dominant}"
     if recent_trajectory != "stable":
@@ -200,13 +207,18 @@ def _trim_signal_buffer(
     user_id: int,
 ) -> None:
     """Remove oldest signals beyond the buffer size limit."""
-    from sqlalchemy import func as sa_func, delete as sa_delete
+    from sqlalchemy import delete as sa_delete
+    from sqlalchemy import func as sa_func
 
     max_size = settings.agent_emotional_signal_buffer_size
-    total = db.scalar(
-        select(sa_func.count()).select_from(EmotionalSignal).where(
-            EmotionalSignal.user_id == user_id)
-    ) or 0
+    total = (
+        db.scalar(
+            select(sa_func.count())
+            .select_from(EmotionalSignal)
+            .where(EmotionalSignal.user_id == user_id)
+        )
+        or 0
+    )
     if total <= max_size:
         return
 

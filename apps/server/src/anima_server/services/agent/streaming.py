@@ -5,8 +5,8 @@ from dataclasses import dataclass
 
 from anima_server.services.agent.runtime_types import (
     MessageSnapshot,
-    StepTiming,
     StepExecutionResult,
+    StepTiming,
     StepTrace,
     ToolCall,
     ToolExecutionResult,
@@ -139,8 +139,7 @@ def build_tool_call_event(step_index: int, tool_call: ToolCall) -> AgentStreamEv
     if tool_call.raw_arguments is not None:
         # Redact ``thinking`` from raw JSON to avoid leaking private
         # reasoning on malformed tool call responses.
-        data["rawArguments"] = _redact_injected_kwargs_from_raw(
-            tool_call.raw_arguments)
+        data["rawArguments"] = _redact_injected_kwargs_from_raw(tool_call.raw_arguments)
     return AgentStreamEvent(
         event="tool_call",
         data=data,
@@ -263,9 +262,7 @@ def build_stream_events(
 
     if result.response:
         for start in range(0, len(result.response), max(1, chunk_size)):
-            yield build_chunk_event(
-                result.response[start: start + max(1, chunk_size)]
-            )
+            yield build_chunk_event(result.response[start : start + max(1, chunk_size)])
 
     usage = summarize_usage(result)
     if usage is not None:
@@ -336,6 +333,7 @@ def _redact_injected_kwargs_from_raw(raw: str) -> str:
     regex for malformed JSON.
     """
     import json as _json
+
     try:
         parsed = _json.loads(raw)
         if isinstance(parsed, dict):
@@ -350,6 +348,7 @@ def _redact_injected_kwargs_from_raw(raw: str) -> str:
         pass
     # Regex fallback for unparseable JSON — strip string values only.
     import re as _re
+
     result = raw
     for key in _INJECTED_KWARG_KEYS:
         result = _re.sub(

@@ -11,19 +11,18 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from anima_server.api.deps.unlock import require_unlocked_session
-from anima_server.api.deps.unlock import read_unlock_token
 from anima_server.api.deps.db_mode import require_sqlite_mode
+from anima_server.api.deps.unlock import read_unlock_token, require_unlocked_session
 from anima_server.db import get_db
+from anima_server.models import User
+from anima_server.services.auth import verify_password
 from anima_server.services.crypto import (
     ENCRYPTED_TEXT_PREFIX,
     ENCRYPTED_TEXT_PREFIX_AAD,
     decrypt_text_with_dek,
 )
-from anima_server.services.auth import verify_password
 from anima_server.services.data_crypto import resolve_domain
 from anima_server.services.sessions import UnlockSession, unlock_session_store
-from anima_server.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +46,7 @@ _AAD_OVERRIDES: dict[tuple[str, str], tuple[str, str]] = {
 def _validate_table(insp: Any, table_name: str) -> None:
     """Raise 404 when *table_name* does not exist."""
     if table_name not in insp.get_table_names():
-        raise HTTPException(
-            status_code=404, detail=f"Table '{table_name}' not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
 
 
 def _pk_columns(insp: Any, table_name: str) -> list[str]:
@@ -184,8 +181,9 @@ def _try_decrypt_cell(
 ) -> str:
     """Try to decrypt a single cell with multiple DEKs and AAD variants."""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     # Try each DEK with AAD first, then without
     for dek in deks:
         if aad is not None:
@@ -198,18 +196,18 @@ def _try_decrypt_cell(
             return decrypt_text_with_dek(val, dek)
         except Exception:
             pass
-    
+
     # Last resort: if we have AAD, try common variations
     if aad is not None:
         # Try with different AAD formats (legacy compatibility)
         aad_str = aad.decode("utf-8")
         parts = aad_str.split(":")
         if len(parts) == 3:
-            table, user_id, field = parts
+            table, _user_id, field = parts
             # Try without user_id in AAD
             alt_aads = [
-                f"{table}::{field}".encode("utf-8"),
-                f"{table}:{field}".encode("utf-8"),
+                f"{table}::{field}".encode(),
+                f"{table}:{field}".encode(),
                 field.encode("utf-8"),
             ]
             for alt_aad in alt_aads:
@@ -220,7 +218,7 @@ def _try_decrypt_cell(
                         return result
                     except Exception:
                         pass
-    
+
     logger.debug(f"Failed to decrypt value with {len(deks)} DEKs")
     return val
 
@@ -232,8 +230,9 @@ def _decrypt_rows(
 ) -> list[dict[str, Any]]:
     """Best-effort decrypt every encrypted cell in *rows*."""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     if not session.deks:
         logger.warning(f"No DEKs in session for user {session.user_id}")
         return rows
@@ -248,9 +247,11 @@ def _decrypt_rows(
     for d, dek in session.deks.items():
         if d != domain:
             all_deks.append(dek)
-    
-    logger.info(f"Decrypting {len(rows)} rows from {table_name} with domain={domain}, deks={[d for d in session.deks.keys()]}")
-    
+
+    logger.info(
+        f"Decrypting {len(rows)} rows from {table_name} with domain={domain}, deks={[d for d in session.deks]}"
+    )
+
     if not all_deks:
         return rows
 
@@ -260,9 +261,10 @@ def _decrypt_rows(
         for col, val in row.items():
             if _is_encrypted(val):
                 aad_table, aad_field = _AAD_OVERRIDES.get(
-                    (table_name, col), (table_name, col),
+                    (table_name, col),
+                    (table_name, col),
                 )
-                aad = f"{aad_table}:{user_id}:{aad_field}".encode("utf-8")
+                aad = f"{aad_table}:{user_id}:{aad_field}".encode()
                 new_row[col] = _try_decrypt_cell(val, all_deks, aad)
             else:
                 new_row[col] = val
@@ -289,9 +291,10 @@ def _decrypt_rows_multi_domain(
             if _is_encrypted(val):
                 if table_name:
                     aad_table, aad_field = _AAD_OVERRIDES.get(
-                        (table_name, col), (table_name, col),
+                        (table_name, col),
+                        (table_name, col),
                     )
-                    aad = f"{aad_table}:{user_id}:{aad_field}".encode("utf-8")
+                    aad = f"{aad_table}:{user_id}:{aad_field}".encode()
                 else:
                     aad = None
                 new_row[col] = _try_decrypt_cell(val, all_deks, aad)
@@ -384,13 +387,12 @@ def get_table_rows(
 
     columns = [col["name"] for col in insp.get_columns(table_name)]
     pk_cols = _pk_columns(insp, table_name)
-    total = db.execute(
-        text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar() or 0
+    total = db.execute(text(f'SELECT COUNT(*) FROM "{table_name}"')).scalar() or 0
     rows_raw = db.execute(
         text(f'SELECT * FROM "{table_name}" LIMIT :lim OFFSET :off'),
         {"lim": limit, "off": offset},
     ).fetchall()
-    rows = [dict(zip(columns, row)) for row in rows_raw]
+    rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
     rows = _decrypt_rows(rows, session, table_name)
     return {
         "table": table_name,
@@ -411,25 +413,27 @@ def get_table_schema(
     """Get detailed schema information for a table."""
     insp = inspect(db.get_bind())
     _validate_table(insp, table_name)
-    
+
     # Get columns with detailed info
     columns_raw = insp.get_columns(table_name)
     pk_cols = set(_pk_columns(insp, table_name))
-    
+
     columns: list[dict[str, object]] = []
     for col in columns_raw:
-        columns.append({
-            "name": col["name"],
-            "type": str(col["type"]),
-            "nullable": col.get("nullable", True),
-            "default": col.get("default"),
-            "primaryKey": col["name"] in pk_cols,
-        })
-    
+        columns.append(
+            {
+                "name": col["name"],
+                "type": str(col["type"]),
+                "nullable": col.get("nullable", True),
+                "default": col.get("default"),
+                "primaryKey": col["name"] in pk_cols,
+            }
+        )
+
     # Get indexes
     indexes_raw = insp.get_indexes(table_name)
     indexes = [idx["name"] for idx in indexes_raw if idx.get("name")]
-    
+
     return {
         "columns": columns,
         "indexes": indexes,
@@ -451,13 +455,13 @@ def run_query(
     first_word = sql.split()[0].upper() if sql.split() else ""
     if first_word not in ("SELECT", "PRAGMA", "EXPLAIN"):
         raise HTTPException(
-            status_code=400, detail="Only SELECT, PRAGMA, and EXPLAIN queries are allowed")
+            status_code=400, detail="Only SELECT, PRAGMA, and EXPLAIN queries are allowed"
+        )
 
     _validate_query_sql(sql)
     result = _execute_read_only_query(db, sql)
     columns = list(result.keys()) if result.returns_rows else []
-    rows = [dict(zip(columns, row))
-            for row in result.fetchall()] if result.returns_rows else []
+    rows = [dict(zip(columns, row, strict=False)) for row in result.fetchall()] if result.returns_rows else []
 
     # Best-effort extract table name from simple "SELECT ... FROM table" queries
     # so we can reconstruct AAD for decryption.

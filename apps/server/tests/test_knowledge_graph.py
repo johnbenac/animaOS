@@ -1,19 +1,12 @@
 """Tests for knowledge graph — F4."""
+
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Generator
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, patch
-
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from anima_server.db.base import Base
-from anima_server.models import KGEntity, KGRelation, User
+from anima_server.models import User
 from anima_server.services.agent.knowledge_graph import (
     _map_ids_back,
     _map_ids_to_sequential,
@@ -25,6 +18,10 @@ from anima_server.services.agent.knowledge_graph import (
     upsert_entity,
     upsert_relation,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @contextmanager
@@ -96,8 +93,11 @@ class TestUpsertEntity:
         with _db_session() as db:
             user = _create_user(db)
             entity = upsert_entity(
-                db, user_id=user.id, name="Alice",
-                entity_type="person", description="User's sister",
+                db,
+                user_id=user.id,
+                name="Alice",
+                entity_type="person",
+                description="User's sister",
             )
             assert entity.name == "Alice"
             assert entity.name_normalized == "alice"
@@ -123,7 +123,12 @@ class TestUpsertEntity:
         with _db_session() as db:
             user = _create_user(db)
             upsert_entity(db, user_id=user.id, name="Alice", description="Sister")
-            e = upsert_entity(db, user_id=user.id, name="Alice", description="User's older sister, lives in Munich")
+            e = upsert_entity(
+                db,
+                user_id=user.id,
+                name="Alice",
+                description="User's older sister, lives in Munich",
+            )
             assert "Munich" in e.description
 
 
@@ -137,8 +142,10 @@ class TestUpsertRelation:
             upsert_entity(db, user_id=user.id, name="User", entity_type="person")
             upsert_entity(db, user_id=user.id, name="Google", entity_type="organization")
             rel = upsert_relation(
-                db, user_id=user.id,
-                source_name="User", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="User",
+                destination_name="Google",
                 relation_type="works_at",
             )
             assert rel is not None
@@ -151,13 +158,17 @@ class TestUpsertRelation:
             upsert_entity(db, user_id=user.id, name="User", entity_type="person")
             upsert_entity(db, user_id=user.id, name="Google", entity_type="organization")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="User", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="User",
+                destination_name="Google",
                 relation_type="works_at",
             )
             rel2 = upsert_relation(
-                db, user_id=user.id,
-                source_name="User", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="User",
+                destination_name="Google",
                 relation_type="works_at",
             )
             assert rel2 is not None
@@ -168,8 +179,10 @@ class TestUpsertRelation:
             user = _create_user(db)
             upsert_entity(db, user_id=user.id, name="User", entity_type="person")
             rel = upsert_relation(
-                db, user_id=user.id,
-                source_name="User", destination_name="Nonexistent",
+                db,
+                user_id=user.id,
+                source_name="User",
+                destination_name="Nonexistent",
                 relation_type="knows",
             )
             assert rel is None
@@ -185,14 +198,19 @@ class TestSearchGraphDepth1:
             upsert_entity(db, user_id=user.id, name="A", entity_type="person")
             upsert_entity(db, user_id=user.id, name="B", entity_type="person")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             db.flush()
 
             results = search_graph(
-                db, user_id=user.id, entity_names=["A"], max_depth=1,
+                db,
+                user_id=user.id,
+                entity_names=["A"],
+                max_depth=1,
             )
             assert len(results) == 1
             assert results[0]["source"] == "A"
@@ -211,19 +229,26 @@ class TestSearchGraphDepth2:
             upsert_entity(db, user_id=user.id, name="B", entity_type="person")
             upsert_entity(db, user_id=user.id, name="C", entity_type="place")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             upsert_relation(
-                db, user_id=user.id,
-                source_name="B", destination_name="C",
+                db,
+                user_id=user.id,
+                source_name="B",
+                destination_name="C",
                 relation_type="lives_in",
             )
             db.flush()
 
             results = search_graph(
-                db, user_id=user.id, entity_names=["A"], max_depth=2,
+                db,
+                user_id=user.id,
+                entity_names=["A"],
+                max_depth=2,
             )
             # Should find both A->B and B->C
             assert len(results) == 2
@@ -242,15 +267,20 @@ class TestSearchGraphBidirectional:
             upsert_entity(db, user_id=user.id, name="A", entity_type="person")
             upsert_entity(db, user_id=user.id, name="B", entity_type="person")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             db.flush()
 
             # Search from B should find A (reverse direction)
             results = search_graph(
-                db, user_id=user.id, entity_names=["B"], max_depth=1,
+                db,
+                user_id=user.id,
+                entity_names=["B"],
+                max_depth=1,
             )
             assert len(results) == 1
             assert results[0]["source"] == "A"
@@ -263,9 +293,27 @@ class TestSearchGraphBidirectional:
 class TestRerankGraphResults:
     def test_relevant_triples_rank_first(self):
         results = [
-            {"source": "Cat", "relation": "is_a", "destination": "Animal", "source_type": "concept", "destination_type": "concept"},
-            {"source": "Alice", "relation": "works_at", "destination": "Google", "source_type": "person", "destination_type": "organization"},
-            {"source": "Berlin", "relation": "located_in", "destination": "Germany", "source_type": "place", "destination_type": "place"},
+            {
+                "source": "Cat",
+                "relation": "is_a",
+                "destination": "Animal",
+                "source_type": "concept",
+                "destination_type": "concept",
+            },
+            {
+                "source": "Alice",
+                "relation": "works_at",
+                "destination": "Google",
+                "source_type": "person",
+                "destination_type": "organization",
+            },
+            {
+                "source": "Berlin",
+                "relation": "located_in",
+                "destination": "Germany",
+                "source_type": "place",
+                "destination_type": "place",
+            },
         ]
         ranked = rerank_graph_results(results, "where does Alice work", top_n=3)
         # Alice/Google/works_at triple should rank first for work-related query
@@ -275,7 +323,15 @@ class TestRerankGraphResults:
         assert rerank_graph_results([], "test") == []
 
     def test_empty_query(self):
-        results = [{"source": "A", "relation": "knows", "destination": "B", "source_type": "", "destination_type": ""}]
+        results = [
+            {
+                "source": "A",
+                "relation": "knows",
+                "destination": "B",
+                "source_type": "",
+                "destination_type": "",
+            }
+        ]
         ranked = rerank_graph_results(results, "", top_n=5)
         assert len(ranked) == 1
 
@@ -315,14 +371,18 @@ class TestGraphContextForQuery:
             upsert_entity(db, user_id=user.id, name="Alice", entity_type="person")
             upsert_entity(db, user_id=user.id, name="Google", entity_type="organization")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="Alice", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Google",
                 relation_type="works_at",
             )
             db.flush()
 
             lines = graph_context_for_query(
-                db, user_id=user.id, query="tell me about Alice",
+                db,
+                user_id=user.id,
+                query="tell me about Alice",
             )
             assert len(lines) >= 1
             assert "Alice" in lines[0]
@@ -333,7 +393,9 @@ class TestGraphContextForQuery:
         with _db_session() as db:
             user = _create_user(db)
             lines = graph_context_for_query(
-                db, user_id=user.id, query="completely unrelated topic",
+                db,
+                user_id=user.id,
+                query="completely unrelated topic",
             )
             assert lines == []
 
@@ -355,14 +417,35 @@ class TestFullGraphScenario:
             ]:
                 upsert_entity(db, user_id=user.id, name=name, entity_type=etype)
 
-            upsert_relation(db, user_id=user.id, source_name="User", destination_name="Alice", relation_type="sister_of")
-            upsert_relation(db, user_id=user.id, source_name="Alice", destination_name="Bob", relation_type="married_to")
-            upsert_relation(db, user_id=user.id, source_name="Alice", destination_name="Munich", relation_type="lives_in")
+            upsert_relation(
+                db,
+                user_id=user.id,
+                source_name="User",
+                destination_name="Alice",
+                relation_type="sister_of",
+            )
+            upsert_relation(
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Bob",
+                relation_type="married_to",
+            )
+            upsert_relation(
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Munich",
+                relation_type="lives_in",
+            )
             db.flush()
 
             # Depth-2 from User should reach Bob and Munich through Alice
             results = search_graph(
-                db, user_id=user.id, entity_names=["User"], max_depth=2,
+                db,
+                user_id=user.id,
+                entity_names=["User"],
+                max_depth=2,
             )
             names_found = set()
             for r in results:
@@ -384,14 +467,19 @@ class TestMentionCountsInSearchResults:
             upsert_entity(db, user_id=user.id, name="A", entity_type="person")
             upsert_entity(db, user_id=user.id, name="B", entity_type="person")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             db.flush()
 
             results = search_graph(
-                db, user_id=user.id, entity_names=["A"], max_depth=1,
+                db,
+                user_id=user.id,
+                entity_names=["A"],
+                max_depth=1,
             )
             assert len(results) == 1
             assert results[0]["source_mentions"] == 1
@@ -408,19 +496,26 @@ class TestMentionCountsInSearchResults:
             upsert_entity(db, user_id=user.id, name="A", entity_type="person")
             # Upsert relation twice
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             upsert_relation(
-                db, user_id=user.id,
-                source_name="A", destination_name="B",
+                db,
+                user_id=user.id,
+                source_name="A",
+                destination_name="B",
                 relation_type="knows",
             )
             db.flush()
 
             results = search_graph(
-                db, user_id=user.id, entity_names=["A"], max_depth=1,
+                db,
+                user_id=user.id,
+                entity_names=["A"],
+                max_depth=1,
             )
             assert len(results) == 1
             assert results[0]["source_mentions"] == 3  # upserted 3 times
@@ -467,19 +562,34 @@ class TestRerankWithMentionBoost:
         """
         results = [
             {
-                "source": "Alice", "relation": "knows", "destination": "Berlin",
-                "source_type": "person", "destination_type": "place",
-                "source_mentions": 1, "destination_mentions": 1, "relation_mentions": 1,
+                "source": "Alice",
+                "relation": "knows",
+                "destination": "Berlin",
+                "source_type": "person",
+                "destination_type": "place",
+                "source_mentions": 1,
+                "destination_mentions": 1,
+                "relation_mentions": 1,
             },
             {
-                "source": "Alice", "relation": "knows", "destination": "Munich",
-                "source_type": "person", "destination_type": "place",
-                "source_mentions": 10, "destination_mentions": 5, "relation_mentions": 8,
+                "source": "Alice",
+                "relation": "knows",
+                "destination": "Munich",
+                "source_type": "person",
+                "destination_type": "place",
+                "source_mentions": 10,
+                "destination_mentions": 5,
+                "relation_mentions": 8,
             },
             {
-                "source": "Cat", "relation": "is_a", "destination": "Animal",
-                "source_type": "concept", "destination_type": "concept",
-                "source_mentions": 1, "destination_mentions": 1, "relation_mentions": 1,
+                "source": "Cat",
+                "relation": "is_a",
+                "destination": "Animal",
+                "source_type": "concept",
+                "destination_type": "concept",
+                "source_mentions": 1,
+                "destination_mentions": 1,
+                "relation_mentions": 1,
             },
         ]
         ranked = rerank_graph_results(results, "Alice knows", top_n=3)
@@ -492,7 +602,6 @@ class TestRerankWithMentionBoost:
     def test_fallback_mention_ordering_without_bm25(self):
         """When rank_bm25 is unavailable, results should be sorted purely
         by mention boost (higher mentions first)."""
-        import importlib
         import sys
 
         # Temporarily hide rank_bm25
@@ -502,14 +611,24 @@ class TestRerankWithMentionBoost:
             # Force reimport so the try/except picks up the None
             results = [
                 {
-                    "source": "X", "relation": "r", "destination": "Y",
-                    "source_type": "", "destination_type": "",
-                    "source_mentions": 1, "destination_mentions": 1, "relation_mentions": 1,
+                    "source": "X",
+                    "relation": "r",
+                    "destination": "Y",
+                    "source_type": "",
+                    "destination_type": "",
+                    "source_mentions": 1,
+                    "destination_mentions": 1,
+                    "relation_mentions": 1,
                 },
                 {
-                    "source": "A", "relation": "r", "destination": "B",
-                    "source_type": "", "destination_type": "",
-                    "source_mentions": 5, "destination_mentions": 5, "relation_mentions": 5,
+                    "source": "A",
+                    "relation": "r",
+                    "destination": "B",
+                    "source_type": "",
+                    "destination_type": "",
+                    "source_mentions": 5,
+                    "destination_mentions": 5,
+                    "relation_mentions": 5,
                 },
             ]
             ranked = rerank_graph_results(results, "some query", top_n=2)
@@ -532,24 +651,32 @@ class TestGraphContextAnnotation:
             upsert_entity(db, user_id=user.id, name="Google", entity_type="organization")
             # Create the relation 3 times to reach the annotation threshold
             upsert_relation(
-                db, user_id=user.id,
-                source_name="Alice", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Google",
                 relation_type="works_at",
             )
             upsert_relation(
-                db, user_id=user.id,
-                source_name="Alice", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Google",
                 relation_type="works_at",
             )
             upsert_relation(
-                db, user_id=user.id,
-                source_name="Alice", destination_name="Google",
+                db,
+                user_id=user.id,
+                source_name="Alice",
+                destination_name="Google",
                 relation_type="works_at",
             )
             db.flush()
 
             lines = graph_context_for_query(
-                db, user_id=user.id, query="tell me about Alice",
+                db,
+                user_id=user.id,
+                query="tell me about Alice",
             )
             assert len(lines) >= 1
             assert "[mentioned 3x]" in lines[0]
@@ -560,14 +687,18 @@ class TestGraphContextAnnotation:
             upsert_entity(db, user_id=user.id, name="Bob", entity_type="person")
             upsert_entity(db, user_id=user.id, name="Berlin", entity_type="place")
             upsert_relation(
-                db, user_id=user.id,
-                source_name="Bob", destination_name="Berlin",
+                db,
+                user_id=user.id,
+                source_name="Bob",
+                destination_name="Berlin",
                 relation_type="lives_in",
             )
             db.flush()
 
             lines = graph_context_for_query(
-                db, user_id=user.id, query="tell me about Bob",
+                db,
+                user_id=user.id,
+                query="tell me about Bob",
             )
             assert len(lines) >= 1
             assert "[mentioned" not in lines[0]

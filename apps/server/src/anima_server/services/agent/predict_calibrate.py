@@ -8,23 +8,20 @@ genuinely new information.
 Inspired by the Free Energy Principle: learning = prediction error
 minimization.  Extract what surprises you, not what you already know.
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
 
-from anima_server.config import settings
 from anima_server.services.agent.consolidation import (
-    LLMExtractionResult,
     extract_memories_via_llm,
 )
+from anima_server.services.agent.embeddings import hybrid_search
 from anima_server.services.agent.json_utils import (
     parse_json_array as _parse_json_array,
-    parse_json_object as _parse_json_object,
 )
-from anima_server.services.agent.embeddings import hybrid_search
 from anima_server.services.data_crypto import df
 
 logger = logging.getLogger(__name__)
@@ -196,26 +193,17 @@ def apply_quality_gates(
 
 def _fails_persistence(content_lower: str) -> bool:
     """Return True if the content contains temporal markers."""
-    for marker in _TEMPORAL_MARKERS:
-        if marker in content_lower:
-            return True
-    return False
+    return any(marker in content_lower for marker in _TEMPORAL_MARKERS)
 
 
 def _fails_utility(content_lower: str) -> bool:
     """Return True if the content is a low-value conversational observation."""
-    for prefix in _UTILITY_PREFIXES:
-        if content_lower.startswith(prefix):
-            return True
-    return False
+    return any(content_lower.startswith(prefix) for prefix in _UTILITY_PREFIXES)
 
 
 def _fails_independence(content: str) -> bool:
     """Return True if the content depends on conversation context."""
-    for pattern in _CONTEXT_DEPENDENT_PATTERNS:
-        if pattern.search(content):
-            return True
-    return False
+    return any(pattern.search(content) for pattern in _CONTEXT_DEPENDENT_PATTERNS)
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +223,9 @@ async def predict_episode_knowledge(
     from anima_server.services.agent.llm import create_llm
     from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
-    facts_text = "\n".join(f"- {f}" for f in existing_facts) if existing_facts else "(no existing facts)"
+    facts_text = (
+        "\n".join(f"- {f}" for f in existing_facts) if existing_facts else "(no existing facts)"
+    )
 
     prompt = PREDICTION_PROMPT.format(
         existing_facts=facts_text,
@@ -243,12 +233,14 @@ async def predict_episode_knowledge(
     )
 
     llm = create_llm()
-    response = await llm.ainvoke([
-        SystemMessage(
-            content="You predict what information a conversation likely contains based on existing knowledge. Be concise."
-        ),
-        HumanMessage(content=prompt),
-    ])
+    response = await llm.ainvoke(
+        [
+            SystemMessage(
+                content="You predict what information a conversation likely contains based on existing knowledge. Be concise."
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
     content = getattr(response, "content", "")
     if not isinstance(content, str):
         content = str(content)
@@ -276,12 +268,14 @@ async def extract_knowledge_delta(
     )
 
     llm = create_llm()
-    response = await llm.ainvoke([
-        SystemMessage(
-            content="You extract only surprising, contradictory, or corrective information. Respond only with a JSON array."
-        ),
-        HumanMessage(content=prompt),
-    ])
+    response = await llm.ainvoke(
+        [
+            SystemMessage(
+                content="You extract only surprising, contradictory, or corrective information. Respond only with a JSON array."
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
     content = getattr(response, "content", "")
     if not isinstance(content, str):
         content = str(content)
@@ -327,7 +321,7 @@ async def predict_calibrate_extraction(
             limit=20,
         )
         existing_items = search_result.items  # list of (MemoryItem, score)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("hybrid_search failed in predict_calibrate, falling back to cold-start")
         existing_items = []
 
@@ -362,7 +356,7 @@ async def predict_calibrate_extraction(
             assistant_response=assistant_response,
             prediction=prediction,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.warning(
             "predict-calibrate LLM calls failed for user %s, falling back to direct extraction",
             user_id,
@@ -373,11 +367,7 @@ async def predict_calibrate_extraction(
         )
 
     emotion_data = next(
-        (
-            item["detected_emotion"]
-            for item in delta_items
-            if item.get("detected_emotion")
-        ),
+        (item["detected_emotion"] for item in delta_items if item.get("detected_emotion")),
         None,
     )
 
@@ -424,7 +414,9 @@ async def _cold_start_extraction(
         }
         results.append(result)
 
-    emotion_data = extraction.emotion if extraction.emotion and extraction.emotion.get("emotion") else None
+    emotion_data = (
+        extraction.emotion if extraction.emotion and extraction.emotion.get("emotion") else None
+    )
 
     # Attach emotion from the extraction result if present
     if emotion_data and results:

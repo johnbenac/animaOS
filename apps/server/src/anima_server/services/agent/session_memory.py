@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryItem, SessionNote
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
@@ -185,20 +185,26 @@ def render_session_memory_text(notes: list[SessionNote], *, user_id: int = 0) ->
 def _count_active_notes(db: Session, thread_id: int) -> int:
     from sqlalchemy import func
 
-    return db.scalar(
-        select(func.count(SessionNote.id)).where(
-            SessionNote.thread_id == thread_id,
-            SessionNote.is_active.is_(True),
+    return (
+        db.scalar(
+            select(func.count(SessionNote.id)).where(
+                SessionNote.thread_id == thread_id,
+                SessionNote.is_active.is_(True),
+            )
         )
-    ) or 0
+        or 0
+    )
 
 
 def _deactivate_oldest_note(db: Session, thread_id: int) -> None:
     oldest = db.scalar(
-        select(SessionNote).where(
+        select(SessionNote)
+        .where(
             SessionNote.thread_id == thread_id,
             SessionNote.is_active.is_(True),
-        ).order_by(SessionNote.updated_at.asc()).limit(1)
+        )
+        .order_by(SessionNote.updated_at.asc())
+        .limit(1)
     )
     if oldest is not None:
         oldest.is_active = False

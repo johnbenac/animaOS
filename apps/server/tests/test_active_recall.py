@@ -12,36 +12,31 @@ from __future__ import annotations
 import gc
 from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from anima_server.db.base import Base
+from anima_server.models import AgentMessage, AgentThread, MemoryDailyLog, User
+from anima_server.services.agent.compaction import (
+    _build_transcript,
+    compact_thread_context_with_llm,
+    estimate_message_tokens,
+    summarize_with_llm,
+)
+from anima_server.services.agent.conversation_search import (
+    ConversationHit,
+    _parse_date,
+    _text_overlap_score,
+    search_conversation_history,
+)
+from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.state import StoredMessage
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from anima_server.db.base import Base
-from anima_server.models import AgentMessage, AgentThread, MemoryDailyLog, MemoryItem, User
-from anima_server.services.agent.compaction import (
-    CompactionResult,
-    compact_thread_context,
-    compact_thread_context_with_llm,
-    estimate_message_tokens,
-    render_summary_text,
-    summarize_with_llm,
-    _build_transcript,
-)
-from anima_server.services.agent.conversation_search import (
-    ConversationHit,
-    search_conversation_history,
-    _text_overlap_score,
-    _parse_date,
-)
-from anima_server.services.agent.memory_blocks import MemoryBlock
-from anima_server.services.agent.state import StoredMessage
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -86,8 +81,7 @@ def _create_user(db: Session, *, user_id: int = 1) -> User:
 
 
 def _create_thread(db: Session, *, user_id: int = 1, next_seq: int = 1) -> AgentThread:
-    thread = AgentThread(user_id=user_id, status="active",
-                         next_message_sequence=next_seq)
+    thread = AgentThread(user_id=user_id, status="active", next_message_sequence=next_seq)
     db.add(thread)
     db.flush()
     return thread
@@ -151,16 +145,36 @@ class TestSearchConversationHistory:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="I love cooking pasta", sequence_id=1, created_at=now)
-            _add_message(db, thread_id=thread.id, role="assistant",
-                         content="That's great! What kind of pasta?", sequence_id=2, created_at=now)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="Mostly spaghetti and ravioli", sequence_id=3, created_at=now)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="I love cooking pasta",
+                sequence_id=1,
+                created_at=now,
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="That's great! What kind of pasta?",
+                sequence_id=2,
+                created_at=now,
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="Mostly spaghetti and ravioli",
+                sequence_id=3,
+                created_at=now,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="cooking pasta",
+                db,
+                user_id=user.id,
+                query="cooking pasta",
             )
             assert len(hits) >= 1
             assert any("pasta" in h.content.lower() for h in hits)
@@ -171,12 +185,20 @@ class TestSearchConversationHistory:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="Hello!", sequence_id=1, created_at=now)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="Hello!",
+                sequence_id=1,
+                created_at=now,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="",
+                db,
+                user_id=user.id,
+                query="",
                 start_date=now.date().isoformat(),
                 end_date=now.date().isoformat(),
             )
@@ -188,14 +210,29 @@ class TestSearchConversationHistory:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="I work at Google", sequence_id=1, created_at=now)
-            _add_message(db, thread_id=thread.id, role="assistant",
-                         content="Google is a great company!", sequence_id=2, created_at=now)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="I work at Google",
+                sequence_id=1,
+                created_at=now,
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="Google is a great company!",
+                sequence_id=2,
+                created_at=now,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="Google", role_filter="user",
+                db,
+                user_id=user.id,
+                query="Google",
+                role_filter="user",
             )
             assert all(h.role == "user" for h in hits)
 
@@ -205,14 +242,29 @@ class TestSearchConversationHistory:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
-            _add_message(db, thread_id=thread.id, role="tool", content="save_to_memory result",
-                         sequence_id=1, created_at=now, tool_name="save_to_memory")
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="Can you save that?", sequence_id=2, created_at=now)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="tool",
+                content="save_to_memory result",
+                sequence_id=1,
+                created_at=now,
+                tool_name="save_to_memory",
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="Can you save that?",
+                sequence_id=2,
+                created_at=now,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="save",
+                db,
+                user_id=user.id,
+                query="save",
             )
             # Tool messages should never appear
             assert all(h.role != "tool" for h in hits)
@@ -225,16 +277,28 @@ class TestSearchConversationHistory:
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
             _add_message(
-                db, thread_id=thread.id, role="assistant",
-                content="", sequence_id=1, created_at=now,
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="",
+                sequence_id=1,
+                created_at=now,
                 content_json={"tool_calls": [{"name": "save_to_memory"}]},
             )
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="I like sushi", sequence_id=2, created_at=now)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="I like sushi",
+                sequence_id=2,
+                created_at=now,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="sushi",
+                db,
+                user_id=user.id,
+                query="sushi",
             )
             assert len(hits) >= 1
 
@@ -252,7 +316,9 @@ class TestSearchConversationHistory:
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="promoted",
+                db,
+                user_id=user.id,
+                query="promoted",
             )
             assert len(hits) >= 1
             assert any("promoted" in h.content.lower() for h in hits)
@@ -264,14 +330,28 @@ class TestSearchConversationHistory:
             thread = _create_thread(db, user_id=user.id)
             old = datetime(2026, 3, 1, tzinfo=UTC)
             recent = datetime(2026, 3, 15, tzinfo=UTC)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="old message about cats", sequence_id=1, created_at=old)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="recent message about cats", sequence_id=2, created_at=recent)
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="old message about cats",
+                sequence_id=1,
+                created_at=old,
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="recent message about cats",
+                sequence_id=2,
+                created_at=recent,
+            )
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="cats",
+                db,
+                user_id=user.id,
+                query="cats",
                 start_date="2026-03-10",
             )
             assert all("recent" in h.content.lower() for h in hits)
@@ -282,7 +362,9 @@ class TestSearchConversationHistory:
             user = _create_user(db)
             # No messages at all
             hits = await search_conversation_history(
-                db, user_id=user.id, query="nonexistent topic",
+                db,
+                user_id=user.id,
+                query="nonexistent topic",
             )
             assert hits == []
 
@@ -307,9 +389,14 @@ class TestRecallMemoryHybrid:
         mock_result.items = [(mock_item, 0.85)]
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
-            patch("anima_server.services.agent.embeddings.hybrid_search", new_callable=AsyncMock, return_value=mock_result) as mock_hs,
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
+            patch(
+                "anima_server.services.agent.embeddings.hybrid_search",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ) as mock_hs,
         ):
             result = recall_memory("food preferences")
             assert "Thai food" in result
@@ -327,12 +414,16 @@ class TestRecallMemoryHybrid:
         mock_items[0].category = "fact"
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
-            patch("anima_server.services.agent.embeddings.hybrid_search",
-                  side_effect=RuntimeError("Provider down")),
-            patch("anima_server.services.agent.memory_store.get_memory_items",
-                  return_value=mock_items),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
+            patch(
+                "anima_server.services.agent.embeddings.hybrid_search",
+                side_effect=RuntimeError("Provider down"),
+            ),
+            patch(
+                "anima_server.services.agent.memory_store.get_memory_items", return_value=mock_items
+            ),
         ):
             result = recall_memory("peanuts")
             assert "peanuts" in result
@@ -354,10 +445,14 @@ class TestRecallMemoryHybrid:
         mock_result.items = [(fact_item, 0.8), (pref_item, 0.7)]
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
-            patch("anima_server.services.agent.embeddings.hybrid_search",
-                  new_callable=AsyncMock, return_value=mock_result),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
+            patch(
+                "anima_server.services.agent.embeddings.hybrid_search",
+                new_callable=AsyncMock,
+                return_value=mock_result,
+            ),
         ):
             result = recall_memory("Google", category="fact")
             assert "Works at Google" in result
@@ -374,10 +469,12 @@ class TestBuildTranscript:
         with _db_session() as db:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
-            msg1 = _add_message(db, thread_id=thread.id,
-                                role="user", content="Hello!", sequence_id=1)
+            msg1 = _add_message(
+                db, thread_id=thread.id, role="user", content="Hello!", sequence_id=1
+            )
             msg2 = _add_message(
-                db, thread_id=thread.id, role="assistant", content="Hi there!", sequence_id=2)
+                db, thread_id=thread.id, role="assistant", content="Hi there!", sequence_id=2
+            )
             db.commit()
 
             transcript = _build_transcript([msg1, msg2])
@@ -390,8 +487,11 @@ class TestBuildTranscript:
             thread = _create_thread(db, user_id=user.id)
             long_result = "x" * 500
             msg = _add_message(
-                db, thread_id=thread.id, role="tool",
-                content=long_result, sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="tool",
+                content=long_result,
+                sequence_id=1,
                 tool_name="recall_memory",
             )
             db.commit()
@@ -406,8 +506,7 @@ class TestBuildTranscript:
         with _db_session() as db:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
-            msg = _add_message(db, thread_id=thread.id,
-                               role="user", content="", sequence_id=1)
+            msg = _add_message(db, thread_id=thread.id, role="user", content="", sequence_id=1)
             db.commit()
 
             transcript = _build_transcript([msg])
@@ -429,8 +528,9 @@ class TestSummarizeWithLlm:
         with _db_session() as db:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
-            msg = _add_message(db, thread_id=thread.id,
-                               role="user", content="Hello!", sequence_id=1)
+            msg = _add_message(
+                db, thread_id=thread.id, role="user", content="Hello!", sequence_id=1
+            )
             db.commit()
 
             mock_response = MagicMock()
@@ -442,10 +542,14 @@ class TestSummarizeWithLlm:
 
             with (
                 patch("anima_server.config.settings") as mock_settings,
-                patch("anima_server.services.agent.llm.resolve_base_url",
-                      return_value="http://localhost:8000/v1"),
-                patch("anima_server.services.agent.llm.build_provider_headers",
-                      return_value={"Authorization": "Bearer test"}),
+                patch(
+                    "anima_server.services.agent.llm.resolve_base_url",
+                    return_value="http://localhost:8000/v1",
+                ),
+                patch(
+                    "anima_server.services.agent.llm.build_provider_headers",
+                    return_value={"Authorization": "Bearer test"},
+                ),
                 patch("httpx.AsyncClient") as mock_client_cls,
             ):
                 mock_settings.agent_provider = "openrouter"
@@ -467,16 +571,21 @@ class TestSummarizeWithLlm:
         with _db_session() as db:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
-            msg = _add_message(db, thread_id=thread.id,
-                               role="user", content="Hello!", sequence_id=1)
+            msg = _add_message(
+                db, thread_id=thread.id, role="user", content="Hello!", sequence_id=1
+            )
             db.commit()
 
             with (
                 patch("anima_server.config.settings") as mock_settings,
-                patch("anima_server.services.agent.llm.resolve_base_url",
-                      return_value="http://localhost:8000/v1"),
-                patch("anima_server.services.agent.llm.build_provider_headers",
-                      return_value={"Authorization": "Bearer test"}),
+                patch(
+                    "anima_server.services.agent.llm.resolve_base_url",
+                    return_value="http://localhost:8000/v1",
+                ),
+                patch(
+                    "anima_server.services.agent.llm.build_provider_headers",
+                    return_value={"Authorization": "Bearer test"},
+                ),
                 patch("httpx.AsyncClient") as mock_client_cls,
             ):
                 mock_settings.agent_provider = "openrouter"
@@ -486,8 +595,7 @@ class TestSummarizeWithLlm:
                 mock_client = AsyncMock()
                 mock_client.__aenter__ = AsyncMock(return_value=mock_client)
                 mock_client.__aexit__ = AsyncMock(return_value=False)
-                mock_client.post = AsyncMock(
-                    side_effect=RuntimeError("Connection failed"))
+                mock_client.post = AsyncMock(side_effect=RuntimeError("Connection failed"))
                 mock_client_cls.return_value = mock_client
 
                 result = await summarize_with_llm([msg])
@@ -507,14 +615,18 @@ class TestCompactThreadContextWithLlm:
                 role = "user" if i % 2 == 0 else "assistant"
                 content = f"Message number {i} with some content to pad tokens" * 5
                 _add_message(
-                    db, thread_id=thread.id, role=role,
-                    content=content, sequence_id=i + 1,
+                    db,
+                    thread_id=thread.id,
+                    role=role,
+                    content=content,
+                    sequence_id=i + 1,
                 )
             db.commit()
 
             with patch(
                 "anima_server.services.agent.compaction.summarize_with_llm",
-                new_callable=AsyncMock, return_value=None,
+                new_callable=AsyncMock,
+                return_value=None,
             ):
                 result = await compact_thread_context_with_llm(
                     db,
@@ -534,10 +646,8 @@ class TestCompactThreadContextWithLlm:
         with _db_session() as db:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id, next_seq=100)
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="Hi", sequence_id=1)
-            _add_message(db, thread_id=thread.id, role="assistant",
-                         content="Hello", sequence_id=2)
+            _add_message(db, thread_id=thread.id, role="user", content="Hi", sequence_id=1)
+            _add_message(db, thread_id=thread.id, role="assistant", content="Hello", sequence_id=2)
             db.commit()
 
             result = await compact_thread_context_with_llm(
@@ -560,8 +670,11 @@ class TestCompactThreadContextWithLlm:
                 role = "user" if i % 2 == 0 else "assistant"
                 content = f"Message number {i} with padding content " * 5
                 _add_message(
-                    db, thread_id=thread.id, role=role,
-                    content=content, sequence_id=i + 1,
+                    db,
+                    thread_id=thread.id,
+                    role=role,
+                    content=content,
+                    sequence_id=i + 1,
                 )
             db.commit()
 
@@ -581,6 +694,7 @@ class TestCompactThreadContextWithLlm:
             assert result is not None
             # Check that the LLM summary was used
             from sqlalchemy import select
+
             summary_msg = db.scalar(
                 select(AgentMessage).where(
                     AgentMessage.thread_id == thread.id,
@@ -602,14 +716,18 @@ class TestCompactThreadContextWithLlm:
                 role = "user" if i % 2 == 0 else "assistant"
                 content = f"Message {i} " * 20
                 _add_message(
-                    db, thread_id=thread.id, role=role,
-                    content=content, sequence_id=i + 1,
+                    db,
+                    thread_id=thread.id,
+                    role=role,
+                    content=content,
+                    sequence_id=i + 1,
                 )
             db.commit()
 
             with patch(
                 "anima_server.services.agent.compaction.summarize_with_llm",
-                new_callable=AsyncMock, return_value=None,
+                new_callable=AsyncMock,
+                return_value=None,
             ):
                 result = await compact_thread_context_with_llm(
                     db,
@@ -621,6 +739,7 @@ class TestCompactThreadContextWithLlm:
 
             assert result is not None
             from sqlalchemy import select
+
             summary_msg = db.scalar(
                 select(AgentMessage).where(
                     AgentMessage.thread_id == thread.id,
@@ -642,9 +761,7 @@ class TestMemoryPressureWarning:
     def test_no_warning_below_threshold(self):
         from anima_server.services.agent.service import _inject_memory_pressure_warning
 
-        blocks = (
-            MemoryBlock(label="soul", value="short text"),
-        )
+        blocks = (MemoryBlock(label="soul", value="short text"),)
         history: list[StoredMessage] = [
             StoredMessage(role="user", content="Hello"),
         ]
@@ -653,8 +770,7 @@ class TestMemoryPressureWarning:
 
         with patch("anima_server.services.agent.service.settings") as mock_settings:
             mock_settings.agent_max_tokens = 4096
-            result = _inject_memory_pressure_warning(
-                blocks, history, companion)
+            result = _inject_memory_pressure_warning(blocks, history, companion)
 
         # Should be unchanged — no warning injected
         assert len(result) == len(blocks)
@@ -664,9 +780,7 @@ class TestMemoryPressureWarning:
 
         # Create blocks that exceed 80% of 4096 tokens ≈ 3277 tokens ≈ 13108 chars
         large_value = "x" * 14000
-        blocks = (
-            MemoryBlock(label="soul", value=large_value),
-        )
+        blocks = (MemoryBlock(label="soul", value=large_value),)
         history: list[StoredMessage] = [
             StoredMessage(role="user", content="Hello"),
         ]
@@ -675,8 +789,7 @@ class TestMemoryPressureWarning:
 
         with patch("anima_server.services.agent.service.settings") as mock_settings:
             mock_settings.agent_max_tokens = 4096
-            result = _inject_memory_pressure_warning(
-                blocks, history, companion)
+            result = _inject_memory_pressure_warning(blocks, history, companion)
 
         assert len(result) == len(blocks) + 1
         assert result[-1].label == "memory_pressure_warning"
@@ -686,9 +799,7 @@ class TestMemoryPressureWarning:
         from anima_server.services.agent.service import _inject_memory_pressure_warning
 
         large_value = "x" * 14000
-        blocks = (
-            MemoryBlock(label="soul", value=large_value),
-        )
+        blocks = (MemoryBlock(label="soul", value=large_value),)
         history: list[StoredMessage] = [
             StoredMessage(role="user", content="Hello"),
         ]
@@ -699,13 +810,11 @@ class TestMemoryPressureWarning:
             mock_settings.agent_max_tokens = 4096
 
             # First call: warning injected
-            result1 = _inject_memory_pressure_warning(
-                blocks, history, companion)
+            result1 = _inject_memory_pressure_warning(blocks, history, companion)
             assert len(result1) == len(blocks) + 1
 
             # Second call: already alerted, no duplicate
-            result2 = _inject_memory_pressure_warning(
-                blocks, history, companion)
+            result2 = _inject_memory_pressure_warning(blocks, history, companion)
             assert len(result2) == len(blocks)
 
     def test_warning_resets_when_pressure_drops(self):
@@ -714,9 +823,7 @@ class TestMemoryPressureWarning:
         companion = MagicMock()
         companion._memory_pressure_alerted = True  # Was previously alerted
 
-        small_blocks = (
-            MemoryBlock(label="soul", value="short"),
-        )
+        small_blocks = (MemoryBlock(label="soul", value="short"),)
         history: list[StoredMessage] = [
             StoredMessage(role="user", content="Hi"),
         ]
@@ -743,17 +850,22 @@ class TestRecallConversationTool:
 
         mock_hits = [
             ConversationHit(
-                source="message", role="user",
-                content="I love cooking pasta", date="2026-03-15", score=0.9,
+                source="message",
+                role="user",
+                content="I love cooking pasta",
+                date="2026-03-15",
+                score=0.9,
             ),
         ]
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=mock_hits,
+                new_callable=AsyncMock,
+                return_value=mock_hits,
             ),
         ):
             result = recall_conversation("cooking pasta")
@@ -767,11 +879,13 @@ class TestRecallConversationTool:
         mock_ctx.user_id = 1
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=[],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
         ):
             result = recall_conversation("nonexistent")
@@ -784,15 +898,16 @@ class TestRecallConversationTool:
         mock_ctx.user_id = 1
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=[],
+                new_callable=AsyncMock,
+                return_value=[],
             ),
         ):
-            result = recall_conversation(
-                "", start_date="2026-03-01", end_date="2026-03-15")
+            result = recall_conversation("", start_date="2026-03-01", end_date="2026-03-15")
             assert "No conversations found in that date range" in result
 
 
@@ -804,10 +919,12 @@ class TestRecallConversationTool:
 class TestParseDate:
     def test_valid_date(self):
         from datetime import date
+
         assert _parse_date("2026-03-15") == date(2026, 3, 15)
 
     def test_whitespace_trimmed(self):
         from datetime import date
+
         assert _parse_date("  2026-03-15  ") == date(2026, 3, 15)
 
     def test_empty_string(self):
@@ -835,13 +952,19 @@ class TestBuildTranscriptToolCallWrapper:
             thread = _create_thread(db, user_id=user.id)
             # Assistant message with tool_calls AND text content
             msg_wrapper = _add_message(
-                db, thread_id=thread.id, role="assistant",
-                content="I'll save that.", sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="I'll save that.",
+                sequence_id=1,
                 content_json={"tool_calls": [{"name": "save_to_memory"}]},
             )
             msg_user = _add_message(
-                db, thread_id=thread.id, role="user",
-                content="Thanks!", sequence_id=2,
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="Thanks!",
+                sequence_id=2,
             )
             db.commit()
 
@@ -856,8 +979,11 @@ class TestBuildTranscriptToolCallWrapper:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             msg = _add_message(
-                db, thread_id=thread.id, role="assistant",
-                content="", sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="",
+                sequence_id=1,
                 content_json={"tool_calls": [{"name": "recall_memory"}]},
             )
             db.commit()
@@ -871,8 +997,11 @@ class TestBuildTranscriptToolCallWrapper:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             msg = _add_message(
-                db, thread_id=thread.id, role="assistant",
-                content="Hello there!", sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="Hello there!",
+                sequence_id=1,
             )
             db.commit()
 
@@ -889,8 +1018,11 @@ class TestSummarizeWithLlmTranscriptOverride:
             user = _create_user(db)
             thread = _create_thread(db, user_id=user.id)
             msg = _add_message(
-                db, thread_id=thread.id, role="user",
-                content="This should not appear in the prompt", sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="This should not appear in the prompt",
+                sequence_id=1,
             )
             db.commit()
 
@@ -903,10 +1035,14 @@ class TestSummarizeWithLlmTranscriptOverride:
 
             with (
                 patch("anima_server.config.settings") as mock_settings,
-                patch("anima_server.services.agent.llm.resolve_base_url",
-                      return_value="http://localhost:8000/v1"),
-                patch("anima_server.services.agent.llm.build_provider_headers",
-                      return_value={"Authorization": "Bearer test"}),
+                patch(
+                    "anima_server.services.agent.llm.resolve_base_url",
+                    return_value="http://localhost:8000/v1",
+                ),
+                patch(
+                    "anima_server.services.agent.llm.build_provider_headers",
+                    return_value={"Authorization": "Bearer test"},
+                ),
                 patch("httpx.AsyncClient") as mock_client_cls,
             ):
                 mock_settings.agent_provider = "openrouter"
@@ -920,7 +1056,8 @@ class TestSummarizeWithLlmTranscriptOverride:
                 mock_client_cls.return_value = mock_client
 
                 result = await summarize_with_llm(
-                    [msg], transcript_override="Clamped: User said hello",
+                    [msg],
+                    transcript_override="Clamped: User said hello",
                 )
                 assert result == "Summary from clamped."
                 # Verify the override was used in the prompt
@@ -939,11 +1076,13 @@ class TestRecallConversationLimitParsing:
         mock_ctx.user_id = 1
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=[],
+                new_callable=AsyncMock,
+                return_value=[],
             ) as mock_search,
         ):
             recall_conversation("test", limit="99999")
@@ -957,11 +1096,13 @@ class TestRecallConversationLimitParsing:
         mock_ctx.user_id = 1
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=[],
+                new_callable=AsyncMock,
+                return_value=[],
             ) as mock_search,
         ):
             recall_conversation("test", limit="-5")
@@ -974,11 +1115,13 @@ class TestRecallConversationLimitParsing:
         mock_ctx.user_id = 1
 
         with (
-            patch("anima_server.services.agent.tool_context.get_tool_context",
-                  return_value=mock_ctx),
+            patch(
+                "anima_server.services.agent.tool_context.get_tool_context", return_value=mock_ctx
+            ),
             patch(
                 "anima_server.services.agent.conversation_search.search_conversation_history",
-                new_callable=AsyncMock, return_value=[],
+                new_callable=AsyncMock,
+                return_value=[],
             ) as mock_search,
         ):
             recall_conversation("test", limit="not_a_number")
@@ -1001,7 +1144,9 @@ class TestSearchDailyLogsEdgeCases:
             db.commit()
 
             hits = await search_conversation_history(
-                db, user_id=user.id, query="didn't say",
+                db,
+                user_id=user.id,
+                query="didn't say",
             )
             # Should find the assistant response, not crash
             assert any("didn't say" in h.content.lower() for h in hits)
@@ -1014,15 +1159,22 @@ class TestSearchDailyLogsEdgeCases:
             thread = _create_thread(db, user_id=user.id)
             now = datetime(2026, 3, 15, 12, 0, 0, tzinfo=UTC)
             _add_message(
-                db, thread_id=thread.id, role="user",
-                content="boundary test message", sequence_id=1, created_at=now,
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="boundary test message",
+                sequence_id=1,
+                created_at=now,
             )
             db.commit()
 
             # Exact date as both start and end — should be included
             hits = await search_conversation_history(
-                db, user_id=user.id, query="boundary",
-                start_date="2026-03-15", end_date="2026-03-15",
+                db,
+                user_id=user.id,
+                query="boundary",
+                start_date="2026-03-15",
+                end_date="2026-03-15",
             )
             assert len(hits) >= 1
 
@@ -1034,16 +1186,22 @@ class TestSearchDailyLogsEdgeCases:
             thread = _create_thread(db, user_id=user.id)
             now = datetime.now(UTC)
             _add_message(
-                db, thread_id=thread.id, role="user",
-                content="test message for invalid date", sequence_id=1,
+                db,
+                thread_id=thread.id,
+                role="user",
+                content="test message for invalid date",
+                sequence_id=1,
                 created_at=now,
             )
             db.commit()
 
             # Should not raise — invalid dates treated as no filter
             hits = await search_conversation_history(
-                db, user_id=user.id, query="invalid date",
-                start_date="not-a-date", end_date="also-not-a-date",
+                db,
+                user_id=user.id,
+                query="invalid date",
+                start_date="not-a-date",
+                end_date="also-not-a-date",
             )
             assert len(hits) >= 1
 
@@ -1071,7 +1229,9 @@ class TestMemoryPressureWarningEdgeCases:
         with patch("anima_server.services.agent.service.settings") as mock_settings:
             mock_settings.agent_max_tokens = 4096
             result = _inject_memory_pressure_warning(
-                (MemoryBlock(label="soul", value="short"),), [], companion,
+                (MemoryBlock(label="soul", value="short"),),
+                [],
+                companion,
             )
 
         assert len(result) == 1  # no warning added
@@ -1086,16 +1246,29 @@ class TestLevel2CascadeFix:
             thread = _create_thread(db, user_id=user.id, next_seq=100)
 
             # Create messages with long tool content that would be clamped
-            _add_message(db, thread_id=thread.id, role="user",
-                         content="Tell me about X " * 20, sequence_id=1)
-            _add_message(db, thread_id=thread.id, role="tool",
-                         content="T" * 500, sequence_id=2, tool_name="recall_memory")
-            _add_message(db, thread_id=thread.id, role="assistant",
-                         content="Here is what I found " * 20, sequence_id=3)
+            _add_message(
+                db, thread_id=thread.id, role="user", content="Tell me about X " * 20, sequence_id=1
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="tool",
+                content="T" * 500,
+                sequence_id=2,
+                tool_name="recall_memory",
+            )
+            _add_message(
+                db,
+                thread_id=thread.id,
+                role="assistant",
+                content="Here is what I found " * 20,
+                sequence_id=3,
+            )
             for i in range(4, 20):
                 role = "user" if i % 2 == 0 else "assistant"
-                _add_message(db, thread_id=thread.id, role=role,
-                             content=f"Msg {i} " * 20, sequence_id=i)
+                _add_message(
+                    db, thread_id=thread.id, role=role, content=f"Msg {i} " * 20, sequence_id=i
+                )
             db.commit()
 
             call_count = 0

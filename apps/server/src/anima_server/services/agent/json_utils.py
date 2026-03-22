@@ -22,13 +22,13 @@ def parse_json_object(text: str) -> dict[str, Any] | None:
     end = text.rfind("}")
     if start == -1 or end == -1 or end <= start:
         return None
-    candidate = text[start:end + 1]
+    candidate = text[start : end + 1]
     try:
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
         try:
             parsed = repair_json(candidate, return_objects=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
     if not isinstance(parsed, dict):
         return None
@@ -45,13 +45,13 @@ def parse_json_array(text: str) -> list[Any]:
     end = text.rfind("]")
     if start == -1 or end == -1 or end <= start:
         return []
-    candidate = text[start:end + 1]
+    candidate = text[start : end + 1]
     try:
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
         try:
             parsed = repair_json(candidate, return_objects=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return []
     if not isinstance(parsed, list):
         return []

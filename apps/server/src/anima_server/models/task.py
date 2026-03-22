@@ -21,7 +21,8 @@ class Task(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     due_date: Mapped[str | None] = mapped_column(String(10), nullable=True)  # YYYY-MM-DD
     completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True,
+        DateTime(timezone=True),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -153,15 +153,17 @@ class ThinkingExtractor:
 
         # Check if this non-whitespace char matches the expected position
         # in the key pattern.
-        if self._match_pos < len(self._key_pattern):
-            if ch == self._key_pattern[self._match_pos]:
-                self._match_pos += 1
-                # Full match?
-                if self._match_pos == len(self._key_pattern):
-                    # Matched "thinking": — wait for opening quote.
-                    self._phase = _Phase.AWAIT_VALUE_QUOTE
-                    self._scan_buf = ""
-                return ("", "")
+        if (
+            self._match_pos < len(self._key_pattern)
+            and ch == self._key_pattern[self._match_pos]
+        ):
+            self._match_pos += 1
+            # Full match?
+            if self._match_pos == len(self._key_pattern):
+                # Matched "thinking": — wait for opening quote.
+                self._phase = _Phase.AWAIT_VALUE_QUOTE
+                self._scan_buf = ""
+            return ("", "")
 
         # Mismatch — not the thinking key.  Flush scan_buf to main_json.
         self._phase = _Phase.PASSTHROUGH

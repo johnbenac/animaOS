@@ -47,22 +47,28 @@ async def get_memory_overview(
 
     counts: dict[str, int] = {}
     for category in ("fact", "preference", "goal", "relationship"):
-        count = db.scalar(
-            select(func.count(MemoryItem.id)).where(
-                MemoryItem.user_id == user_id,
-                MemoryItem.category == category,
-                MemoryItem.superseded_by.is_(None),
+        count = (
+            db.scalar(
+                select(func.count(MemoryItem.id)).where(
+                    MemoryItem.user_id == user_id,
+                    MemoryItem.category == category,
+                    MemoryItem.superseded_by.is_(None),
+                )
             )
-        ) or 0
+            or 0
+        )
         counts[category] = count
 
     total = sum(counts.values())
     focus = get_current_focus(db, user_id=user_id)
-    episode_count = db.scalar(
-        select(func.count(MemoryEpisode.id)).where(
-            MemoryEpisode.user_id == user_id,
+    episode_count = (
+        db.scalar(
+            select(func.count(MemoryEpisode.id)).where(
+                MemoryEpisode.user_id == user_id,
+            )
         )
-    ) or 0
+        or 0
+    )
 
     return MemoryOverview(
         totalItems=total,
@@ -158,7 +164,9 @@ async def update_memory_item(
             db,
             old_item_id=existing.id,
             new_content=payload.content,
-            importance=payload.importance if payload.importance is not None else existing.importance,
+            importance=payload.importance
+            if payload.importance is not None
+            else existing.importance,
         )
         db.commit()
         return _item_to_response(new_item, user_id)
@@ -201,7 +209,7 @@ def _remove_from_vector_store(user_id: int, item_id: int, db: Session) -> None:
         from anima_server.services.agent.vector_store import delete_memory
 
         delete_memory(user_id, item_id=item_id, db=db)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -222,7 +230,10 @@ async def search_memory(
             from anima_server.services.agent.embeddings import semantic_search
 
             matches = await semantic_search(
-                db, user_id=user_id, query=q, limit=20,
+                db,
+                user_id=user_id,
+                query=q,
+                limit=20,
             )
             semantic_results = [
                 {
@@ -235,7 +246,7 @@ async def search_memory(
                 }
                 for item, score in matches
             ]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     # Keyword search — decrypt content in Python since encrypted fields
@@ -252,7 +263,8 @@ async def search_memory(
         ).all()
     )
     items = [
-        item for item in all_items
+        item
+        for item in all_items
         if q_lower in df(user_id, item.content, table="memory_items", field="content").lower()
     ][:20]
 
@@ -264,7 +276,8 @@ async def search_memory(
         ).all()
     )
     episodes = [
-        ep for ep in all_episodes
+        ep
+        for ep in all_episodes
         if q_lower in df(user_id, ep.summary, table="memory_episodes", field="summary").lower()
     ][:10]
 
@@ -326,7 +339,10 @@ async def list_episodes(
             summary=df(user_id, ep.summary, table="memory_episodes", field="summary"),
             topics=ep.topics_json or [],
             emotionalArc=df(
-                user_id, ep.emotional_arc, table="memory_episodes", field="emotional_arc") if ep.emotional_arc else None,
+                user_id, ep.emotional_arc, table="memory_episodes", field="emotional_arc"
+            )
+            if ep.emotional_arc
+            else None,
             significanceScore=ep.significance_score,
             turnCount=ep.turn_count,
             createdAt=ep.created_at,

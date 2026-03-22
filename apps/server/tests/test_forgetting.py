@@ -1,13 +1,10 @@
 """Tests for F7 — Intentional Forgetting."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import (
     ForgetAuditLog,
@@ -27,6 +24,9 @@ from anima_server.services.agent.forgetting import (
     redact_derived_references,
     suppress_memory,
 )
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()
@@ -38,7 +38,9 @@ def db() -> Session:  # type: ignore[misc]
     )
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(
-        bind=engine, autoflush=False, expire_on_commit=False,
+        bind=engine,
+        autoflush=False,
+        expire_on_commit=False,
     )
     session = SessionLocal()
     try:
@@ -163,10 +165,13 @@ class TestSupersededDecay:
         last_accessed = datetime(2026, 3, 18, 12, 0, 0, tzinfo=UTC)  # 24h ago
 
         normal_decay = compute_time_decay(
-            last_accessed, now, tau_hours=RECENCY_TAU_HOURS,
+            last_accessed,
+            now,
+            tau_hours=RECENCY_TAU_HOURS,
         )
         superseded_decay = compute_time_decay(
-            last_accessed, now,
+            last_accessed,
+            now,
             tau_hours=RECENCY_TAU_HOURS / SUPERSEDED_DECAY_MULTIPLIER,
         )
 
@@ -187,12 +192,16 @@ class TestSuppressMemory:
 
         ep = _make_episode(db, summary="Discussed that user Works as a teacher")
         block = _make_self_model_block(
-            db, section="growth_log",
+            db,
+            section="growth_log",
             content="User revealed: Works as a teacher",
         )
 
         result = suppress_memory(
-            db, memory_id=item.id, superseded_by=new_item.id, user_id=1,
+            db,
+            memory_id=item.id,
+            superseded_by=new_item.id,
+            user_id=1,
         )
 
         assert result.derived_refs_flagged == 2
@@ -210,7 +219,10 @@ class TestSuppressMemory:
         item.superseded_by = new_item.id
 
         result = suppress_memory(
-            db, memory_id=item.id, superseded_by=new_item.id, user_id=1,
+            db,
+            memory_id=item.id,
+            superseded_by=new_item.id,
+            user_id=1,
         )
 
         log = db.get(ForgetAuditLog, result.audit_log_id)
@@ -221,7 +233,10 @@ class TestSuppressMemory:
 
     def test_suppress_nonexistent_memory(self, db: Session):
         result = suppress_memory(
-            db, memory_id=9999, superseded_by=1, user_id=1,
+            db,
+            memory_id=9999,
+            superseded_by=1,
+            user_id=1,
         )
         assert result.derived_refs_flagged == 0
 
@@ -289,7 +304,8 @@ class TestForgetMemory:
         item = _make_item(db, content="Likes hiking")
         _make_episode(db, summary="User mentioned they Likes hiking in the park")
         _make_self_model_block(
-            db, section="growth_log",
+            db,
+            section="growth_log",
             content="Learned: Likes hiking",
         )
 
@@ -390,32 +406,40 @@ class TestFindDerivedReferences:
         ep = _make_episode(db, summary="The user works as a teacher and enjoys it")
 
         refs = find_derived_references(
-            db, memory_content="works as a teacher", user_id=1,
+            db,
+            memory_content="works as a teacher",
+            user_id=1,
         )
         assert len(refs.episodes) == 1
         assert refs.episodes[0].record_id == ep.id
 
     def test_finds_in_self_model_blocks(self, db: Session):
         block = _make_self_model_block(
-            db, section="growth_log",
+            db,
+            section="growth_log",
             content="User revealed they enjoy painting",
         )
 
         refs = find_derived_references(
-            db, memory_content="enjoy painting", user_id=1,
+            db,
+            memory_content="enjoy painting",
+            user_id=1,
         )
         assert len(refs.self_model_blocks) == 1
         assert refs.self_model_blocks[0].record_id == block.id
         assert refs.self_model_blocks[0].section == "growth_log"
 
     def test_finds_in_intentions(self, db: Session):
-        block = _make_self_model_block(
-            db, section="intentions",
+        _make_self_model_block(
+            db,
+            section="intentions",
             content="Remind user about their goal to learn guitar",
         )
 
         refs = find_derived_references(
-            db, memory_content="learn guitar", user_id=1,
+            db,
+            memory_content="learn guitar",
+            user_id=1,
         )
         assert len(refs.self_model_blocks) == 1
         assert refs.self_model_blocks[0].section == "intentions"
@@ -424,13 +448,17 @@ class TestFindDerivedReferences:
         _make_episode(db, summary="unrelated content")
 
         refs = find_derived_references(
-            db, memory_content="something else", user_id=1,
+            db,
+            memory_content="something else",
+            user_id=1,
         )
         assert refs.total == 0
 
     def test_short_content_skipped(self, db: Session):
         refs = find_derived_references(
-            db, memory_content="ab", user_id=1,
+            db,
+            memory_content="ab",
+            user_id=1,
         )
         assert refs.total == 0
 
@@ -449,11 +477,15 @@ class TestRedactDerivedReferences:
         )
         # Build proper refs
         refs = find_derived_references(
-            db, memory_content="some content", user_id=1,
+            db,
+            memory_content="some content",
+            user_id=1,
         )
 
         count = redact_derived_references(
-            db, refs=refs, strategy="flag_for_regeneration",
+            db,
+            refs=refs,
+            strategy="flag_for_regeneration",
         )
 
         assert count == 2
@@ -464,15 +496,20 @@ class TestRedactDerivedReferences:
 
     def test_immediate_redact(self, db: Session):
         block = _make_self_model_block(
-            db, content="sensitive data here",
+            db,
+            content="sensitive data here",
         )
 
         refs = find_derived_references(
-            db, memory_content="sensitive data here", user_id=1,
+            db,
+            memory_content="sensitive data here",
+            user_id=1,
         )
 
         redact_derived_references(
-            db, refs=refs, strategy="immediate_redact",
+            db,
+            refs=refs,
+            strategy="immediate_redact",
         )
 
         db.refresh(block)

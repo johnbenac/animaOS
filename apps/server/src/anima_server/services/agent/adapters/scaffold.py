@@ -18,11 +18,7 @@ class ScaffoldAdapter(BaseLLMAdapter):
         return None
 
     async def invoke(self, request: LLMRequest) -> StepExecutionResult:
-        human_turns = [
-            message
-            for message in request.messages
-            if is_user_message(message)
-        ]
+        human_turns = [message for message in request.messages if is_user_message(message)]
         user_message = message_content(human_turns[-1]) if human_turns else ""
         turn_number = (
             request.conversation_turn_count

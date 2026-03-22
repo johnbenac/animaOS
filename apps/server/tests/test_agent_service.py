@@ -4,14 +4,10 @@ from collections.abc import Generator
 from contextlib import contextmanager
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import AgentMessage, AgentRun, AgentStep, AgentThread, User
 from anima_server.services.agent import list_agent_history, run_agent
+from anima_server.services.agent import service as agent_service
 from anima_server.services.agent.compaction import compact_thread_context
 from anima_server.services.agent.persistence import create_run, persist_agent_result
 from anima_server.services.agent.prompt_budget import (
@@ -20,14 +16,17 @@ from anima_server.services.agent.prompt_budget import (
 )
 from anima_server.services.agent.runtime_types import StepTrace
 from anima_server.services.agent.state import AgentResult
-from anima_server.services.agent import service as agent_service
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 class FailingThenReplyRunner:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def invoke(self, *args, **kwargs) -> AgentResult:  # noqa: ANN002, ANN003
+    async def invoke(self, *args, **kwargs) -> AgentResult:
         del args, kwargs
         self.calls += 1
         if self.calls == 1:
@@ -53,14 +52,16 @@ class RecordingRunner:
         **kwargs: object,
     ) -> AgentResult:
         del kwargs
-        self.requests.append({
-            "user_message": user_message,
-            "user_id": user_id,
-            "history": [
-                (message.role, message.content, message.tool_name, message.tool_call_id)
-                for message in history
-            ],
-        })
+        self.requests.append(
+            {
+                "user_message": user_message,
+                "user_id": user_id,
+                "history": [
+                    (message.role, message.content, message.tool_name, message.tool_call_id)
+                    for message in history
+                ],
+            }
+        )
         reply = f"Reply to: {user_message}"
         return AgentResult(
             response=reply,
@@ -119,11 +120,7 @@ async def test_failed_turn_retry_keeps_history_clean(
 
         thread = session.query(AgentThread).one()
         runs = session.query(AgentRun).order_by(AgentRun.id).all()
-        messages = (
-            session.query(AgentMessage)
-            .order_by(AgentMessage.sequence_id)
-            .all()
-        )
+        messages = session.query(AgentMessage).order_by(AgentMessage.sequence_id).all()
         history = list_agent_history(user.id, session, limit=10)
 
     assert result.response == "Recovered reply."

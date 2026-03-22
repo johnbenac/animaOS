@@ -10,7 +10,6 @@ import asyncio
 from collections import OrderedDict
 from threading import Lock
 
-
 _MAX_USER_LOCKS = 256
 
 _global_lock = Lock()

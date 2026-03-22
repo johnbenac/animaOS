@@ -10,6 +10,7 @@ Formula:
 
 Where recency_decay = exp(-hours_since_last_access / tau).
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,10 +24,10 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 # ── Configurable weights ────────────────────────────────────────────
-HEAT_ALPHA: float = 1.0        # access count weight
-HEAT_BETA: float = 1.0         # interaction depth weight
-HEAT_GAMMA: float = 1.0        # recency decay weight
-HEAT_DELTA: float = 0.5        # importance weight
+HEAT_ALPHA: float = 1.0  # access count weight
+HEAT_BETA: float = 1.0  # interaction depth weight
+HEAT_GAMMA: float = 1.0  # recency decay weight
+HEAT_DELTA: float = 0.5  # importance weight
 RECENCY_TAU_HOURS: float = 24.0  # time-decay constant
 
 
@@ -70,12 +71,8 @@ def compute_heat(
     if recency_ref is not None:
         recency = compute_time_decay(recency_ref, ref_now, tau_hours=tau_hours)
     return (
-        (HEAT_ALPHA * access_count
-         + HEAT_BETA * interaction_depth
-         + HEAT_DELTA * importance)
-        * recency
-        + HEAT_GAMMA * recency
-    )
+        HEAT_ALPHA * access_count + HEAT_BETA * interaction_depth + HEAT_DELTA * importance
+    ) * recency + HEAT_GAMMA * recency
 
 
 def update_heat_on_access(

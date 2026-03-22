@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from anima_server.services.agent.adapters.openai_compatible import OpenAICompatibleAdapter
 from anima_server.services.agent.openai_compatible_client import OpenAICompatibleStreamChunk
 from anima_server.services.agent.runtime_types import LLMRequest, StepStreamEvent, ToolCall
@@ -38,7 +37,7 @@ class FakeChatClient:
         *,
         tool_choice: str | None = None,
         **_: object,
-    ) -> "FakeChatClient":
+    ) -> FakeChatClient:
         self.bound_tools = list(tools)
         self.tool_choice = tool_choice
         return self

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from anima_server.services.agent.runtime_types import StepTrace, ToolCall, ToolExecutionResult, UsageStats
+from anima_server.services.agent.runtime_types import (
+    StepTrace,
+    ToolCall,
+    ToolExecutionResult,
+    UsageStats,
+)
 from anima_server.services.agent.state import AgentResult
 from anima_server.services.agent.streaming import build_stream_events
 

@@ -1,4 +1,5 @@
 """Tests for heat-based memory scoring — F2."""
+
 from __future__ import annotations
 
 import math
@@ -6,9 +7,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from anima_server.services.agent.heat_scoring import (
-    HEAT_ALPHA,
-    HEAT_BETA,
-    HEAT_GAMMA,
     HEAT_DELTA,
     RECENCY_TAU_HOURS,
     compute_heat,

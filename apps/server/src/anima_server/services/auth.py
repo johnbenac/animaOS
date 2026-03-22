@@ -8,7 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anima_server.models import User, UserKey
-from anima_server.services.crypto import WrappedDekRecord, create_wrapped_deks_for_domains, unwrap_dek, wrap_dek
+from anima_server.services.crypto import (
+    WrappedDekRecord,
+    create_wrapped_deks_for_domains,
+    unwrap_dek,
+    wrap_dek,
+)
 from anima_server.services.data_crypto import ALL_DOMAINS
 
 PASSWORD_HASHER = PasswordHasher(
@@ -57,9 +62,7 @@ def get_user_by_id(db: Session, user_id: int) -> User | None:
 
 
 def get_user_keys_by_user_id(db: Session, user_id: int) -> list[UserKey]:
-    return list(db.scalars(
-        select(UserKey).where(UserKey.user_id == user_id)
-    ).all())
+    return list(db.scalars(select(UserKey).where(UserKey.user_id == user_id)).all())
 
 
 def build_user_key(user_id: int, domain: str, wrapped_dek: WrappedDekRecord) -> UserKey:
@@ -108,34 +111,40 @@ def create_user(
         db.add(build_user_key(user.id, domain, wrapped_dek))
 
     # Seed structured agent profile for fast lookup
-    db.add(AgentProfile(
-        user_id=user.id,
-        agent_name=agent_name,
-        creator_name=display_name,
-        relationship=relationship,
-    ))
+    db.add(
+        AgentProfile(
+            user_id=user.id,
+            agent_name=agent_name,
+            creator_name=display_name,
+            relationship=relationship,
+        )
+    )
 
     # Seed immutable origin block
-    soul_content = render_origin_block(
-        agent_name=agent_name, creator_name=display_name)
-    db.add(SelfModelBlock(
-        user_id=user.id,
-        section="soul",
-        content=soul_content,
-        version=1,
-        updated_by="system",
-    ))
+    soul_content = render_origin_block(agent_name=agent_name, creator_name=display_name)
+    db.add(
+        SelfModelBlock(
+            user_id=user.id,
+            section="soul",
+            content=soul_content,
+            version=1,
+            updated_by="system",
+        )
+    )
 
     # Seed persona from template (mutable — evolves through reflection)
     from anima_server.config import settings
+
     persona_content = render_persona_seed(settings.agent_persona_template)
-    db.add(SelfModelBlock(
-        user_id=user.id,
-        section="persona",
-        content=persona_content,
-        version=1,
-        updated_by="system",
-    ))
+    db.add(
+        SelfModelBlock(
+            user_id=user.id,
+            section="persona",
+            content=persona_content,
+            version=1,
+            updated_by="system",
+        )
+    )
 
     # Seed human block — the agent's living understanding of the user.
     # Starts with basic facts; the agent enriches this through conversation
@@ -143,23 +152,27 @@ def create_user(
     human_lines = [f"Name: {display_name}"]
     if relationship.strip():
         human_lines.append(f"Relationship: {relationship}")
-    db.add(SelfModelBlock(
-        user_id=user.id,
-        section="human",
-        content="\n".join(human_lines),
-        version=1,
-        updated_by="system",
-    ))
+    db.add(
+        SelfModelBlock(
+            user_id=user.id,
+            section="human",
+            content="\n".join(human_lines),
+            version=1,
+            updated_by="system",
+        )
+    )
 
     # Seed user directive if provided
     if user_directive.strip():
-        db.add(SelfModelBlock(
-            user_id=user.id,
-            section="user_directive",
-            content=user_directive.strip(),
-            version=1,
-            updated_by="system",
-        ))
+        db.add(
+            SelfModelBlock(
+                user_id=user.id,
+                section="user_directive",
+                content=user_directive.strip(),
+                version=1,
+                updated_by="system",
+            )
+        )
 
     db.commit()
     db.refresh(user)
@@ -235,7 +248,7 @@ def _unwrap_all_domain_keys(
         try:
             dek = unwrap_dek(password, to_wrapped_dek_record(uk), uk.user_id, uk.domain)
             deks[uk.domain] = dek
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise ValueError("Invalid credentials") from exc
     return deks
 

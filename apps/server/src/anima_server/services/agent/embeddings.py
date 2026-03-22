@@ -27,13 +27,13 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryItem
-from anima_server.services.data_crypto import df
 from anima_server.services.agent.llm import (
     LLMConfigError,
     build_provider_headers,
     resolve_base_url,
     validate_provider_configuration,
 )
+from anima_server.services.data_crypto import df
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,8 @@ async def generate_embedding(text: str) -> list[float] | None:
         except Exception:
             logger.debug(
                 "OpenRouter has no embeddings endpoint and local Ollama "
-                "fallback unavailable — skipping embedding generation")
+                "fallback unavailable — skipping embedding generation"
+            )
             return None
         if result is not None:
             key = _cache_key(text)
@@ -156,8 +157,7 @@ async def generate_embedding(text: str) -> list[float] | None:
     try:
         validate_provider_configuration(provider)
     except LLMConfigError as exc:
-        logger.debug(
-            "Skipping embedding generation for provider %s: %s", provider, exc)
+        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
         return None
 
     try:
@@ -167,12 +167,10 @@ async def generate_embedding(text: str) -> list[float] | None:
             # openrouter, vllm — all OpenAI-compatible
             result = await _embed_openai_compatible(text)
     except LLMConfigError as exc:
-        logger.debug(
-            "Skipping embedding generation for provider %s: %s", provider, exc)
+        logger.debug("Skipping embedding generation for provider %s: %s", provider, exc)
         return None
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Embedding generation failed for provider %s", provider)
+    except Exception:
+        logger.exception("Embedding generation failed for provider %s", provider)
         return None
 
     if result is not None:
@@ -233,7 +231,7 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     if len(a) != len(b) or not a:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=False))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))
     if norm_a == 0.0 or norm_b == 0.0:
@@ -269,8 +267,7 @@ async def semantic_search(
             db=db,
         )
         if vs_results:
-            item_ids = [
-                r["id"] for r in vs_results if r["similarity"] >= similarity_threshold]
+            item_ids = [r["id"] for r in vs_results if r["similarity"] >= similarity_threshold]
             if item_ids:
                 items_by_id = {
                     item.id: item
@@ -288,7 +285,7 @@ async def semantic_search(
                             continue
                         results.append((item, r["similarity"]))
                 return results[:limit]
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Vector store search failed, falling back to brute-force")
 
     # Fallback: brute-force over embedding_json column
@@ -329,8 +326,7 @@ async def embed_memory_item(
     and the MemoryVector table (for fast search).
     Returns True if successful.
     """
-    plaintext = df(item.user_id, item.content,
-                   table="memory_items", field="content")
+    plaintext = df(item.user_id, item.content, table="memory_items", field="content")
     embedding = await generate_embedding(plaintext)
     if embedding is None:
         return False
@@ -350,7 +346,7 @@ async def embed_memory_item(
             importance=item.importance,
             db=db,
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Failed to upsert item %d into vector store", item.id)
 
     return True
@@ -365,7 +361,8 @@ async def backfill_embeddings(
     """Generate embeddings for all items that don't have one yet. Returns count of items embedded."""
     items = list(
         db.scalars(
-            select(MemoryItem).where(
+            select(MemoryItem)
+            .where(
                 MemoryItem.user_id == user_id,
                 MemoryItem.superseded_by.is_(None),
                 MemoryItem.embedding_json.is_(None),
@@ -377,12 +374,13 @@ async def backfill_embeddings(
     if not items:
         return 0
 
-    plaintexts = [df(user_id, item.content, table="memory_items",
-                     field="content") for item in items]
+    plaintexts = [
+        df(user_id, item.content, table="memory_items", field="content") for item in items
+    ]
     embeddings = await generate_embeddings_batch(plaintexts)
 
     count = 0
-    for item, plaintext, embedding in zip(items, plaintexts, embeddings):
+    for item, plaintext, embedding in zip(items, plaintexts, embeddings, strict=False):
         if embedding is None:
             continue
         item.embedding_json = embedding
@@ -398,7 +396,7 @@ async def backfill_embeddings(
                 importance=item.importance,
                 db=db,
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Failed to upsert item %d into vector store", item.id)
         count += 1
 
@@ -430,15 +428,19 @@ def sync_to_vector_store(
         from anima_server.services.agent.vector_store import rebuild_user_index
 
         index_data = [
-            (item.id, df(user_id, item.content, table="memory_items", field="content"),
-             item.embedding_json, item.category, item.importance)
+            (
+                item.id,
+                df(user_id, item.content, table="memory_items", field="content"),
+                item.embedding_json,
+                item.category,
+                item.importance,
+            )
             for item in items
             if isinstance(item.embedding_json, list) and item.embedding_json
         ]
         return rebuild_user_index(user_id, index_data, db=db)
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "Failed to sync embeddings to vector store for user %d", user_id)
+    except Exception:
+        logger.exception("Failed to sync embeddings to vector store for user %d", user_id)
         return 0
 
 
@@ -468,6 +470,7 @@ _RRF_K = 60  # Standard RRF constant (Cormack et al. 2009)
 @dataclass(frozen=True, slots=True)
 class HybridSearchResult:
     """Return type for hybrid_search — carries items + the query embedding for reuse."""
+
     items: list[tuple[MemoryItem, float]]
     query_embedding: list[float] | None
 
@@ -507,8 +510,7 @@ def _bm25_rerank(
     # Decrypt and tokenize each document
     doc_tokens: list[list[str]] = []
     for item, _score in results:
-        plaintext = df(item.user_id, item.content,
-                       table="memory_items", field="content")
+        plaintext = df(item.user_id, item.content, table="memory_items", field="content")
         doc_tokens.append(_tokenize(plaintext))
 
     n = len(doc_tokens)
@@ -541,18 +543,12 @@ def _bm25_rerank(
 
     # Normalise BM25 scores to [0, 1]
     max_bm25 = max(bm25_scores) if bm25_scores else 0.0
-    if max_bm25 > 0.0:
-        norm_bm25 = [s / max_bm25 for s in bm25_scores]
-    else:
-        norm_bm25 = [0.0] * n
+    norm_bm25 = [s / max_bm25 for s in bm25_scores] if max_bm25 > 0.0 else [0.0] * n
 
     # Normalise RRF scores to [0, 1]
     rrf_scores = [score for _, score in results]
     max_rrf = max(rrf_scores) if rrf_scores else 0.0
-    if max_rrf > 0.0:
-        norm_rrf = [s / max_rrf for s in rrf_scores]
-    else:
-        norm_rrf = [0.0] * n
+    norm_rrf = [s / max_rrf for s in rrf_scores] if max_rrf > 0.0 else [0.0] * n
 
     # Combine and re-sort
     combined: list[tuple[MemoryItem, float]] = []
@@ -575,12 +571,10 @@ def _reciprocal_rank_fusion(
     scores: dict[int, float] = {}
 
     for rank, (item_id, _sim) in enumerate(semantic_ranked):
-        scores[item_id] = scores.get(
-            item_id, 0.0) + semantic_weight / (_RRF_K + rank + 1)
+        scores[item_id] = scores.get(item_id, 0.0) + semantic_weight / (_RRF_K + rank + 1)
 
     for rank, (item_id, _sim) in enumerate(keyword_ranked):
-        scores[item_id] = scores.get(
-            item_id, 0.0) + keyword_weight / (_RRF_K + rank + 1)
+        scores[item_id] = scores.get(item_id, 0.0) + keyword_weight / (_RRF_K + rank + 1)
 
     merged = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     return merged
@@ -611,9 +605,13 @@ async def hybrid_search(
     allowed_ids: set[int] | None = None
     if tags:
         from anima_server.services.agent.memory_store import get_items_by_tags
+
         tag_items = get_items_by_tags(
-            db, user_id=user_id, tags=tags,
-            match_mode=tag_match_mode, limit=500,
+            db,
+            user_id=user_id,
+            tags=tags,
+            match_mode=tag_match_mode,
+            limit=500,
         )
         allowed_ids = {item.id for item in tag_items}
         if not allowed_ids:
@@ -628,7 +626,9 @@ async def hybrid_search(
     if query_embedding is not None:
         try:
             sem_results = search_similar(
-                user_id, query_embedding=query_embedding, limit=limit,
+                user_id,
+                query_embedding=query_embedding,
+                limit=limit,
                 db=db,
             )
             semantic_ranked = [
@@ -636,7 +636,7 @@ async def hybrid_search(
                 for r in sem_results
                 if r["similarity"] >= similarity_threshold
             ]
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Semantic search failed in hybrid_search")
 
         # Brute-force fallback if vector store is empty
@@ -666,9 +666,8 @@ async def hybrid_search(
     try:
         from anima_server.services.agent.bm25_index import bm25_search
 
-        keyword_ranked = bm25_search(
-            user_id, query=query, limit=limit, db=db)
-    except Exception:  # noqa: BLE001
+        keyword_ranked = bm25_search(user_id, query=query, limit=limit, db=db)
+    except Exception:
         logger.debug("BM25 keyword search failed in hybrid_search")
 
     # --- RRF merge ---
@@ -684,12 +683,14 @@ async def hybrid_search(
 
     # Resolve item_ids to MemoryItem objects
     merged_ids = [item_id for item_id, _ in merged[:limit]]
-    items_by_id = {
-        item.id: item
-        for item in db.scalars(
-            select(MemoryItem).where(MemoryItem.id.in_(merged_ids))
-        ).all()
-    } if merged_ids else {}
+    items_by_id = (
+        {
+            item.id: item
+            for item in db.scalars(select(MemoryItem).where(MemoryItem.id.in_(merged_ids))).all()
+        }
+        if merged_ids
+        else {}
+    )
 
     from anima_server.services.agent.forgetting import HEAT_VISIBILITY_FLOOR
 
@@ -808,7 +809,7 @@ async def _batch_embed_openai_compatible(
     batch_size = min(max_batch_size, len(texts))
 
     for start in range(0, len(texts), batch_size):
-        chunk = texts[start: start + batch_size]
+        chunk = texts[start : start + batch_size]
         current_batch = len(chunk)
 
         while current_batch >= 1:
@@ -816,7 +817,7 @@ async def _batch_embed_openai_compatible(
                 async with httpx.AsyncClient(timeout=60.0) as client:
                     # Process sub-chunks if we had to halve
                     for sub_start in range(0, len(chunk), current_batch):
-                        sub_chunk = chunk[sub_start: sub_start + current_batch]
+                        sub_chunk = chunk[sub_start : sub_start + current_batch]
                         resp = await client.post(
                             f"{base_url}/embeddings",
                             headers=headers,
@@ -832,7 +833,7 @@ async def _batch_embed_openai_compatible(
                             if abs_idx < len(results) and isinstance(embedding, list):
                                 results[abs_idx] = embedding
                 break  # Success — move to next batch
-            except Exception:  # noqa: BLE001
+            except Exception:
                 current_batch = current_batch // 2
                 if current_batch < 1:
                     logger.warning(
@@ -841,7 +842,8 @@ async def _batch_embed_openai_compatible(
                     )
                     break
                 logger.debug(
-                    "Batch embedding failed, retrying with batch_size=%d", current_batch,
+                    "Batch embedding failed, retrying with batch_size=%d",
+                    current_batch,
                 )
 
     return results

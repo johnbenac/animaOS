@@ -71,20 +71,22 @@ def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
 
     focus = get_current_focus(db, user_id=user_id)
 
-    open_task_count = db.scalar(
-        select(func.count(Task.id)).where(
-            Task.user_id == user_id, Task.done.is_(False)
-        )
-    ) or 0
+    open_task_count = (
+        db.scalar(select(func.count(Task.id)).where(Task.user_id == user_id, Task.done.is_(False)))
+        or 0
+    )
 
-    overdue_count = db.scalar(
-        select(func.count(Task.id)).where(
-            Task.user_id == user_id,
-            Task.done.is_(False),
-            Task.due_date.isnot(None),
-            Task.due_date < func.date("now"),
+    overdue_count = (
+        db.scalar(
+            select(func.count(Task.id)).where(
+                Task.user_id == user_id,
+                Task.done.is_(False),
+                Task.due_date.isnot(None),
+                Task.due_date < func.date("now"),
+            )
         )
-    ) or 0
+        or 0
+    )
 
     # Upcoming deadlines (next 3 days)
     upcoming = list(
@@ -102,9 +104,7 @@ def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
     )
 
     # Days since last chat
-    thread = db.scalar(
-        select(AgentThread).where(AgentThread.user_id == user_id)
-    )
+    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
     days_since: int | None = None
     if thread and thread.last_message_at:
         last = thread.last_message_at
@@ -134,7 +134,7 @@ def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
         wm_block = get_self_model_block(db, user_id=user_id, section="working_memory")
         if wm_block:
             working_memory_summary = render_self_model_section(wm_block, budget=300)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     # Emotional context
@@ -145,7 +145,7 @@ def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
         )
 
         emotional_summary = synthesize_emotional_context(db, user_id=user_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     # Recent episodes
@@ -159,9 +159,10 @@ def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
         ).all()
         if episodes:
             recent_episode_summary = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}" for ep in reversed(episodes)
+                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}"
+                for ep in reversed(episodes)
             )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
     return GreetingContext(
@@ -187,9 +188,7 @@ def build_static_greeting(ctx: GreetingContext) -> str:
         s = "s" if ctx.open_task_count != 1 else ""
         parts.append(f"You have {ctx.open_task_count} open task{s}.")
     if ctx.days_since_last_chat is not None and ctx.days_since_last_chat > 1:
-        parts.append(
-            f"It's been {ctx.days_since_last_chat} days since we last chatted."
-        )
+        parts.append(f"It's been {ctx.days_since_last_chat} days since we last chatted.")
     if not parts:
         parts.append("Welcome back! How can I help you today?")
     return " ".join(parts)
@@ -226,7 +225,9 @@ async def generate_greeting(
         elif ctx.days_since_last_chat == 1:
             time_context = "You last chatted yesterday."
         else:
-            time_context = f"It's been {ctx.days_since_last_chat} days since your last conversation."
+            time_context = (
+                f"It's been {ctx.days_since_last_chat} days since your last conversation."
+            )
     else:
         time_context = "This is your first time meeting."
 
@@ -236,9 +237,7 @@ async def generate_greeting(
         s = "s" if ctx.overdue_task_count != 1 else ""
         task_parts.append(f"{ctx.overdue_task_count} overdue task{s}")
     if ctx.upcoming_deadlines:
-        task_parts.append(
-            f"Upcoming deadlines: {', '.join(ctx.upcoming_deadlines[:3])}"
-        )
+        task_parts.append(f"Upcoming deadlines: {', '.join(ctx.upcoming_deadlines[:3])}")
     if ctx.open_task_count:
         task_parts.append(f"{ctx.open_task_count} open tasks total")
     if ctx.current_focus:
@@ -250,13 +249,9 @@ async def generate_greeting(
     if ctx.inner_state_summary:
         memory_context_parts.append(f"Your inner state:\n{ctx.inner_state_summary}")
     if ctx.working_memory_summary:
-        memory_context_parts.append(
-            f"Things you're holding in mind:\n{ctx.working_memory_summary}"
-        )
+        memory_context_parts.append(f"Things you're holding in mind:\n{ctx.working_memory_summary}")
     if ctx.recent_episode_summary:
-        memory_context_parts.append(
-            f"Recent conversations:\n{ctx.recent_episode_summary}"
-        )
+        memory_context_parts.append(f"Recent conversations:\n{ctx.recent_episode_summary}")
     memory_context = "\n\n".join(memory_context_parts)
 
     prompt = GREETING_PROMPT.format(
@@ -272,18 +267,20 @@ async def generate_greeting(
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
-        response = await llm.ainvoke([
-            SystemMessage(
-                content="You are Anima, generating a brief greeting. Respond with ONLY the greeting text."
-            ),
-            HumanMessage(content=prompt),
-        ])
+        response = await llm.ainvoke(
+            [
+                SystemMessage(
+                    content="You are Anima, generating a brief greeting. Respond with ONLY the greeting text."
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
         content = getattr(response, "content", "")
         if isinstance(content, str) and content.strip():
             result.message = content.strip()
             result.llm_generated = True
             return result
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         logger.debug("LLM greeting generation failed: %s", e)
         result.errors.append(str(e))
 

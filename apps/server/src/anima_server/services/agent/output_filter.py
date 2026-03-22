@@ -82,17 +82,15 @@ class ReasoningTraceFilter:
                     break
 
                 # Capture the reasoning content before the close tag.
-                self._reasoning_parts.append(
-                    self._buffer[: close_match.start()])
-                self._buffer = self._buffer[close_match.end():]
+                self._reasoning_parts.append(self._buffer[: close_match.start()])
+                self._buffer = self._buffer[close_match.end() :]
                 self._inside_reasoning = False
                 continue
 
             open_match = _OPEN_RE.search(self._buffer)
             if open_match is not None:
-                visible_parts.append(self._consume_visible(
-                    self._buffer[: open_match.start()]))
-                self._buffer = self._buffer[open_match.end():]
+                visible_parts.append(self._consume_visible(self._buffer[: open_match.start()]))
+                self._buffer = self._buffer[open_match.end() :]
                 self._inside_reasoning = True
                 continue
 
@@ -103,9 +101,7 @@ class ReasoningTraceFilter:
                 pending = _longest_partial_suffix(self._buffer, _OPEN_MARKERS)
                 visible_length = len(self._buffer) - len(pending)
                 if visible_length > 0:
-                    visible_parts.append(
-                        self._consume_visible(self._buffer[:visible_length])
-                    )
+                    visible_parts.append(self._consume_visible(self._buffer[:visible_length]))
                     self._buffer = self._buffer[visible_length:]
                 break
 

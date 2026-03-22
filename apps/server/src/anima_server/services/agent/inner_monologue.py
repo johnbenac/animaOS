@@ -9,7 +9,6 @@ Two modes:
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -190,45 +189,65 @@ async def run_quick_reflection(
     try:
         with factory() as db:
             from anima_server.services.agent.self_model import (
+                ensure_self_model_exists,
                 get_self_model_block,
                 set_self_model_block,
-                ensure_self_model_exists,
             )
 
             ensure_self_model_exists(db, user_id=user_id)
 
-            inner_state_block = get_self_model_block(
-                db, user_id=user_id, section="inner_state")
+            inner_state_block = get_self_model_block(db, user_id=user_id, section="inner_state")
             working_memory_block = get_self_model_block(
-                db, user_id=user_id, section="working_memory")
+                db, user_id=user_id, section="working_memory"
+            )
 
             # Get recent episodes
             from sqlalchemy import select
+
             episodes = db.scalars(
                 select(MemoryEpisode)
                 .where(MemoryEpisode.user_id == user_id)
                 .order_by(MemoryEpisode.created_at.desc())
                 .limit(3)
             ).all()
-            episodes_text = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}" for ep in reversed(episodes)
-            ) or "No recent episodes."
+            episodes_text = (
+                "\n".join(
+                    f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}"
+                    for ep in reversed(episodes)
+                )
+                or "No recent episodes."
+            )
 
             # If no conversation text, try to get from recent messages
             if not conversation_text:
-                conversation_text = await _get_recent_conversation(db, user_id=user_id, thread_id=thread_id)
+                conversation_text = await _get_recent_conversation(
+                    db, user_id=user_id, thread_id=thread_id
+                )
 
             if not conversation_text.strip():
                 return result
 
             prompt = QUICK_REFLECTION_PROMPT.format(
-                inner_state=df(user_id, inner_state_block.content, table="self_model_blocks", field="content") if inner_state_block else "No state yet.",
-                working_memory=df(user_id, working_memory_block.content, table="self_model_blocks", field="content") if working_memory_block else "Empty.",
+                inner_state=df(
+                    user_id, inner_state_block.content, table="self_model_blocks", field="content"
+                )
+                if inner_state_block
+                else "No state yet.",
+                working_memory=df(
+                    user_id,
+                    working_memory_block.content,
+                    table="self_model_blocks",
+                    field="content",
+                )
+                if working_memory_block
+                else "Empty.",
                 recent_episodes=episodes_text,
                 conversation=conversation_text[:3000],
             )
 
-            response = await _call_llm(prompt, system="You are SAM's inner reflection. Respond only with JSON.")
+            response = await _call_llm(
+                prompt, system="You are SAM's inner reflection. Respond only with JSON."
+            )
             if not response:
                 return result
 
@@ -242,15 +261,27 @@ async def run_quick_reflection(
             if inner_state_data and isinstance(inner_state_data, dict):
                 new_inner_state = _format_inner_state(inner_state_data)
                 set_self_model_block(
-                    db, user_id=user_id, section="inner_state",
-                    content=new_inner_state, updated_by="post_turn",
+                    db,
+                    user_id=user_id,
+                    section="inner_state",
+                    content=new_inner_state,
+                    updated_by="post_turn",
                 )
                 result.inner_state_updated = True
 
             # Update working memory
             wm_updates = parsed.get("working_memory_updates", [])
             if wm_updates and isinstance(wm_updates, list):
-                current_wm = df(user_id, working_memory_block.content, table="self_model_blocks", field="content") if working_memory_block else "# Things I'm Holding in Mind\n"
+                current_wm = (
+                    df(
+                        user_id,
+                        working_memory_block.content,
+                        table="self_model_blocks",
+                        field="content",
+                    )
+                    if working_memory_block
+                    else "# Things I'm Holding in Mind\n"
+                )
                 for update in wm_updates:
                     if not isinstance(update, dict):
                         continue
@@ -267,15 +298,21 @@ async def run_quick_reflection(
                     elif action == "remove":
                         current_wm = current_wm.replace(f"- {item}", "")
                 set_self_model_block(
-                    db, user_id=user_id, section="working_memory",
-                    content=current_wm.strip(), updated_by="post_turn",
+                    db,
+                    user_id=user_id,
+                    section="working_memory",
+                    content=current_wm.strip(),
+                    updated_by="post_turn",
                 )
                 result.working_memory_updated = True
 
             # Record emotional signal
             emotional = parsed.get("emotional_read", {})
             if isinstance(emotional, dict) and emotional.get("emotion"):
-                from anima_server.services.agent.emotional_intelligence import record_emotional_signal
+                from anima_server.services.agent.emotional_intelligence import (
+                    record_emotional_signal,
+                )
+
                 signal = record_emotional_signal(
                     db,
                     user_id=user_id,
@@ -315,67 +352,121 @@ async def run_deep_monologue(
 
     try:
         with factory() as db:
+            from anima_server.services.agent.emotional_intelligence import get_recent_signals
+            from anima_server.services.agent.memory_store import get_memory_items
             from anima_server.services.agent.self_model import (
-                get_all_self_model_blocks,
-                set_self_model_block,
                 append_growth_log_entry,
                 ensure_self_model_exists,
+                get_all_self_model_blocks,
+                set_self_model_block,
             )
-            from anima_server.services.agent.memory_store import get_memory_items
-            from anima_server.services.agent.emotional_intelligence import get_recent_signals
 
             ensure_self_model_exists(db, user_id=user_id)
             blocks = get_all_self_model_blocks(db, user_id=user_id)
 
             # Gather context
             from sqlalchemy import select
+
             episodes = db.scalars(
                 select(MemoryEpisode)
                 .where(MemoryEpisode.user_id == user_id)
                 .order_by(MemoryEpisode.created_at.desc())
                 .limit(10)
             ).all()
-            episodes_text = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (topics: {', '.join(ep.topics_json or [])})"
-                for ep in reversed(episodes)
-            ) or "No episodes yet."
+            episodes_text = (
+                "\n".join(
+                    f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (topics: {', '.join(ep.topics_json or [])})"
+                    for ep in reversed(episodes)
+                )
+                or "No episodes yet."
+            )
 
-            facts = get_memory_items(
-                db, user_id=user_id, category="fact", limit=30)
-            facts_text = "\n".join(
-                f"- {df(user_id, f.content, table='memory_items', field='content')}" for f in facts) or "No facts yet."
+            facts = get_memory_items(db, user_id=user_id, category="fact", limit=30)
+            facts_text = (
+                "\n".join(
+                    f"- {df(user_id, f.content, table='memory_items', field='content')}"
+                    for f in facts
+                )
+                or "No facts yet."
+            )
 
             signals = get_recent_signals(db, user_id=user_id, limit=10)
-            signals_text = "\n".join(
-                f"- {s.emotion} (confidence: {s.confidence:.1f}, {s.trajectory})"
-                + (f" — {df(user_id, s.evidence, table='emotional_signals', field='evidence')[:80]}" if s.evidence else "")
-                for s in signals
-            ) or "No emotional signals yet."
+            signals_text = (
+                "\n".join(
+                    f"- {s.emotion} (confidence: {s.confidence:.1f}, {s.trajectory})"
+                    + (
+                        f" — {df(user_id, s.evidence, table='emotional_signals', field='evidence')[:80]}"
+                        if s.evidence
+                        else ""
+                    )
+                    for s in signals
+                )
+                or "No emotional signals yet."
+            )
 
             identity_block = blocks.get("identity")
             identity_version = identity_block.version if identity_block else 1
 
             # Load persona block (living style/approach)
-            from anima_server.models import SelfModelBlock
             from sqlalchemy import select as sa_select
+
+            from anima_server.models import SelfModelBlock
+
             persona_block = db.scalar(
                 sa_select(SelfModelBlock).where(
                     SelfModelBlock.user_id == user_id,
                     SelfModelBlock.section == "persona",
                 )
             )
-            persona_text = df(user_id, persona_block.content, table="self_model_blocks", field="content") if persona_block else "Default persona — not yet customized."
+            persona_text = (
+                df(user_id, persona_block.content, table="self_model_blocks", field="content")
+                if persona_block
+                else "Default persona — not yet customized."
+            )
 
             prompt = DEEP_MONOLOGUE_PROMPT.format(
                 identity_version=identity_version,
-                identity=df(user_id, identity_block.content, table="self_model_blocks", field="content") if identity_block else "Not yet created.",
+                identity=df(
+                    user_id, identity_block.content, table="self_model_blocks", field="content"
+                )
+                if identity_block
+                else "Not yet created.",
                 persona=persona_text[:1000],
-                inner_state=df(user_id, blocks["inner_state"].content, table="self_model_blocks", field="content") if "inner_state" in blocks else "No state.",
-                working_memory=df(user_id, blocks["working_memory"].content, table="self_model_blocks", field="content") if "working_memory" in blocks else "Empty.",
+                inner_state=df(
+                    user_id,
+                    blocks["inner_state"].content,
+                    table="self_model_blocks",
+                    field="content",
+                )
+                if "inner_state" in blocks
+                else "No state.",
+                working_memory=df(
+                    user_id,
+                    blocks["working_memory"].content,
+                    table="self_model_blocks",
+                    field="content",
+                )
+                if "working_memory" in blocks
+                else "Empty.",
                 growth_log=_last_n_entries(
-                    df(user_id, blocks["growth_log"].content, table="self_model_blocks", field="content") if "growth_log" in blocks else "", 5
+                    df(
+                        user_id,
+                        blocks["growth_log"].content,
+                        table="self_model_blocks",
+                        field="content",
+                    )
+                    if "growth_log" in blocks
+                    else "",
+                    5,
                 ),
-                intentions=df(user_id, blocks["intentions"].content, table="self_model_blocks", field="content") if "intentions" in blocks else "None.",
+                intentions=df(
+                    user_id,
+                    blocks["intentions"].content,
+                    table="self_model_blocks",
+                    field="content",
+                )
+                if "intentions" in blocks
+                else "None.",
                 user_facts=facts_text[:2000],
                 recent_episodes=episodes_text[:2000],
                 emotional_signals=signals_text[:1000],
@@ -396,7 +487,9 @@ async def run_deep_monologue(
             # Apply updates
             if parsed.get("identity_update"):
                 set_self_model_block(
-                    db, user_id=user_id, section="identity",
+                    db,
+                    user_id=user_id,
+                    section="identity",
                     content=parsed["identity_update"],
                     updated_by="sleep_time",
                 )
@@ -405,22 +498,36 @@ async def run_deep_monologue(
             if parsed.get("persona_update"):
                 # Evolve the persona block — the agent's living style/approach
                 if persona_block is not None:
-                    persona_block.content = ef(user_id, parsed["persona_update"], table="self_model_blocks", field="content")
+                    persona_block.content = ef(
+                        user_id,
+                        parsed["persona_update"],
+                        table="self_model_blocks",
+                        field="content",
+                    )
                     persona_block.version += 1
                     persona_block.updated_by = "sleep_time"
                 else:
-                    db.add(SelfModelBlock(
-                        user_id=user_id,
-                        section="persona",
-                        content=ef(user_id, parsed["persona_update"], table="self_model_blocks", field="content"),
-                        version=1,
-                        updated_by="sleep_time",
-                    ))
+                    db.add(
+                        SelfModelBlock(
+                            user_id=user_id,
+                            section="persona",
+                            content=ef(
+                                user_id,
+                                parsed["persona_update"],
+                                table="self_model_blocks",
+                                field="content",
+                            ),
+                            version=1,
+                            updated_by="sleep_time",
+                        )
+                    )
                 result.persona_updated = True
 
             if parsed.get("inner_state_update"):
                 set_self_model_block(
-                    db, user_id=user_id, section="inner_state",
+                    db,
+                    user_id=user_id,
+                    section="inner_state",
                     content=parsed["inner_state_update"],
                     updated_by="sleep_time",
                 )
@@ -428,7 +535,9 @@ async def run_deep_monologue(
 
             if parsed.get("working_memory_update"):
                 set_self_model_block(
-                    db, user_id=user_id, section="working_memory",
+                    db,
+                    user_id=user_id,
+                    section="working_memory",
                     content=parsed["working_memory_update"],
                     updated_by="sleep_time",
                 )
@@ -436,14 +545,17 @@ async def run_deep_monologue(
 
             if parsed.get("growth_log_entry"):
                 append_growth_log_entry(
-                    db, user_id=user_id,
+                    db,
+                    user_id=user_id,
                     entry=parsed["growth_log_entry"],
                 )
                 result.growth_log_entry_added = True
 
             if parsed.get("intentions_update"):
                 set_self_model_block(
-                    db, user_id=user_id, section="intentions",
+                    db,
+                    user_id=user_id,
+                    section="intentions",
                     content=parsed["intentions_update"],
                     updated_by="sleep_time",
                 )
@@ -453,10 +565,12 @@ async def run_deep_monologue(
             rules = parsed.get("new_procedural_rules", [])
             if isinstance(rules, list):
                 from anima_server.services.agent.intentions import add_procedural_rule
+
                 for rule_data in rules:
                     if isinstance(rule_data, dict) and rule_data.get("rule"):
                         add_procedural_rule(
-                            db, user_id=user_id,
+                            db,
+                            user_id=user_id,
                             rule=rule_data["rule"],
                             evidence=rule_data.get("evidence", ""),
                             confidence=rule_data.get("confidence", "low"),
@@ -501,12 +615,11 @@ async def _get_recent_conversation(
 ) -> str:
     """Get the recent conversation text for reflection."""
     from sqlalchemy import select
+
     from anima_server.models import AgentMessage, AgentThread
 
     if thread_id is None:
-        thread = db.scalar(
-            select(AgentThread).where(AgentThread.user_id == user_id)
-        )
+        thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
         if thread is None:
             return ""
         thread_id = thread.id
@@ -525,7 +638,9 @@ async def _get_recent_conversation(
     lines = []
     for msg in reversed(messages):
         role = "User" if msg.role == "user" else "SAM"
-        text = df(user_id, msg.content_text or "", table="agent_messages", field="content_text").strip()
+        text = df(
+            user_id, msg.content_text or "", table="agent_messages", field="content_text"
+        ).strip()
         if text:
             lines.append(f"{role}: {text}")
 
@@ -565,4 +680,4 @@ def _last_n_entries(growth_log: str, n: int) -> str:
     return "\n\n".join(f"### {e}" for e in last_entries) if last_entries else "No entries yet."
 
 
-from anima_server.services.agent.json_utils import parse_json_object as _parse_json  # noqa: E302
+from anima_server.services.agent.json_utils import parse_json_object as _parse_json

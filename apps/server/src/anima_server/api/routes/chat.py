@@ -6,9 +6,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-
 from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from anima_server.api.deps.unlock import require_unlocked_user
 from anima_server.db import get_db
@@ -90,7 +89,9 @@ async def send_message(
             yield _format_sse_event("error", {"error": str(exc)})
         except Exception:
             logger.exception("Unexpected error during SSE streaming")
-            yield _format_sse_event("error", {"error": "An internal error occurred during streaming."})
+            yield _format_sse_event(
+                "error", {"error": "An internal error occurred during streaming."}
+            )
 
     return StreamingResponse(
         event_stream(),
@@ -208,20 +209,25 @@ async def get_nudges(
 
     nudges: list[dict[str, object]] = []
 
-    overdue_count = db.scalar(
-        select(func.count(Task.id)).where(
-            Task.user_id == userId,
-            Task.done.is_(False),
-            Task.due_date.isnot(None),
-            Task.due_date < func.date("now"),
+    overdue_count = (
+        db.scalar(
+            select(func.count(Task.id)).where(
+                Task.user_id == userId,
+                Task.done.is_(False),
+                Task.due_date.isnot(None),
+                Task.due_date < func.date("now"),
+            )
         )
-    ) or 0
+        or 0
+    )
     if overdue_count:
-        nudges.append({
-            "type": "overdue_tasks",
-            "message": f"You have {overdue_count} overdue task{'s' if overdue_count != 1 else ''}.",
-            "priority": 3,
-        })
+        nudges.append(
+            {
+                "type": "overdue_tasks",
+                "message": f"You have {overdue_count} overdue task{'s' if overdue_count != 1 else ''}.",
+                "priority": 3,
+            }
+        )
 
     return {"nudges": nudges}
 
@@ -245,24 +251,33 @@ async def get_home(
         ).all()
     )
 
-    memory_count = db.scalar(
-        select(func.count(MemoryItem.id)).where(
-            MemoryItem.user_id == userId,
-            MemoryItem.superseded_by.is_(None),
+    memory_count = (
+        db.scalar(
+            select(func.count(MemoryItem.id)).where(
+                MemoryItem.user_id == userId,
+                MemoryItem.superseded_by.is_(None),
+            )
         )
-    ) or 0
+        or 0
+    )
 
-    message_count = db.scalar(
-        select(func.count(AgentMessage.id)).join(
-            AgentThread, AgentMessage.thread_id == AgentThread.id
-        ).where(AgentThread.user_id == userId)
-    ) or 0
-
-    journal_total = db.scalar(
-        select(func.count(func.distinct(MemoryDailyLog.date))).where(
-            MemoryDailyLog.user_id == userId,
+    message_count = (
+        db.scalar(
+            select(func.count(AgentMessage.id))
+            .join(AgentThread, AgentMessage.thread_id == AgentThread.id)
+            .where(AgentThread.user_id == userId)
         )
-    ) or 0
+        or 0
+    )
+
+    journal_total = (
+        db.scalar(
+            select(func.count(func.distinct(MemoryDailyLog.date))).where(
+                MemoryDailyLog.user_id == userId,
+            )
+        )
+        or 0
+    )
 
     journal_streak = 0
     if journal_total > 0:
@@ -271,12 +286,15 @@ async def get_home(
         today = datetime.now(UTC).date()
         day = today
         while True:
-            has_log = db.scalar(
-                select(func.count(MemoryDailyLog.id)).where(
-                    MemoryDailyLog.user_id == userId,
-                    MemoryDailyLog.date == day.isoformat(),
+            has_log = (
+                db.scalar(
+                    select(func.count(MemoryDailyLog.id)).where(
+                        MemoryDailyLog.user_id == userId,
+                        MemoryDailyLog.date == day.isoformat(),
+                    )
                 )
-            ) or 0
+                or 0
+            )
             if has_log:
                 journal_streak += 1
                 day -= timedelta(days=1)
@@ -333,7 +351,7 @@ async def consolidate(
                 db_factory=build_session_factory_for_db(db),
             )
             items_added += len(result.llm_items_added)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(str(exc))
 
     return {"filesProcessed": len(logs), "filesChanged": items_added, "errors": errors}
@@ -408,15 +426,14 @@ async def cancel_run(
 
     run = db.get(AgentRunModel, run_id)
     if run is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     if run.user_id != payload.userId:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Not authorized to cancel this run")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to cancel this run"
+        )
     cancelled = await cancel_agent_run(run_id, payload.userId, db)
     if cancelled is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return CancelRunResponse(runId=cancelled.id, status=cancelled.status)
 
 
@@ -439,10 +456,7 @@ async def dry_run(
 
     return DryRunResponse(
         systemPrompt=result.system_prompt,
-        messages=[
-            {"role": m.role, "content": m.content}
-            for m in result.messages
-        ],
+        messages=[{"role": m.role, "content": m.content} for m in result.messages],
         allowedTools=list(result.allowed_tools),
         estimatedPromptTokens=result.estimated_prompt_tokens,
         toolSchemas=list(result.tool_schemas),
@@ -461,23 +475,28 @@ async def handle_approval(
     require_unlocked_user(request, payload.userId)
 
     from anima_server.models import AgentRun as AgentRunModel
+
     run = db.get(AgentRunModel, run_id)
     if run is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     if run.user_id != payload.userId:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized for this run")
+            status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized for this run"
+        )
     if run.status != "awaiting_approval":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Run is not awaiting approval (status: {run.status})")
+            detail=f"Run is not awaiting approval (status: {run.status})",
+        )
 
     if payload.stream:
+
         async def _generate() -> AsyncGenerator[str, None]:
             async for event in stream_approve_or_deny(
-                run_id, payload.userId, payload.approved, db,
+                run_id,
+                payload.userId,
+                payload.approved,
+                db,
                 denial_reason=payload.reason,
             ):
                 if event.event == "thought":
@@ -495,15 +514,16 @@ async def handle_approval(
 
     try:
         result = await approve_or_deny_turn(
-            run_id, payload.userId, payload.approved, db,
+            run_id,
+            payload.userId,
+            payload.approved,
+            db,
             denial_reason=payload.reason,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except PermissionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from math import ceil
 import json
 import logging
+from dataclasses import dataclass
+from math import ceil
 
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from anima_server.models import AgentMessage, AgentThread
 from anima_server.services.agent.sequencing import reserve_message_sequences
-from anima_server.services.data_crypto import ef, df
+from anima_server.services.data_crypto import df, ef
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +104,8 @@ def compact_thread_context(
     if estimated_tokens_before <= effective_trigger_token_limit:
         return None
 
-    existing_summary_rows = [
-        row for row in in_context_rows if row.role == "summary"]
-    conversation_rows = [
-        row for row in in_context_rows if row.role != "summary"]
+    existing_summary_rows = [row for row in in_context_rows if row.role == "summary"]
+    conversation_rows = [row for row in in_context_rows if row.role != "summary"]
     if len(conversation_rows) <= keep_last_messages:
         return None
 
@@ -117,7 +115,8 @@ def compact_thread_context(
         return None
 
     summary_text = render_summary_text(
-        existing_summary_rows, compacted_rows, user_id=thread.user_id)
+        existing_summary_rows, compacted_rows, user_id=thread.user_id
+    )
 
     for row in existing_summary_rows:
         row.is_in_context = False
@@ -185,7 +184,9 @@ def render_summary_text(
     lines: list[str] = ["Conversation summary:"]
 
     for summary_row in summary_rows:
-        content = df(user_id, (summary_row.content_text or ""), table="agent_messages", field="content_text").strip()
+        content = df(
+            user_id, (summary_row.content_text or ""), table="agent_messages", field="content_text"
+        ).strip()
         if not content:
             continue
         compact_content = _trim_summary_text(content)
@@ -198,11 +199,9 @@ def render_summary_text(
         if line:
             lines.append(f"- {line}")
 
-    hidden_count = len(compacted_rows) - \
-        min(len(compacted_rows), SUMMARY_LINE_LIMIT)
+    hidden_count = len(compacted_rows) - min(len(compacted_rows), SUMMARY_LINE_LIMIT)
     if hidden_count > 0:
-        lines.append(
-            f"- {hidden_count} additional earlier messages were compacted.")
+        lines.append(f"- {hidden_count} additional earlier messages were compacted.")
 
     return "\n".join(lines)
 
@@ -213,7 +212,8 @@ def _summarize_row(row: AgentMessage, *, user_id: int = 0) -> str:
         role_label = f"Tool {row.tool_name}"
 
     content = _trim_summary_text(
-        df(user_id, row.content_text or "", table="agent_messages", field="content_text"))
+        df(user_id, row.content_text or "", table="agent_messages", field="content_text")
+    )
     if not content:
         return f"{role_label}: [empty]"
     return f"{role_label}: {content}"
@@ -229,6 +229,7 @@ def _trim_summary_text(text: str) -> str:
 # ---------------------------------------------------------------------------
 # LLM-powered summarization (Phase 2 upgrade)
 # ---------------------------------------------------------------------------
+
 
 def _build_transcript(rows: list[AgentMessage], *, clamp_tools: bool = False) -> str:
     """Build a plain-text transcript from message rows for LLM summarization."""
@@ -276,9 +277,8 @@ async def summarize_with_llm(
     """
     from anima_server.config import settings
     from anima_server.services.agent.llm import (
-        LLMConfigError,
-        resolve_base_url,
         build_provider_headers,
+        resolve_base_url,
     )
 
     provider = settings.agent_provider
@@ -311,8 +311,7 @@ async def summarize_with_llm(
                 json={
                     "model": model,
                     "messages": [
-                        {"role": "system",
-                            "content": "You are a concise conversation summarizer."},
+                        {"role": "system", "content": "You are a concise conversation summarizer."},
                         {"role": "user", "content": prompt_text},
                     ],
                     "max_tokens": 500,
@@ -327,9 +326,8 @@ async def summarize_with_llm(
                 summary = message.get("content", "").strip()
                 if summary:
                     return summary
-    except Exception:  # noqa: BLE001
-        logger.debug(
-            "LLM summarization failed, will use fallback", exc_info=True)
+    except Exception:
+        logger.debug("LLM summarization failed, will use fallback", exc_info=True)
 
     return None
 
@@ -386,10 +384,8 @@ async def compact_thread_context_with_llm(
     if estimated_tokens_before <= effective_trigger_token_limit:
         return None
 
-    existing_summary_rows = [
-        row for row in in_context_rows if row.role == "summary"]
-    conversation_rows = [
-        row for row in in_context_rows if row.role != "summary"]
+    existing_summary_rows = [row for row in in_context_rows if row.role == "summary"]
+    conversation_rows = [row for row in in_context_rows if row.role != "summary"]
     if len(conversation_rows) <= keep_last_messages:
         return None
 
@@ -404,25 +400,26 @@ async def compact_thread_context_with_llm(
     # Level 1: Full LLM summarization
     try:
         summary_text = await summarize_with_llm(compacted_rows)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Level 1 LLM summarization failed")
 
     # Level 2: LLM summarization with clamped tool content
     if summary_text is None:
         try:
-            clamped_transcript = _build_transcript(
-                compacted_rows, clamp_tools=True)
+            clamped_transcript = _build_transcript(compacted_rows, clamp_tools=True)
             if clamped_transcript.strip():
                 summary_text = await summarize_with_llm(
-                    compacted_rows, transcript_override=clamped_transcript,
+                    compacted_rows,
+                    transcript_override=clamped_transcript,
                 )
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.debug("Level 2 clamped LLM summarization failed")
 
     # Level 3: Fast text-based fallback (always succeeds)
     if summary_text is None:
         summary_text = render_summary_text(
-            existing_summary_rows, compacted_rows, user_id=thread.user_id)
+            existing_summary_rows, compacted_rows, user_id=thread.user_id
+        )
 
     # Add metadata prefix
     total_hidden = len(compacted_rows)
@@ -447,7 +444,9 @@ async def compact_thread_context_with_llm(
         db.add(row)
 
     summary_sequence_id = reserve_message_sequences(
-        db, thread_id=thread.id, count=1,
+        db,
+        thread_id=thread.id,
+        count=1,
     )
     # Track whether LLM was used before we potentially modify summary_text
     used_llm = summary_text != render_summary_text(

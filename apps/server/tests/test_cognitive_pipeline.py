@@ -3,17 +3,11 @@ act (with thinking) → respond, with memory persistence and thinking extraction
 
 from __future__ import annotations
 
-import asyncio
 from collections import deque
 from collections.abc import Generator
 from contextlib import contextmanager
-from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import SelfModelBlock, User
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
@@ -29,15 +23,20 @@ from anima_server.services.agent.runtime_types import (
     ToolExecutionResult,
 )
 from anima_server.services.agent.state import AgentResult
-from anima_server.services.agent.tool_context import ToolContext, clear_tool_context, set_tool_context
+from anima_server.services.agent.tool_context import (
+    ToolContext,
+    clear_tool_context,
+    set_tool_context,
+)
 from anima_server.services.agent.tools import (
     core_memory_append,
     core_memory_replace,
     inject_inner_thoughts_into_tools,
     send_message,
-    tool,
 )
-
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,41 +98,51 @@ async def test_append_memory_respond_pipeline() -> None:
         db.flush()
 
         # Seed a human memory block
-        db.add(SelfModelBlock(
-            user_id=user.id,
-            section="human",
-            content="Name: Alice",
-            version=1,
-            updated_by="seed",
-        ))
+        db.add(
+            SelfModelBlock(
+                user_id=user.id,
+                section="human",
+                content="Name: Alice",
+                version=1,
+                updated_by="seed",
+            )
+        )
         db.commit()
 
         set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=1))
         try:
             # Step 1: core_memory_append (with thinking)
             # Step 2: send_message (with thinking)
-            adapter = QueueAdapter([
-                StepExecutionResult(
-                    tool_calls=(ToolCall(
-                        id="c1", name="core_memory_append",
-                        arguments={
-                            "thinking": "User mentioned they have a dog named Biscuit.",
-                            "label": "human",
-                            "content": "Has a dog named Biscuit.",
-                            "request_heartbeat": True,
-                        },
-                    ),)
-                ),
-                StepExecutionResult(
-                    tool_calls=(ToolCall(
-                        id="c2", name="send_message",
-                        arguments={
-                            "thinking": "Should acknowledge the dog warmly.",
-                            "message": "Biscuit sounds adorable!",
-                        },
-                    ),)
-                ),
-            ])
+            adapter = QueueAdapter(
+                [
+                    StepExecutionResult(
+                        tool_calls=(
+                            ToolCall(
+                                id="c1",
+                                name="core_memory_append",
+                                arguments={
+                                    "thinking": "User mentioned they have a dog named Biscuit.",
+                                    "label": "human",
+                                    "content": "Has a dog named Biscuit.",
+                                    "request_heartbeat": True,
+                                },
+                            ),
+                        )
+                    ),
+                    StepExecutionResult(
+                        tool_calls=(
+                            ToolCall(
+                                id="c2",
+                                name="send_message",
+                                arguments={
+                                    "thinking": "Should acknowledge the dog warmly.",
+                                    "message": "Biscuit sounds adorable!",
+                                },
+                            ),
+                        )
+                    ),
+                ]
+            )
 
             # Custom executor that propagates memory_modified from real tools
             class RealToolExecutor(ToolExecutor):
@@ -164,21 +173,25 @@ async def test_append_memory_respond_pipeline() -> None:
                 )
                 if block is None:
                     return None
-                return (MemoryBlock(
-                    label="human",
-                    value=block.content,
-                    description="User understanding",
-                ),)
+                return (
+                    MemoryBlock(
+                        label="human",
+                        value=block.content,
+                        description="User understanding",
+                    ),
+                )
 
             result = await runtime.invoke(
                 "I just got a rescue dog named Biscuit!",
                 user_id=user.id,
                 history=[],
-                memory_blocks=(MemoryBlock(
-                    label="human",
-                    value="Name: Alice",
-                    description="User understanding",
-                ),),
+                memory_blocks=(
+                    MemoryBlock(
+                        label="human",
+                        value="Name: Alice",
+                        description="User understanding",
+                    ),
+                ),
                 memory_refresher=refresher,
             )
 
@@ -211,40 +224,50 @@ async def test_core_memory_replace_pipeline() -> None:
         db.add(user)
         db.flush()
 
-        db.add(SelfModelBlock(
-            user_id=user.id,
-            section="human",
-            content="Works at Google",
-            version=1,
-            updated_by="seed",
-        ))
+        db.add(
+            SelfModelBlock(
+                user_id=user.id,
+                section="human",
+                content="Works at Google",
+                version=1,
+                updated_by="seed",
+            )
+        )
         db.commit()
 
         set_tool_context(ToolContext(db=db, user_id=user.id, thread_id=1))
         try:
-            adapter = QueueAdapter([
-                StepExecutionResult(
-                    tool_calls=(ToolCall(
-                        id="c1", name="core_memory_replace",
-                        arguments={
-                            "thinking": "User switched jobs to Apple.",
-                            "label": "human",
-                            "old_text": "Works at Google",
-                            "new_text": "Works at Apple (switched March 2026)",
-                            "request_heartbeat": True,
-                        },
-                    ),)
-                ),
-                StepExecutionResult(
-                    tool_calls=(ToolCall(
-                        id="c2", name="send_message",
-                        arguments={
-                            "thinking": "Congratulate on the new role.",
-                            "message": "Congrats on the new role at Apple!",
-                        },
-                    ),)
-                ),
-            ])
+            adapter = QueueAdapter(
+                [
+                    StepExecutionResult(
+                        tool_calls=(
+                            ToolCall(
+                                id="c1",
+                                name="core_memory_replace",
+                                arguments={
+                                    "thinking": "User switched jobs to Apple.",
+                                    "label": "human",
+                                    "old_text": "Works at Google",
+                                    "new_text": "Works at Apple (switched March 2026)",
+                                    "request_heartbeat": True,
+                                },
+                            ),
+                        )
+                    ),
+                    StepExecutionResult(
+                        tool_calls=(
+                            ToolCall(
+                                id="c2",
+                                name="send_message",
+                                arguments={
+                                    "thinking": "Congratulate on the new role.",
+                                    "message": "Congrats on the new role at Apple!",
+                                },
+                            ),
+                        )
+                    ),
+                ]
+            )
 
             tools = [core_memory_replace, send_message]
             inject_inner_thoughts_into_tools(tools)
@@ -286,8 +309,8 @@ async def test_core_memory_replace_pipeline() -> None:
 
 def test_extract_inner_thoughts_from_traces() -> None:
     """_extract_inner_thoughts pulls thinking content from tool result inner_thinking."""
-    from anima_server.services.agent.service import _extract_inner_thoughts
     from anima_server.services.agent.runtime_types import StepTrace
+    from anima_server.services.agent.service import _extract_inner_thoughts
 
     result = AgentResult(
         response="Hello!",
@@ -298,14 +321,21 @@ def test_extract_inner_thoughts_from_traces() -> None:
         step_traces=[
             StepTrace(
                 step_index=0,
-                tool_calls=(ToolCall(
-                    id="c1", name="send_message",
-                    arguments={"message": "Hey!"},
-                ),),
-                tool_results=(ToolExecutionResult(
-                    call_id="c1", name="send_message", output="Hey!",
-                    inner_thinking="User seems happy today.",
-                ),),
+                tool_calls=(
+                    ToolCall(
+                        id="c1",
+                        name="send_message",
+                        arguments={"message": "Hey!"},
+                    ),
+                ),
+                tool_results=(
+                    ToolExecutionResult(
+                        call_id="c1",
+                        name="send_message",
+                        output="Hey!",
+                        inner_thinking="User seems happy today.",
+                    ),
+                ),
             ),
         ],
     )
@@ -316,8 +346,8 @@ def test_extract_inner_thoughts_from_traces() -> None:
 
 def test_extract_inner_thoughts_empty_when_no_thoughts() -> None:
     """No thinking content means empty string."""
-    from anima_server.services.agent.service import _extract_inner_thoughts
     from anima_server.services.agent.runtime_types import StepTrace
+    from anima_server.services.agent.service import _extract_inner_thoughts
 
     result = AgentResult(
         response="Hi",
@@ -341,6 +371,7 @@ def test_extract_inner_thoughts_empty_when_no_thoughts() -> None:
 def test_deep_monologue_result_tracks_persona() -> None:
     """DeepMonologueResult has a persona_updated field."""
     from anima_server.services.agent.inner_monologue import DeepMonologueResult
+
     r = DeepMonologueResult()
     assert r.persona_updated is False
     r.persona_updated = True
@@ -350,6 +381,7 @@ def test_deep_monologue_result_tracks_persona() -> None:
 def test_deep_monologue_prompt_includes_persona() -> None:
     """The deep monologue prompt template includes a persona section."""
     from anima_server.services.agent.inner_monologue import DEEP_MONOLOGUE_PROMPT
+
     assert "{persona}" in DEEP_MONOLOGUE_PROMPT
     assert "persona_update" in DEEP_MONOLOGUE_PROMPT
     assert "EVOLVE" in DEEP_MONOLOGUE_PROMPT

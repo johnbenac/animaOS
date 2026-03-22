@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from anima_server.config import settings
 from anima_server.services.agent.embeddings import generate_embedding
 from anima_server.services.agent.llm import LLMConfigError, build_provider_headers

@@ -1,8 +1,8 @@
 """Tests for predict-calibrate consolidation -- F3."""
+
 from __future__ import annotations
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Quality Gates (heuristic-based)
@@ -14,6 +14,7 @@ class TestApplyQualityGates:
 
     def _gates(self, statements):
         from anima_server.services.agent.predict_calibrate import apply_quality_gates
+
         return apply_quality_gates(statements=statements)
 
     # -- Persistence: reject temporal markers --
@@ -27,7 +28,9 @@ class TestApplyQualityGates:
         assert self._gates(stmts) == []
 
     def test_reject_temporal_currently(self):
-        stmts = [{"content": "User is currently reading a book", "category": "fact", "confidence": 0.7}]
+        stmts = [
+            {"content": "User is currently reading a book", "category": "fact", "confidence": 0.7}
+        ]
         assert self._gates(stmts) == []
 
     def test_reject_temporal_yesterday(self):
@@ -41,7 +44,13 @@ class TestApplyQualityGates:
     # -- Specificity: accept detailed statements --
 
     def test_accept_specific_restaurant(self):
-        stmts = [{"content": "User's favorite restaurant is Sushi Dai in Tokyo", "category": "preference", "confidence": 0.9}]
+        stmts = [
+            {
+                "content": "User's favorite restaurant is Sushi Dai in Tokyo",
+                "category": "preference",
+                "confidence": 0.9,
+            }
+        ]
         result = self._gates(stmts)
         assert len(result) == 1
         assert result[0]["content"] == "User's favorite restaurant is Sushi Dai in Tokyo"
@@ -58,35 +67,69 @@ class TestApplyQualityGates:
     # -- Utility: reject "User said/asked" --
 
     def test_reject_user_said(self):
-        stmts = [{"content": "User said hello to the assistant", "category": "fact", "confidence": 0.5}]
+        stmts = [
+            {"content": "User said hello to the assistant", "category": "fact", "confidence": 0.5}
+        ]
         assert self._gates(stmts) == []
 
     def test_reject_user_asked(self):
-        stmts = [{"content": "User asked about the weather forecast", "category": "fact", "confidence": 0.5}]
+        stmts = [
+            {
+                "content": "User asked about the weather forecast",
+                "category": "fact",
+                "confidence": 0.5,
+            }
+        ]
         assert self._gates(stmts) == []
 
     def test_reject_user_mentioned(self):
-        stmts = [{"content": "User mentioned something about work", "category": "fact", "confidence": 0.5}]
+        stmts = [
+            {
+                "content": "User mentioned something about work",
+                "category": "fact",
+                "confidence": 0.5,
+            }
+        ]
         assert self._gates(stmts) == []
 
     # -- Independence: reject context-dependent references --
 
     def test_reject_agreed_with_that(self):
-        stmts = [{"content": "User agreed with that suggestion from assistant", "category": "fact", "confidence": 0.6}]
+        stmts = [
+            {
+                "content": "User agreed with that suggestion from assistant",
+                "category": "fact",
+                "confidence": 0.6,
+            }
+        ]
         assert self._gates(stmts) == []
 
     def test_reject_the_thing_we_discussed(self):
-        stmts = [{"content": "The thing we discussed was interesting to user", "category": "fact", "confidence": 0.6}]
+        stmts = [
+            {
+                "content": "The thing we discussed was interesting to user",
+                "category": "fact",
+                "confidence": 0.6,
+            }
+        ]
         assert self._gates(stmts) == []
 
     # -- Mixed: keep good, reject bad --
 
     def test_mixed_batch(self):
         stmts = [
-            {"content": "User works at Google as a software engineer", "category": "fact", "confidence": 0.9},
+            {
+                "content": "User works at Google as a software engineer",
+                "category": "fact",
+                "confidence": 0.9,
+            },
             {"content": "User is tired today", "category": "fact", "confidence": 0.5},
             {"content": "User said hello", "category": "fact", "confidence": 0.3},
-            {"content": "User lives in Berlin with their partner", "category": "fact", "confidence": 0.8},
+            {
+                "content": "User lives in Berlin with their partner",
+                "category": "fact",
+                "confidence": 0.8,
+            },
         ]
         result = self._gates(stmts)
         contents = [r["content"] for r in result]
@@ -112,6 +155,7 @@ class TestIDMapping:
 
     def test_build_id_map(self):
         from anima_server.services.agent.predict_calibrate import _build_id_map
+
         real_ids = [101, 205, 307]
         id_map, reverse_map = _build_id_map(real_ids)
         assert id_map == {101: 1, 205: 2, 307: 3}
@@ -119,6 +163,7 @@ class TestIDMapping:
 
     def test_round_trip(self):
         from anima_server.services.agent.predict_calibrate import _build_id_map
+
         real_ids = [42, 99, 7, 1001]
         id_map, reverse_map = _build_id_map(real_ids)
         for real_id in real_ids:
@@ -127,6 +172,7 @@ class TestIDMapping:
 
     def test_empty_ids(self):
         from anima_server.services.agent.predict_calibrate import _build_id_map
+
         id_map, reverse_map = _build_id_map([])
         assert id_map == {}
         assert reverse_map == {}
@@ -149,6 +195,7 @@ class TestColdStartPath:
         # Mock hybrid_search to return < 5 results
         async def mock_hybrid_search(db, *, user_id, query, limit=15, **kw):
             from anima_server.services.agent.embeddings import HybridSearchResult
+
             return HybridSearchResult(items=[], query_embedding=None)
 
         # Track whether direct extraction was called
@@ -156,9 +203,16 @@ class TestColdStartPath:
 
         async def mock_extract_direct(*, user_message, assistant_response):
             from anima_server.services.agent.consolidation import LLMExtractionResult
+
             direct_called.append(True)
             return LLMExtractionResult(
-                memories=[{"content": "User likes pizza very much", "category": "preference", "importance": 3}],
+                memories=[
+                    {
+                        "content": "User likes pizza very much",
+                        "category": "preference",
+                        "importance": 3,
+                    }
+                ],
                 emotion=None,
             )
 
@@ -186,6 +240,7 @@ class TestPredictCalibratePipeline:
     @pytest.mark.asyncio
     async def test_full_pipeline_with_mocked_llm(self, monkeypatch):
         from unittest.mock import MagicMock
+
         from anima_server.services.agent import predict_calibrate
         from anima_server.services.agent.embeddings import HybridSearchResult
 
@@ -248,9 +303,10 @@ class TestPredictCalibratePipeline:
     @pytest.mark.asyncio
     async def test_fallback_on_predict_failure(self, monkeypatch):
         """F3.9 — if predict-calibrate fails, fall back to direct extraction."""
+        from unittest.mock import MagicMock
+
         from anima_server.services.agent import predict_calibrate
         from anima_server.services.agent.embeddings import HybridSearchResult
-        from unittest.mock import MagicMock
 
         mock_items = []
         for i in range(6):
@@ -274,9 +330,16 @@ class TestPredictCalibratePipeline:
 
         async def mock_extract_direct(*, user_message, assistant_response):
             from anima_server.services.agent.consolidation import LLMExtractionResult
+
             direct_called.append(True)
             return LLMExtractionResult(
-                memories=[{"content": "User enjoys swimming at the beach", "category": "preference", "importance": 3}],
+                memories=[
+                    {
+                        "content": "User enjoys swimming at the beach",
+                        "category": "preference",
+                        "importance": 3,
+                    }
+                ],
                 emotion=None,
             )
 
@@ -298,9 +361,10 @@ class TestPredictCalibratePipeline:
     @pytest.mark.asyncio
     async def test_emotion_preserved_in_output(self, monkeypatch):
         """F3.12 — detected_emotion must be passed through."""
+        from unittest.mock import MagicMock
+
         from anima_server.services.agent import predict_calibrate
         from anima_server.services.agent.embeddings import HybridSearchResult
-        from unittest.mock import MagicMock
 
         mock_items = []
         for i in range(6):

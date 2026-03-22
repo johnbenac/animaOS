@@ -57,10 +57,7 @@ def build_conversation_messages(
 
 
 def _is_stale_tool_rule_violation_message(message: StoredMessage) -> bool:
-    return (
-        message.role == "tool"
-        and message.content.startswith(_TOOL_RULE_VIOLATION_PREFIX)
-    )
+    return message.role == "tool" and message.content.startswith(_TOOL_RULE_VIOLATION_PREFIX)
 
 
 def to_runtime_message(message: StoredMessage) -> Any:
@@ -76,15 +73,12 @@ def to_runtime_message(message: StoredMessage) -> Any:
         # the terminal ``send_message`` (whose content is real assistant
         # text, not inner thinking).  This also protects legacy history
         # rows written before the thinking kwarg was introduced.
-        has_non_terminal_tools = (
-            message.tool_calls
-            and not any(tc.name == "send_message" for tc in message.tool_calls)
+        has_non_terminal_tools = message.tool_calls and not any(
+            tc.name == "send_message" for tc in message.tool_calls
         )
         inner = (
             message.content.strip()
-            if has_non_terminal_tools
-            and message.content
-            and message.content.strip()
+            if has_non_terminal_tools and message.content and message.content.strip()
             else None
         )
         return make_assistant_message(
@@ -126,14 +120,12 @@ def make_assistant_message(
         return AIMessage(
             content="",
             tool_calls=[
-                to_tool_call_payload(tc, inner_thoughts=inner_thoughts)
-                for tc in tool_calls
+                to_tool_call_payload(tc, inner_thoughts=inner_thoughts) for tc in tool_calls
             ],
         )
     return AIMessage(
         content=content,
-        tool_calls=[to_tool_call_payload(tool_call)
-                    for tool_call in tool_calls],
+        tool_calls=[to_tool_call_payload(tool_call) for tool_call in tool_calls],
     )
 
 
@@ -200,8 +192,7 @@ def message_usage_payload(message: Any) -> dict[str, object] | None:
     if not isinstance(response_metadata, dict):
         return None
 
-    usage_payload = response_metadata.get(
-        "token_usage") or response_metadata.get("usage")
+    usage_payload = response_metadata.get("token_usage") or response_metadata.get("usage")
     return usage_payload if isinstance(usage_payload, dict) else None
 
 
@@ -238,5 +229,3 @@ def to_tool_call_payload(
     if tool_call.raw_arguments is not None:
         payload["raw_arguments"] = tool_call.raw_arguments
     return payload
-
-

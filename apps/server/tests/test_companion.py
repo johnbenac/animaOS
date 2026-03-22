@@ -3,18 +3,8 @@
 from __future__ import annotations
 
 from collections import deque
-from contextlib import contextmanager
-from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from anima_server.db.base import Base
-from anima_server.models import AgentMessage, AgentThread, User
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.companion import (
     AnimaCompanion,
@@ -23,11 +13,15 @@ from anima_server.services.agent.companion import (
     invalidate_companion,
 )
 from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.rules import TerminalToolRule
 from anima_server.services.agent.runtime import AgentRuntime
-from anima_server.services.agent.runtime_types import LLMRequest, StepExecutionResult, StopReason, ToolCall
+from anima_server.services.agent.runtime_types import (
+    LLMRequest,
+    StepExecutionResult,
+)
 from anima_server.services.agent.state import StoredMessage
 from anima_server.services.agent.tools import send_message
-from anima_server.services.agent.rules import TerminalToolRule
+from sqlalchemy.orm import Session
 
 
 class QueueAdapter(BaseLLMAdapter):
@@ -66,17 +60,19 @@ def _make_companion(
     )
 
 
-SOUL_BLOCK = MemoryBlock(label="soul", value="I am Anima.",
-                         description="origin", read_only=True)
+SOUL_BLOCK = MemoryBlock(label="soul", value="I am Anima.", description="origin", read_only=True)
 PERSONA_BLOCK = MemoryBlock(
-    label="persona", value="Curious and warm.", description="persona", read_only=True)
+    label="persona", value="Curious and warm.", description="persona", read_only=True
+)
 FACTS_BLOCK = MemoryBlock(
-    label="facts", value="- Works as engineer", description="facts", read_only=True)
+    label="facts", value="- Works as engineer", description="facts", read_only=True
+)
 
 
 # ------------------------------------------------------------------
 # Version-counter cache
 # ------------------------------------------------------------------
+
 
 class TestMemoryCache:
     def test_starts_stale(self) -> None:
@@ -132,6 +128,7 @@ class TestMemoryCache:
 # System prompt cache
 # ------------------------------------------------------------------
 
+
 class TestSystemPromptCache:
     def test_starts_none(self) -> None:
         companion = _make_companion()
@@ -164,6 +161,7 @@ class TestSystemPromptCache:
 # Conversation window
 # ------------------------------------------------------------------
 
+
 class TestConversationWindow:
     def test_starts_empty(self) -> None:
         companion = _make_companion()
@@ -177,29 +175,27 @@ class TestConversationWindow:
 
     def test_bounded_on_set(self) -> None:
         companion = _make_companion(keep_last_messages=3)
-        msgs = [StoredMessage(
-            role="user", content=f"msg {i}") for i in range(10)]
+        msgs = [StoredMessage(role="user", content=f"msg {i}") for i in range(10)]
         companion.set_conversation_window(msgs)
         assert len(companion.conversation_window) == 3
         assert companion.conversation_window[0].content == "msg 7"
 
     def test_append_grows(self) -> None:
         companion = _make_companion(keep_last_messages=50)
-        companion.set_conversation_window(
-            [StoredMessage(role="user", content="first")])
-        companion.append_to_window(
-            [StoredMessage(role="assistant", content="reply")])
+        companion.set_conversation_window([StoredMessage(role="user", content="first")])
+        companion.append_to_window([StoredMessage(role="assistant", content="reply")])
         assert len(companion.conversation_window) == 2
 
     def test_append_bounded(self) -> None:
         companion = _make_companion(keep_last_messages=3)
-        companion.set_conversation_window([
-            StoredMessage(role="user", content="a"),
-            StoredMessage(role="assistant", content="b"),
-            StoredMessage(role="user", content="c"),
-        ])
-        companion.append_to_window(
-            [StoredMessage(role="assistant", content="d")])
+        companion.set_conversation_window(
+            [
+                StoredMessage(role="user", content="a"),
+                StoredMessage(role="assistant", content="b"),
+                StoredMessage(role="user", content="c"),
+            ]
+        )
+        companion.append_to_window([StoredMessage(role="assistant", content="d")])
         assert len(companion.conversation_window) == 3
         assert companion.conversation_window[-1].content == "d"
         assert companion.conversation_window[0].content == "b"
@@ -209,13 +205,13 @@ class TestConversationWindow:
 # Reset
 # ------------------------------------------------------------------
 
+
 class TestReset:
     def test_clears_all_caches(self) -> None:
         companion = _make_companion()
         companion.set_memory_cache((SOUL_BLOCK, PERSONA_BLOCK))
         companion.set_system_prompt("prompt")
-        companion.set_conversation_window(
-            [StoredMessage(role="user", content="hi")])
+        companion.set_conversation_window([StoredMessage(role="user", content="hi")])
         companion.emotional_state = {"emotion": "calm"}
         companion.thread_id = 42
 
@@ -238,6 +234,7 @@ class TestReset:
 # ------------------------------------------------------------------
 # Singleton management
 # ------------------------------------------------------------------
+
 
 class TestSingletonManagement:
     def setup_method(self) -> None:
@@ -271,6 +268,7 @@ class TestSingletonManagement:
 # ------------------------------------------------------------------
 # ensure_memory_loaded (integration with DB mock)
 # ------------------------------------------------------------------
+
 
 class TestEnsureMemoryLoaded:
     def test_uses_cache_on_second_call(self) -> None:
@@ -321,6 +319,7 @@ class TestEnsureMemoryLoaded:
 # ------------------------------------------------------------------
 # Emotional state
 # ------------------------------------------------------------------
+
 
 class TestEmotionalState:
     def test_starts_none(self) -> None:

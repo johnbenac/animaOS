@@ -6,15 +6,14 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import MemoryDailyLog, MemoryEpisode, User
 from anima_server.services.agent import reflection as reflection_service
 from anima_server.services.agent.reflection import run_reflection
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @contextmanager
@@ -62,15 +61,17 @@ async def test_run_reflection_generates_episode_when_turns_available() -> None:
         )
 
         today = datetime.now(UTC).date().isoformat()
-        session.add_all([
-            MemoryDailyLog(
-                user_id=user.id,
-                date=today,
-                user_message=f"Turn {i} message",
-                assistant_response=f"Turn {i} response",
-            )
-            for i in range(3)
-        ])
+        session.add_all(
+            [
+                MemoryDailyLog(
+                    user_id=user.id,
+                    date=today,
+                    user_message=f"Turn {i} message",
+                    assistant_response=f"Turn {i} response",
+                )
+                for i in range(3)
+            ]
+        )
         session.commit()
 
         await run_reflection(

@@ -5,22 +5,21 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from anima_server.config import settings
+from anima_server.db.base import Base
+from anima_server.models import MemoryDailyLog, User
+from anima_server.services.agent import invalidate_agent_runtime_cache, run_agent
+from anima_server.services.agent.consolidation import (
+    LLMExtractionResult,
+    consolidate_turn_memory,
+    consolidate_turn_memory_with_llm,
+    drain_background_memory_tasks,
+)
+from anima_server.services.agent.memory_store import get_memory_items
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from anima_server.config import settings
-from anima_server.db.base import Base
-from anima_server.models import MemoryDailyLog, MemoryItem, User
-from anima_server.services.agent import invalidate_agent_runtime_cache, run_agent
-from anima_server.services.agent.consolidation import (
-    consolidate_turn_memory,
-    consolidate_turn_memory_with_llm,
-    drain_background_memory_tasks,
-    LLMExtractionResult,
-)
-from anima_server.services.agent.memory_store import get_memory_items
 
 
 @contextmanager
@@ -57,7 +56,7 @@ def test_consolidate_turn_memory_writes_daily_log_and_user_memory() -> None:
         session.add(user)
         session.commit()
 
-        factory = session.get_bind().engine.dispose  # unused, need the sessionmaker
+        # need the sessionmaker — engine disposal happens via test teardown
         # Create a factory that returns the existing session for the test
         eng = session.get_bind()
         test_factory = sessionmaker(
@@ -301,7 +300,7 @@ async def test_consolidate_turn_memory_with_llm_deduplicates_slot_paraphrase(
 async def test_run_agent_schedules_background_memory_consolidation() -> None:
     # Pre-set turn counter so that the next bump lands on a frequency multiple
     # (F5 frequency gating runs every SLEEPTIME_FREQUENCY turns).
-    from anima_server.services.agent.sleep_agent import _turn_counters, SLEEPTIME_FREQUENCY
+    from anima_server.services.agent.sleep_agent import SLEEPTIME_FREQUENCY, _turn_counters
 
     original_provider = settings.agent_provider
     invalidate_agent_runtime_cache()

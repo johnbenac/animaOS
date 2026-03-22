@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from anima_server.services.data_crypto import (
     decrypt_field,
     encrypt_field,
@@ -11,9 +12,6 @@ from anima_server.services.data_crypto import (
     maybe_encrypt_for_user,
     require_dek_for_user,
 )
-
-import pytest
-
 
 # --------------------------------------------------------------------------- #
 # Helpers

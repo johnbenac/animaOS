@@ -3,18 +3,17 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 
-from fastapi.testclient import TestClient
-
 from anima_server.config import settings
 from anima_server.db.session import get_user_session_factory
 from anima_server.models import AgentMessage, AgentRun, AgentStep, AgentThread
 from anima_server.services.agent import invalidate_agent_runtime_cache
-from anima_server.services.data_crypto import df
 from anima_server.services.agent.openai_compatible_client import (
     OpenAICompatibleResponse,
     OpenAICompatibleStreamChunk,
 )
+from anima_server.services.data_crypto import df
 from conftest import managed_test_client
+from fastapi.testclient import TestClient
 
 
 def _register_user(client: TestClient, username: str = "alice") -> dict[str, object]:
@@ -66,28 +65,26 @@ def test_chat_requires_unlocked_session() -> None:
         )
 
     assert response.status_code == 401
-    assert response.json() == {
-        "error": "Session locked. Please sign in again."}
+    assert response.json() == {"error": "Session locked. Please sign in again."}
 
 
 def test_chat_returns_scaffold_response_and_tracks_turns() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client)
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client)
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            first = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "hello", "userId": user_id},
-            )
-            invalidate_agent_runtime_cache()
-            second = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "still there?", "userId": user_id},
-            )
+        first = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "hello", "userId": user_id},
+        )
+        invalidate_agent_runtime_cache()
+        second = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "still there?", "userId": user_id},
+        )
 
     assert first.status_code == 200
     assert first.json()["provider"] == "scaffold"
@@ -102,35 +99,34 @@ def test_chat_returns_scaffold_response_and_tracks_turns() -> None:
 
 
 def test_chat_reset_clears_scaffold_thread_state() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client, username="reset-me")
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client, username="reset-me")
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "first", "userId": user_id},
-            )
-            reset_response = client.post(
-                "/api/chat/reset",
-                headers=headers,
-                json={"userId": user_id},
-            )
-            after_reset = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "again", "userId": user_id},
-            )
-            session = get_user_session_factory(user_id)()
-            try:
-                assert session.query(AgentThread).count() == 1
-                assert session.query(AgentMessage).count() == 3
-                assert session.query(AgentRun).count() == 1
-                assert session.query(AgentStep).count() == 1
-            finally:
-                session.close()
+        client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "first", "userId": user_id},
+        )
+        reset_response = client.post(
+            "/api/chat/reset",
+            headers=headers,
+            json={"userId": user_id},
+        )
+        after_reset = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "again", "userId": user_id},
+        )
+        session = get_user_session_factory(user_id)()
+        try:
+            assert session.query(AgentThread).count() == 1
+            assert session.query(AgentMessage).count() == 3
+            assert session.query(AgentRun).count() == 1
+            assert session.query(AgentStep).count() == 1
+        finally:
+            session.close()
 
     assert reset_response.status_code == 200
     assert reset_response.json() == {"status": "reset"}
@@ -138,27 +134,26 @@ def test_chat_reset_clears_scaffold_thread_state() -> None:
 
 
 def test_chat_history_returns_persisted_transcript() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client, username="history-me")
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client, username="history-me")
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            first = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "hello", "userId": user_id},
-            )
-            second = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "still there?", "userId": user_id},
-            )
-            history = client.get(
-                "/api/chat/history",
-                headers=headers,
-                params={"userId": user_id, "limit": 10},
-            )
+        first = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "hello", "userId": user_id},
+        )
+        second = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "still there?", "userId": user_id},
+        )
+        history = client.get(
+            "/api/chat/history",
+            headers=headers,
+            params={"userId": user_id, "limit": 10},
+        )
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -176,28 +171,27 @@ def test_chat_history_returns_persisted_transcript() -> None:
 
 
 def test_chat_history_delete_clears_thread_for_desktop_ui() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client, username="clear-history")
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client, username="clear-history")
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "first", "userId": user_id},
-            )
-            clear_response = client.request(
-                "DELETE",
-                "/api/chat/history",
-                headers=headers,
-                json={"userId": user_id},
-            )
-            history = client.get(
-                "/api/chat/history",
-                headers=headers,
-                params={"userId": user_id, "limit": 10},
-            )
+        client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "first", "userId": user_id},
+        )
+        clear_response = client.request(
+            "DELETE",
+            "/api/chat/history",
+            headers=headers,
+            json={"userId": user_id},
+        )
+        history = client.get(
+            "/api/chat/history",
+            headers=headers,
+            params={"userId": user_id, "limit": 10},
+        )
 
     assert clear_response.status_code == 200
     assert clear_response.json() == {"status": "cleared"}
@@ -206,62 +200,61 @@ def test_chat_history_delete_clears_thread_for_desktop_ui() -> None:
 
 
 def test_chat_persists_runtime_rows() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client, username="persist-me")
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client, username="persist-me")
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            response = client.post(
-                "/api/chat",
-                headers=headers,
-                json={"message": "hello", "userId": user_id},
-            )
+        response = client.post(
+            "/api/chat",
+            headers=headers,
+            json={"message": "hello", "userId": user_id},
+        )
 
-            session = get_user_session_factory(user_id)()
-            try:
-                thread = session.query(AgentThread).one()
-                run = session.query(AgentRun).one()
-                step = session.query(AgentStep).one()
-                messages = (
-                    session.query(AgentMessage)
-                    .order_by(AgentMessage.sequence_id)
-                    .all()
-                )
-            finally:
-                session.close()
+        session = get_user_session_factory(user_id)()
+        try:
+            thread = session.query(AgentThread).one()
+            run = session.query(AgentRun).one()
+            step = session.query(AgentStep).one()
+            messages = session.query(AgentMessage).order_by(AgentMessage.sequence_id).all()
+        finally:
+            session.close()
 
-            assert response.status_code == 200
-            assert thread.user_id == user_id
-            assert run.thread_id == thread.id
-            assert run.status == "completed"
-            assert run.mode == "blocking"
-            assert run.stop_reason == "terminal_tool"
-            assert step.run_id == run.id
-            assert step.step_index == 0
-            assert thread.next_message_sequence == 4
-            assert [message.role for message in messages] == [
-                "user", "assistant", "tool"]
-            assert df(user_id, messages[0].content_text, table="agent_messages", field="content_text") == "hello"
-            assert "turn 1" in df(user_id, messages[1].content_text, table="agent_messages", field="content_text")
-            assert "turn 1" in df(user_id, messages[2].content_text, table="agent_messages", field="content_text")
+        assert response.status_code == 200
+        assert thread.user_id == user_id
+        assert run.thread_id == thread.id
+        assert run.status == "completed"
+        assert run.mode == "blocking"
+        assert run.stop_reason == "terminal_tool"
+        assert step.run_id == run.id
+        assert step.step_index == 0
+        assert thread.next_message_sequence == 4
+        assert [message.role for message in messages] == ["user", "assistant", "tool"]
+        assert (
+            df(user_id, messages[0].content_text, table="agent_messages", field="content_text")
+            == "hello"
+        )
+        assert "turn 1" in df(
+            user_id, messages[1].content_text, table="agent_messages", field="content_text"
+        )
+        assert "turn 1" in df(
+            user_id, messages[2].content_text, table="agent_messages", field="content_text"
+        )
 
 
 def test_chat_stream_returns_sse_events() -> None:
-    with _scaffold_agent_settings():
-        with _client() as client:
-            user = _register_user(client, username="stream-me")
-            headers = {"x-anima-unlock": str(user["unlockToken"])}
-            user_id = int(user["id"])
+    with _scaffold_agent_settings(), _client() as client:
+        user = _register_user(client, username="stream-me")
+        headers = {"x-anima-unlock": str(user["unlockToken"])}
+        user_id = int(user["id"])
 
-            with client.stream(
-                "POST",
-                "/api/chat",
-                headers=headers,
-                json={"message": "stream this",
-                      "userId": user_id, "stream": True},
-            ) as response:
-                body = "".join(response.iter_text())
+        with client.stream(
+            "POST",
+            "/api/chat",
+            headers=headers,
+            json={"message": "stream this", "userId": user_id, "stream": True},
+        ) as response:
+            body = "".join(response.iter_text())
 
     assert response.status_code == 200
     assert "event: tool_return" in body
@@ -287,7 +280,7 @@ def test_chat_stream_ollama_emits_live_chunks(monkeypatch) -> None:
             *,
             tool_choice: str | None = None,
             **_: object,
-        ) -> "FakeStreamingChatClient":
+        ) -> FakeStreamingChatClient:
             self.bound_tools = list(tools)
             self.tool_choice = tool_choice
             return self
@@ -377,7 +370,7 @@ def test_chat_ollama_provider_uses_live_adapter_surface(monkeypatch) -> None:
             *,
             tool_choice: str | None = None,
             **_: object,
-        ) -> "FakeLiveChatClient":
+        ) -> FakeLiveChatClient:
             self.bound_tools = list(tools)
             self.tool_choice = tool_choice
             return self
@@ -431,8 +424,7 @@ def test_chat_ollama_provider_uses_live_adapter_surface(monkeypatch) -> None:
     assert response.json()["response"] == "hello from ollama adapter"
     assert "private reasoning" not in response.json()["response"]
     assert fake_client.tool_choice == "required"
-    tool_names = [getattr(tool, "name", "")
-                  for tool in fake_client.bound_tools]
+    tool_names = [getattr(tool, "name", "") for tool in fake_client.bound_tools]
     # send_message is always available (terminal tool)
     assert "send_message" in tool_names
 
@@ -544,11 +536,7 @@ def test_chat_compacts_thread_context_into_summary() -> None:
 
             session = get_user_session_factory(user_id)()
             try:
-                all_messages = (
-                    session.query(AgentMessage)
-                    .order_by(AgentMessage.sequence_id)
-                    .all()
-                )
+                all_messages = session.query(AgentMessage).order_by(AgentMessage.sequence_id).all()
                 thread = session.query(AgentThread).one()
                 in_context_messages = (
                     session.query(AgentMessage)
@@ -576,8 +564,7 @@ def test_chat_compacts_thread_context_into_summary() -> None:
     assert second.status_code == 200
     assert third.status_code == 200
     assert "turn 3" in third.json()["response"]
-    summary_messages = [
-        message for message in in_context_messages if message.role == "summary"]
+    summary_messages = [message for message in in_context_messages if message.role == "summary"]
     assert len(summary_messages) == 1
     # Summary text is now encrypted at rest (fix #3). Verify a summary
     # message exists and is non-empty; the plaintext content is verified by

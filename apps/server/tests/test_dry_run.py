@@ -2,21 +2,16 @@
 
 from __future__ import annotations
 
-from collections import deque
-
 import pytest
-
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
 from anima_server.services.agent.memory_blocks import MemoryBlock
+from anima_server.services.agent.rules import TerminalToolRule
 from anima_server.services.agent.runtime import AgentRuntime
 from anima_server.services.agent.runtime_types import (
     DryRunResult,
     LLMRequest,
     StepExecutionResult,
-    UsageStats,
 )
-from anima_server.services.agent.rules import TerminalToolRule
-from anima_server.services.agent.state import AgentResult
 from anima_server.services.agent.tools import send_message
 
 

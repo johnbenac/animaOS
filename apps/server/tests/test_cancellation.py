@@ -7,29 +7,28 @@ from collections import deque
 from typing import Any
 
 import pytest
-
-from anima_server.services.agent.companion import AnimaCompanion
 from anima_server.services.agent.adapters.base import BaseLLMAdapter
+from anima_server.services.agent.companion import AnimaCompanion
 from anima_server.services.agent.executor import ToolExecutor
+from anima_server.services.agent.rules import TerminalToolRule
 from anima_server.services.agent.runtime import AgentRuntime
 from anima_server.services.agent.runtime_types import (
-    DryRunResult,
     LLMRequest,
     StepExecutionResult,
     StopReason,
     ToolCall,
     UsageStats,
 )
-from anima_server.services.agent.rules import TerminalToolRule
 from anima_server.services.agent.state import AgentResult
 from anima_server.services.agent.streaming import AgentStreamEvent
 from anima_server.services.agent.tools import send_message
 
-
 # ---- Helpers ----
+
 
 class _DummyTool:
     """A non-terminal tool so the loop continues after execution."""
+
     name = "dummy_think"
     description = "Think step"
 
@@ -56,16 +55,24 @@ class QueueAdapter(BaseLLMAdapter):
         text = result.assistant_text or ""
         if not text:
             # No text to stream — yield a single event with the final result
-            yield type("StreamEvent", (), {
-                "content_delta": "",
-                "result": result,
-            })()
+            yield type(
+                "StreamEvent",
+                (),
+                {
+                    "content_delta": "",
+                    "result": result,
+                },
+            )()
             return
         for i, ch in enumerate(text):
-            yield type("StreamEvent", (), {
-                "content_delta": ch,
-                "result": result if i == len(text) - 1 else None,
-            })()
+            yield type(
+                "StreamEvent",
+                (),
+                {
+                    "content_delta": ch,
+                    "result": result if i == len(text) - 1 else None,
+                },
+            )()
             await asyncio.sleep(0)
 
 
@@ -86,10 +93,7 @@ def _build_runtime(adapter: QueueAdapter, *, max_steps: int = 4) -> AgentRuntime
 def _terminal_step(text: str) -> StepExecutionResult:
     return StepExecutionResult(
         assistant_text=text,
-        tool_calls=(
-            ToolCall(id="tc-1", name="send_message",
-                     arguments={"message": text}),
-        ),
+        tool_calls=(ToolCall(id="tc-1", name="send_message", arguments={"message": text}),),
         usage=UsageStats(prompt_tokens=10, completion_tokens=5),
     )
 
@@ -103,14 +107,14 @@ def _thinking_step() -> StepExecutionResult:
     return StepExecutionResult(
         assistant_text="",
         tool_calls=(
-            ToolCall(id="tc-think", name="dummy_think",
-                     arguments={"request_heartbeat": True}),
+            ToolCall(id="tc-think", name="dummy_think", arguments={"request_heartbeat": True}),
         ),
         usage=UsageStats(prompt_tokens=10, completion_tokens=5),
     )
 
 
 # ---- Step-boundary cancellation ----
+
 
 @pytest.mark.asyncio
 async def test_cancel_at_step_boundary() -> None:
@@ -139,8 +143,7 @@ async def test_cancel_between_steps() -> None:
 
     # Step 1: non-terminal tool call (loop continues)
     # Step 2: terminal call (should never run because cancel fires)
-    adapter = QueueAdapter(
-        [_thinking_step(), _terminal_step("should not appear")])
+    adapter = QueueAdapter([_thinking_step(), _terminal_step("should not appear")])
     runtime = _build_runtime(adapter)
 
     step_count = 0
@@ -181,15 +184,20 @@ async def test_cancel_mid_stream() -> None:
             for i in range(10):
                 if i == 3:
                     cancel_event.set()
-                yield type("StreamEvent", (), {
-                    "content_delta": "x",
-                    "result": StepExecutionResult(
-                        assistant_text="x" * 10,
-                        tool_calls=(),
-                        usage=UsageStats(prompt_tokens=10,
-                                         completion_tokens=5),
-                    ) if i == 9 else None,
-                })()
+                yield type(
+                    "StreamEvent",
+                    (),
+                    {
+                        "content_delta": "x",
+                        "result": StepExecutionResult(
+                            assistant_text="x" * 10,
+                            tool_calls=(),
+                            usage=UsageStats(prompt_tokens=10, completion_tokens=5),
+                        )
+                        if i == 9
+                        else None,
+                    },
+                )()
                 await asyncio.sleep(0)
 
     runtime = AgentRuntime(
@@ -229,6 +237,7 @@ async def test_cancel_response_is_empty() -> None:
 
 
 # ---- Companion cancel-event lifecycle ----
+
 
 class TestCompanionCancelEvents:
     def test_create_and_set(self) -> None:
@@ -279,6 +288,7 @@ class TestCompanionCancelEvents:
 
 
 # ---- No cancel_event → normal behaviour ---
+
 
 @pytest.mark.asyncio
 async def test_no_cancel_event_runs_normally() -> None:

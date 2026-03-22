@@ -1,4 +1,5 @@
 """Tests for batch episode segmentation (F6)."""
+
 from __future__ import annotations
 
 from collections.abc import Generator
@@ -7,11 +8,6 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from anima_server.db.base import Base
 from anima_server.models import MemoryDailyLog, MemoryEpisode, User
 from anima_server.services.agent.batch_segmenter import (
@@ -21,11 +17,15 @@ from anima_server.services.agent.batch_segmenter import (
     should_batch_segment,
     validate_indices,
 )
-
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------------------------------------------------------------------------
 # should_batch_segment
 # ---------------------------------------------------------------------------
+
 
 def test_should_batch_segment_below_threshold() -> None:
     assert should_batch_segment(7) is False
@@ -46,6 +46,7 @@ def test_batch_threshold_value() -> None:
 # ---------------------------------------------------------------------------
 # validate_indices
 # ---------------------------------------------------------------------------
+
 
 def test_validate_indices_valid() -> None:
     assert validate_indices([[1, 2, 3], [4, 5]], total_messages=5) is True
@@ -88,6 +89,7 @@ def test_validate_indices_complex_valid() -> None:
 # indices_to_0based
 # ---------------------------------------------------------------------------
 
+
 def test_indices_to_0based() -> None:
     result = indices_to_0based([[1, 2, 3], [4, 5]])
     assert result == [[0, 1, 2], [3, 4]]
@@ -106,6 +108,7 @@ def test_indices_to_0based_single_group() -> None:
 # ---------------------------------------------------------------------------
 # segment_messages_batch (with mocked LLM)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_segment_messages_batch_success() -> None:
@@ -133,9 +136,7 @@ async def test_segment_messages_batch_success() -> None:
 
 @pytest.mark.asyncio
 async def test_segment_messages_batch_llm_failure() -> None:
-    messages = [
-        (f"User message {i}", f"Response {i}") for i in range(1, 9)
-    ]
+    messages = [(f"User message {i}", f"Response {i}") for i in range(1, 9)]
 
     with patch(
         "anima_server.services.agent.batch_segmenter._call_llm_for_segmentation",
@@ -150,9 +151,7 @@ async def test_segment_messages_batch_llm_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_segment_messages_batch_invalid_indices_fallback() -> None:
-    messages = [
-        (f"User message {i}", f"Response {i}") for i in range(1, 9)
-    ]
+    messages = [(f"User message {i}", f"Response {i}") for i in range(1, 9)]
 
     # LLM returns indices that don't cover all messages (missing 7 and 8)
     with patch(
@@ -169,9 +168,7 @@ async def test_segment_messages_batch_invalid_indices_fallback() -> None:
 @pytest.mark.asyncio
 async def test_segment_messages_batch_non_contiguous() -> None:
     """Non-contiguous indices are valid when properly covering all messages."""
-    messages = [
-        (f"User message {i}", f"Response {i}") for i in range(1, 10)
-    ]
+    messages = [(f"User message {i}", f"Response {i}") for i in range(1, 10)]
 
     with patch(
         "anima_server.services.agent.batch_segmenter._call_llm_for_segmentation",
@@ -187,6 +184,7 @@ async def test_segment_messages_batch_non_contiguous() -> None:
 # ---------------------------------------------------------------------------
 # Integration: generate_episodes_from_segments
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def _db_session() -> Generator[Session, None, None]:
@@ -244,9 +242,7 @@ async def test_generate_episodes_from_segments() -> None:
         segments_0based = [[0, 1, 2, 4, 5], [3, 6, 7]]
 
         # Use scaffold provider to avoid LLM calls for episode summary
-        with patch(
-            "anima_server.services.agent.batch_segmenter.settings"
-        ) as mock_settings:
+        with patch("anima_server.services.agent.batch_segmenter.settings") as mock_settings:
             mock_settings.agent_provider = "scaffold"
             episodes = await generate_episodes_from_segments(
                 db,
@@ -273,6 +269,7 @@ async def test_generate_episodes_from_segments() -> None:
 # ---------------------------------------------------------------------------
 # Integration: maybe_generate_episode with batch path
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_maybe_generate_episode_batch_path() -> None:
@@ -317,9 +314,7 @@ async def test_maybe_generate_episode_batch_path() -> None:
                 new_callable=AsyncMock,
                 return_value=[[1, 2, 3, 7, 8], [4, 5, 6, 9, 10]],
             ),
-            patch(
-                "anima_server.services.agent.batch_segmenter.settings"
-            ) as mock_settings,
+            patch("anima_server.services.agent.batch_segmenter.settings") as mock_settings,
         ):
             mock_settings.agent_provider = "scaffold"
             result = await maybe_generate_episode(
@@ -376,9 +371,7 @@ async def test_maybe_generate_episode_sequential_under_threshold() -> None:
         session.commit()
 
         # Use scaffold to avoid LLM call for sequential episode too
-        with patch(
-            "anima_server.services.agent.episodes.settings"
-        ) as mock_settings:
+        with patch("anima_server.services.agent.episodes.settings") as mock_settings:
             mock_settings.agent_provider = "scaffold"
             result = await maybe_generate_episode(
                 user_id=user.id,
@@ -436,9 +429,7 @@ async def test_maybe_generate_episode_batch_fallback_on_error() -> None:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("LLM down"),
             ),
-            patch(
-                "anima_server.services.agent.episodes.settings"
-            ) as mock_settings,
+            patch("anima_server.services.agent.episodes.settings") as mock_settings,
         ):
             mock_settings.agent_provider = "scaffold"
             result = await maybe_generate_episode(
@@ -500,9 +491,7 @@ async def test_log_pointer_advances_correctly_after_batch() -> None:
                 new_callable=AsyncMock,
                 return_value=[[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]],
             ),
-            patch(
-                "anima_server.services.agent.batch_segmenter.settings"
-            ) as mock_settings,
+            patch("anima_server.services.agent.batch_segmenter.settings") as mock_settings,
         ):
             mock_settings.agent_provider = "scaffold"
             first = await maybe_generate_episode(
