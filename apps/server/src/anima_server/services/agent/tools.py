@@ -716,17 +716,78 @@ def inject_inner_thoughts_into_tools(
     return tools
 
 
-def get_tools() -> list[Any]:
-    """Return all tools available to the agent."""
-    tools = [
-        current_datetime, send_message, continue_reasoning,
+_HEARTBEAT_KEY = "request_heartbeat"
+_HEARTBEAT_DESCRIPTION = (
+    "Request an immediate follow-up step after this tool executes. "
+    "Set to true when you need to chain tools (e.g. search then update). "
+    "Set to false or omit when you are done and ready to send_message."
+)
+
+
+def inject_heartbeat_into_tools(
+    tools: list[Any],
+    terminal_tool_names: set[str] | None = None,
+) -> list[Any]:
+    """Inject ``request_heartbeat`` as an optional boolean parameter on
+    every non-terminal tool schema.
+
+    Terminal tools (e.g. ``send_message``) are excluded — they always
+    end the turn.  The parameter is appended last (after all other
+    params) so the model fills in the real arguments first.
+    """
+    terminal = terminal_tool_names or {"send_message"}
+    for t in tools:
+        name = getattr(t, "name", "") or getattr(t, "__name__", "")
+        if name in terminal:
+            continue
+        schema_obj = getattr(t, "args_schema", None)
+        if schema_obj is None or not hasattr(schema_obj, "model_json_schema"):
+            continue
+        schema = schema_obj.model_json_schema()
+        props = schema.get("properties")
+        if not isinstance(props, dict):
+            continue
+        if _HEARTBEAT_KEY in props:
+            continue  # already injected
+        props[_HEARTBEAT_KEY] = {
+            "type": "boolean",
+            "description": _HEARTBEAT_DESCRIPTION,
+        }
+        # Not required — defaults to false (stop after this tool)
+        t.args_schema = _SimpleSchema(schema)
+    return tools
+
+
+def get_core_tools() -> list[Any]:
+    """Return the minimal cognitive tool set.
+
+    These 6 tools are the AI's core capabilities — communicate,
+    remember, learn, persist.  Everything else is an extension.
+    """
+    return [
+        send_message,
+        recall_memory, recall_conversation,
         core_memory_append, core_memory_replace,
-        note_to_self, dismiss_note, save_to_memory,
-        set_intention, complete_goal,
-        create_task, list_tasks, complete_task,
-        recall_memory, recall_conversation, update_human_memory,
+        save_to_memory,
     ]
+
+
+def get_extension_tools() -> list[Any]:
+    """Return optional extension tools (task management, intentions, etc.)."""
+    return [
+        create_task, list_tasks, complete_task,
+        set_intention, complete_goal,
+        note_to_self, dismiss_note,
+        update_human_memory,
+        current_datetime,
+    ]
+
+
+def get_tools() -> list[Any]:
+    """Return all tools available to the agent (core + extensions)."""
+    tools = get_core_tools() + get_extension_tools()
     inject_inner_thoughts_into_tools(tools)
+    inject_heartbeat_into_tools(tools)
     return tools
 
 

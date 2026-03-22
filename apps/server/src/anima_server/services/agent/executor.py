@@ -32,6 +32,28 @@ def unpack_inner_thoughts_from_kwargs(
     return str(value) if not isinstance(value, str) else value
 
 
+def unpack_heartbeat_from_kwargs(
+    tool_call: ToolCall,
+    heartbeat_key: str = "request_heartbeat",
+) -> bool:
+    """Pop the ``request_heartbeat`` kwarg from *tool_call.arguments*.
+
+    Returns True if the model requested a follow-up step, False otherwise.
+    Handles stringified booleans (``"true"``, ``"True"``) that some
+    models produce instead of native JSON booleans.
+    """
+    if not isinstance(tool_call.arguments, dict):
+        return False
+    value = tool_call.arguments.pop(heartbeat_key, None)
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return bool(value)
+
+
 class ToolExecutor:
     def __init__(self, tools: list[Any]) -> None:
         self._tools = {
@@ -54,9 +76,10 @@ class ToolExecutor:
                 is_error=True,
             )
 
-        # Strip the injected `thinking` kwarg early — before any error
-        # path can echo it back in raw_arguments or error messages.
+        # Strip injected kwargs early — before any error path can
+        # echo them back in raw_arguments or error messages.
         thinking = unpack_inner_thoughts_from_kwargs(tool_call)
+        heartbeat = unpack_heartbeat_from_kwargs(tool_call)
 
         if tool_call.parse_error is not None:
             # Redact thinking from raw_arguments string (the dict pop
@@ -74,10 +97,10 @@ class ToolExecutor:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
-                output=(
+                output=_package_error_response(
                     f"Tool {tool_call.name} received malformed arguments: "
                     f"{tool_call.parse_error} Raw arguments: {raw[:200]}"
-                ).rstrip(),
+                ),
                 is_error=True,
             )
 
@@ -88,7 +111,7 @@ class ToolExecutor:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
-                output=validation_error,
+                output=_package_error_response(validation_error),
                 is_error=True,
             )
 
@@ -104,24 +127,36 @@ class ToolExecutor:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
-                output=f"Tool {tool_call.name} timed out after {settings.agent_tool_timeout}s",
+                output=_package_error_response(
+                    f"Tool {tool_call.name} timed out after {settings.agent_tool_timeout}s"),
                 is_error=True,
             )
         except Exception as exc:
             return ToolExecutionResult(
                 call_id=tool_call.id,
                 name=tool_call.name,
-                output=f"Tool {tool_call.name} failed: {exc}",
+                output=_package_error_response(
+                    f"Tool {tool_call.name} failed: {exc}"),
                 is_error=True,
             )
+
+        # Terminal tools (send_message) return raw output — it's the
+        # user-facing response.  Non-terminal tools get the JSON envelope
+        # so the model sees structured status/message/time.
+        formatted_output = (
+            _stringify_output(output)
+            if is_terminal
+            else _package_tool_response(output)
+        )
 
         return ToolExecutionResult(
             call_id=tool_call.id,
             name=tool_call.name,
-            output=_stringify_output(output),
+            output=formatted_output,
             is_terminal=is_terminal,
             memory_modified=flags["memory_modified"],
             inner_thinking=thinking,
+            heartbeat_requested=heartbeat,
         )
 
     async def execute_parallel(
@@ -210,7 +245,7 @@ def _validate_tool_arguments(
     tool: Any,
     arguments: dict[str, Any],
     *,
-    ignore_keys: tuple[str, ...] = ("thinking",),
+    ignore_keys: tuple[str, ...] = ("thinking", "request_heartbeat"),
 ) -> str | None:
     required_arguments = _get_required_tool_arguments(tool)
     if not required_arguments:
@@ -277,6 +312,45 @@ def _get_tool_schema(tool: Any) -> dict[str, Any] | None:
         return None
 
     return resolved if isinstance(resolved, dict) else None
+
+
+_TOOL_RETURN_CHAR_LIMIT = 50_000
+_ERROR_MESSAGE_CHAR_LIMIT = 1000
+
+
+def _package_tool_response(
+    output: Any,
+    *,
+    was_success: bool = True,
+    char_limit: int = _TOOL_RETURN_CHAR_LIMIT,
+) -> str:
+    """Format a tool result into a uniform JSON envelope.
+
+    Returns ``{"status": "OK"|"Failed", "message": "...", "time": "..."}``.
+    Truncates the message with an in-band warning if it exceeds *char_limit*.
+    """
+    from datetime import datetime, timezone
+
+    message = _stringify_output(output)
+
+    if char_limit and len(message) > char_limit:
+        message = (
+            f"{message[:char_limit]}... [NOTE: output truncated, "
+            f"{len(message)} > {char_limit} chars]"
+        )
+
+    return json.dumps({
+        "status": "OK" if was_success else "Failed",
+        "message": message,
+        "time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+    })
+
+
+def _package_error_response(error_msg: str) -> str:
+    """Format an error into the uniform envelope with truncation."""
+    if len(error_msg) > _ERROR_MESSAGE_CHAR_LIMIT:
+        error_msg = error_msg[:_ERROR_MESSAGE_CHAR_LIMIT] + "..."
+    return _package_tool_response(error_msg, was_success=False)
 
 
 def _stringify_output(value: Any) -> str:

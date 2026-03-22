@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  api,
-  type DbTableInfo,
-  type DbTableData,
-  type DbQueryResult,
-} from "../lib/api";
-
-type View = "tables" | "rows" | "query";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { api, type DbTableInfo, type DbTableData, type DbQueryResult } from "../lib/api";
+import { Icons } from "../components/database/Icons";
+import { NavButton } from "../components/database/components";
+import { useLocalStorage, useColumnStats, useVirtualList, useLastSession, useQueryDraft, useColumnVisibility } from "../components/database/hooks";
+import type { View, RowViewMode, ExportFormat, Bookmark, TableStats, QueryHistoryItem } from "../components/database/types";
+import { Dashboard, TableList, RowViewer, SchemaView, RelationsView, QueryEditor } from "../components/database/views";
+import { convertToCsv, generateInsertSQL, downloadFile, applyColumnFilters } from "../components/database/utils";
+import type { ColumnFilter } from "../components/database/ColumnFilter";
+import { KeyboardShortcutsHelp, useKeyboardShortcuts } from "../components/database";
 
 export default function Database() {
   // Password gate
@@ -15,7 +16,8 @@ export default function Database() {
   const [verifying, setVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
 
-  const [view, setView] = useState<View>("tables");
+  // View state
+  const [view, setView] = useState<View>("dashboard");
   const [tables, setTables] = useState<DbTableInfo[]>([]);
   const [tableData, setTableData] = useState<DbTableData | null>(null);
   const [queryResult, setQueryResult] = useState<DbQueryResult | null>(null);
@@ -23,35 +25,96 @@ export default function Database() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
-  const queryRef = useRef<HTMLTextAreaElement>(null);
 
-  // Edit / delete gating
+  // View modes
+  const [rowViewMode, setRowViewMode] = useState<RowViewMode>("list");
+
+  // Search & filter
+  const [tableSearch, setTableSearch] = useState("");
+  const [rowFilter, setRowFilter] = useState("");
+  const [expandedCells, setExpandedCells] = useState<Set<string>>(new Set());
+
+  // Schema
+  const [schemaColumns, setSchemaColumns] = useState<Array<{ name: string; type: string; nullable: boolean; default: string | null; primaryKey: boolean }>>([]);
+  const [schemaIndexes, setSchemaIndexes] = useState<string[]>([]);
+
+  // Query history
+  const [queryHistory, setQueryHistory] = useLocalStorage<QueryHistoryItem[]>("db-query-history", []);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Edit
   const [editMode, setEditMode] = useState(false);
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
 
+  // Stats
+  const [stats, setStats] = useState<TableStats | null>(null);
+  const { columnStats, calculateStats } = useColumnStats();
+
+  // Selection
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+
+  // Column stats toggle
+  const [showColumnStats, setShowColumnStats] = useState(false);
+
+  // Bookmarks
+  const [bookmarks, setBookmarks] = useLocalStorage<Bookmark[]>("db-bookmarks", []);
+
+  // Recent tables
+  const [recentTables, setRecentTables] = useLocalStorage<string[]>("db-recent-tables", []);
+
+  // Export
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Copy feedback
+  const [copiedCell, setCopiedCell] = useState<string | null>(null);
+
+  // Column widths
+  const [columnWidths, setColumnWidths] = useLocalStorage<Record<string, number>>("db-col-widths", {});
+  const resizingCol = useRef<string | null>(null);
+  const startX = useRef(0);
+  const startWidth = useRef(0);
+
+  // Column filters
+  const [columnFilters, setColumnFilters] = useState<ColumnFilter[]>([]);
+
+  // Virtual list (for future use)
+  const { containerRef } = useVirtualList([], 32, 10);
+
+  // Last session restoration
+  const { saveSession, restoreSession } = useLastSession();
+
+  // Query draft auto-save
+  const { draft: queryDraft, updateDraft: updateQueryDraft } = useQueryDraft();
+
   const PAGE_SIZE = 100;
 
-  async function handleVerify() {
-    if (!password) return;
-    setVerifying(true);
-    setVerifyError(null);
-    try {
-      await api.db.verifyPassword(password);
-      setUnlocked(true);
-      setPassword("");
-    } catch (e: unknown) {
-      setVerifyError(e instanceof Error ? e.message : "Verification failed");
-    } finally {
-      setVerifying(false);
+  // Initial load + session restore
+  // Load draft on mount
+  useEffect(() => {
+    if (queryDraft && !sql) {
+      setSql(queryDraft);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    if (unlocked) loadTables();
+    if (unlocked) {
+      loadTables();
+      calculateDashboardStats();
+      
+      // Restore last session
+      const session = restoreSession();
+      if (session) {
+        if (session.lastQuery && !sql) {
+          setSql(session.lastQuery);
+        }
+        // Could also restore lastTable here if we wanted
+      }
+    }
   }, [unlocked]);
 
-  // Reset editing state when edit mode is toggled off
+  // Reset edit state
   useEffect(() => {
     if (!editMode) {
       setEditingRow(null);
@@ -59,37 +122,113 @@ export default function Database() {
     }
   }, [editMode]);
 
-  async function loadTables() {
+  // Reset selection on table change
+  useEffect(() => {
+    setSelectedRows(new Set());
+    setSelectAll(false);
+  }, [tableData?.table]);
+
+  // Auto-save query draft
+  useEffect(() => {
+    updateQueryDraft(sql);
+  }, [sql, updateQueryDraft]);
+
+  // Save session on view/table change
+  useEffect(() => {
+    if (unlocked) {
+      saveSession({
+        lastView: view,
+        lastTable: tableData?.table,
+        lastQuery: sql,
+      });
+    }
+  }, [view, tableData?.table, sql, unlocked, saveSession]);
+
+  const handleVerify = async () => {
+    if (!password) return;
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      await api.db.verifyPassword(password);
+      setUnlocked(true);
+      setPassword("");
+    } catch (e) {
+      setVerifyError(e instanceof Error ? e.message : "Verification failed");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const loadTables = async () => {
     setLoading(true);
     setError(null);
     try {
       const data = await api.db.tables();
       setTables(data);
-    } catch (e: unknown) {
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load tables");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function openTable(name: string, pageNum = 0) {
+  const calculateDashboardStats = async () => {
+    try {
+      const tableData = await api.db.tables();
+      const totalRows = tableData.reduce((sum, t) => sum + t.rowCount, 0);
+      const largest = tableData.reduce((max, t) => (t.rowCount > max.rowCount ? t : max), tableData[0]);
+      setStats({
+        totalRows,
+        totalTables: tableData.length,
+        largestTable: largest?.name || "—",
+        recentQueries: queryHistory.length,
+      });
+    } catch {
+      // ignore
+    }
+  };
+
+  const openTable = async (name: string, pageNum = 0) => {
     setLoading(true);
     setError(null);
     setPage(pageNum);
-    setView("rows");
     setEditingRow(null);
     setEditValues({});
+    setRowFilter("");
+    setExpandedCells(new Set());
+    setSelectedRows(new Set());
+    setSelectAll(false);
+
+    setRecentTables((prev) => {
+      const filtered = prev.filter((t) => t !== name);
+      return [name, ...filtered].slice(0, 10);
+    });
+
     try {
       const data = await api.db.tableRows(name, PAGE_SIZE, pageNum * PAGE_SIZE);
       setTableData(data);
-    } catch (e: unknown) {
+      setView("rows");
+      await loadSchema(name);
+      calculateStats(data);
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load table");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function runQuery() {
+  const loadSchema = async (tableName: string) => {
+    try {
+      const schema = await api.db.tableSchema(tableName);
+      setSchemaColumns(schema.columns || []);
+      setSchemaIndexes(schema.indexes || []);
+    } catch {
+      setSchemaColumns([]);
+      setSchemaIndexes([]);
+    }
+  };
+
+  const runQuery = async () => {
     if (!sql.trim()) return;
     setLoading(true);
     setError(null);
@@ -97,65 +236,130 @@ export default function Database() {
     try {
       const data = await api.db.query(sql);
       setQueryResult(data);
-    } catch (e: unknown) {
+      const newItem: QueryHistoryItem = {
+        sql: sql.trim(),
+        timestamp: Date.now(),
+        rowCount: data.rowCount,
+      };
+      setQueryHistory((prev) => [newItem, ...prev.slice(0, 19)]);
+      calculateDashboardStats();
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Query failed");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      runQuery();
+  // Filtered tables
+  const filteredTables = useMemo(() => {
+    if (!tableSearch.trim()) return tables;
+    const search = tableSearch.toLowerCase();
+    return tables.filter((t) => t.name.toLowerCase().includes(search));
+  }, [tables, tableSearch]);
+
+  // Filtered rows
+  // Filter rows (search + column filters)
+  const filteredRows = useMemo(() => {
+    if (!tableData?.rows) return [];
+    
+    let rows = tableData.rows;
+    
+    // Apply column filters first
+    if (columnFilters.length > 0) {
+      rows = applyColumnFilters(rows, columnFilters);
     }
-  }
+    
+    // Apply text filter
+    if (rowFilter.trim()) {
+      const filter = rowFilter.toLowerCase();
+      rows = rows.filter((row) =>
+        Object.values(row).some((val) => String(val).toLowerCase().includes(filter))
+      );
+    }
+    
+    return rows;
+  }, [tableData, rowFilter, columnFilters]);
 
-  // ---------------------------------------------------------------------------
-  // Row editing helpers
-  // ---------------------------------------------------------------------------
+  // Top tables
+  const topTables = useMemo(() => {
+    return [...tables].sort((a, b) => b.rowCount - a.rowCount).slice(0, 5);
+  }, [tables]);
 
-  function buildConditions(
-    row: Record<string, unknown>,
-  ): Record<string, unknown> {
+  // Foreign keys
+  const foreignKeys = useMemo(() => {
+    if (!tableData) return [];
+    return tableData.columns
+      .filter((col) => col.endsWith("_id"))
+      .map((col) => {
+        const targetTable = col.replace(/_id$/, "");
+        const matchingTable = tables.find(
+          (t) => t.name === targetTable || t.name === targetTable + "s"
+        );
+        return matchingTable
+          ? {
+              fromTable: tableData.table,
+              fromColumn: col,
+              toTable: matchingTable.name,
+              toColumn: "id",
+            }
+          : null;
+      })
+      .filter(Boolean) as Array<{ fromTable: string; fromColumn: string; toTable: string; toColumn: string }>;
+  }, [tableData, tables]);
+
+  // Can mutate
+  const canMutate = editMode && (tableData?.primaryKeys?.length ?? 0) > 0;
+
+  // Column visibility
+  const {
+    visibleColumns,
+    hiddenColumns,
+    toggleColumn,
+    showAllColumns,
+    hideAllColumns,
+  } = useColumnVisibility(tableData?.table || null, tableData?.columns || []);
+
+  // Bookmarks helpers
+  const addBookmark = (type: "table" | "query", name: string, value: string) => {
+    const newBookmark: Bookmark = { type, name, value, timestamp: Date.now() };
+    setBookmarks((prev) => [newBookmark, ...prev].slice(0, 20));
+  };
+
+  const removeBookmark = (timestamp: number) => {
+    setBookmarks((prev) => prev.filter((b) => b.timestamp !== timestamp));
+  };
+
+  const isBookmarked = (type: "table" | "query", value: string) => {
+    return bookmarks.some((b) => b.type === type && b.value === value);
+  };
+
+  // Row helpers
+  const buildConditions = (row: Record<string, unknown>) => {
     if (!tableData) return {};
     const pks = tableData.primaryKeys ?? [];
     if (pks.length === 0) return {};
-    const cond: Record<string, unknown> = {};
-    for (const pk of pks) cond[pk] = row[pk];
-    return cond;
-  }
+    return Object.fromEntries(pks.map((pk) => [pk, row[pk]]));
+  };
 
-  const canMutate = editMode && (tableData?.primaryKeys?.length ?? 0) > 0;
-
-  function startEdit(rowIndex: number, row: Record<string, unknown>) {
+  const startEdit = (rowIndex: number, row: Record<string, unknown>) => {
     setEditingRow(rowIndex);
-    const vals: Record<string, string> = {};
-    for (const [k, v] of Object.entries(row)) {
-      vals[k] = v === null || v === undefined ? "" : String(v);
-    }
-    setEditValues(vals);
-  }
+    setEditValues(Object.fromEntries(Object.entries(row).map(([k, v]) => [k, v == null ? "" : String(v)])));
+  };
 
-  function cancelEdit() {
+  const cancelEdit = () => {
     setEditingRow(null);
     setEditValues({});
-  }
+  };
 
-  async function saveEdit(originalRow: Record<string, unknown>) {
+  const saveEdit = async (originalRow: Record<string, unknown>) => {
     if (!tableData) return;
     const conditions = buildConditions(originalRow);
-    const updates: Record<string, unknown> = {};
-    for (const col of tableData.columns) {
-      const newVal = editValues[col] ?? "";
-      const oldVal =
-        originalRow[col] === null || originalRow[col] === undefined
-          ? ""
-          : String(originalRow[col]);
-      if (newVal !== oldVal) {
-        updates[col] = newVal;
-      }
-    }
+    const updates = Object.fromEntries(
+      Object.entries(editValues).filter(([col, val]) => {
+        const oldVal = originalRow[col] == null ? "" : String(originalRow[col]);
+        return val !== oldVal;
+      })
+    );
     if (Object.keys(updates).length === 0) {
       cancelEdit();
       return;
@@ -166,14 +370,14 @@ export default function Database() {
       await api.db.updateRow(tableData.table, conditions, updates);
       cancelEdit();
       await openTable(tableData.table, page);
-    } catch (e: unknown) {
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Update failed");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  async function deleteRow(row: Record<string, unknown>) {
+  const deleteRow = async (row: Record<string, unknown>) => {
     if (!tableData) return;
     const conditions = buildConditions(row);
     setLoading(true);
@@ -181,314 +385,155 @@ export default function Database() {
     try {
       await api.db.deleteRow(tableData.table, conditions);
       await openTable(tableData.table, page);
-    } catch (e: unknown) {
+    } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
+  // Import rows
+  const importRows = async (rows: Record<string, unknown>[]) => {
+    if (!tableData) return;
+    // TODO: Insert each row via API
+    // For now, just refresh the table
+    console.log(`Would import ${rows.length} rows into ${tableData.table}`);
+    await openTable(tableData.table, page);
+  };
 
-  function renderCell(value: unknown): string {
-    if (value === null || value === undefined) return "NULL";
-    if (typeof value === "string" && value.length > 120)
-      return value.slice(0, 120) + "…";
-    return String(value);
-  }
+  // Selection helpers
+  const toggleRowSelection = (index: number) => {
+    setSelectedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
 
-  function renderDataTable(
-    columns: string[],
-    rows: Record<string, unknown>[],
-    options?: { editable?: boolean },
-  ) {
-    const editable = options?.editable && canMutate;
-    if (columns.length === 0) {
-      return <p className="text-text-muted text-sm">No columns</p>;
+  const toggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedRows(new Set());
+    } else {
+      setSelectedRows(new Set(filteredRows.map((_, i) => i)));
     }
-    return (
-      <div className="overflow-auto max-h-[calc(100vh-280px)] border border-border rounded-md">
-        <table className="w-full text-[12px] font-mono">
-          <thead className="sticky top-0 z-10">
-            <tr className="bg-bg-card border-b border-border">
-              {editable && (
-                <th className="px-2 py-2 text-left text-text-muted font-medium whitespace-nowrap w-[80px]">
-                  Actions
-                </th>
-              )}
-              {columns.map((col) => (
-                <th
-                  key={col}
-                  className="px-3 py-2 text-left text-text-muted font-medium whitespace-nowrap"
-                >
-                  {col}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => {
-              const isEditing = editable && editingRow === i;
-              return (
-                <tr
-                  key={i}
-                  className="border-b border-border/50 hover:bg-bg-card/60 transition-colors"
-                >
-                  {editable && (
-                    <td className="px-2 py-1.5 whitespace-nowrap">
-                      {isEditing ? (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => saveEdit(row)}
-                            className="text-[10px] text-primary hover:text-primary-hover"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={cancelEdit}
-                            className="text-[10px] text-text-muted hover:text-text"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={() => startEdit(i, row)}
-                            className="text-[10px] text-text-muted hover:text-primary transition-colors"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => deleteRow(row)}
-                            className="text-[10px] text-text-muted hover:text-danger transition-colors"
-                          >
-                            Del
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  )}
-                  {columns.map((col) => (
-                    <td
-                      key={col}
-                      className="px-3 py-1.5 whitespace-nowrap max-w-[300px] truncate"
-                    >
-                      {isEditing ? (
-                        <input
-                          type="text"
-                          value={editValues[col] ?? ""}
-                          onChange={(e) =>
-                            setEditValues((prev) => ({
-                              ...prev,
-                              [col]: e.target.value,
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveEdit(row);
-                            if (e.key === "Escape") cancelEdit();
-                          }}
-                          className="w-full min-w-[80px] bg-bg-input border border-border rounded px-1.5 py-0.5 text-[12px] font-mono outline-none focus:border-primary/40"
-                        />
-                      ) : (
-                        <span
-                          className={
-                            row[col] === null ? "text-text-muted/40 italic" : ""
-                          }
-                        >
-                          {renderCell(row[col])}
-                        </span>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
+    setSelectAll(!selectAll);
+  };
 
-  // ---------------------------------------------------------------------------
-  // Views
-  // ---------------------------------------------------------------------------
+  const deleteSelectedRows = async () => {
+    if (!tableData || selectedRows.size === 0) return;
+    if (!confirm(`Delete ${selectedRows.size} selected rows?`)) return;
+    setLoading(true);
+    for (const idx of selectedRows) {
+      const row = filteredRows[idx];
+      if (!row) continue;
+      try {
+        await api.db.deleteRow(tableData.table, buildConditions(row));
+      } catch {
+        // ignore individual failures
+      }
+    }
+    setSelectedRows(new Set());
+    setSelectAll(false);
+    await openTable(tableData.table, page);
+    setLoading(false);
+  };
 
-  function renderTablesView() {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-text-muted">
-            {tables.length} tables
-          </h2>
-          <button
-            onClick={loadTables}
-            className="text-xs text-text-muted hover:text-text transition-colors"
-          >
-            Refresh
-          </button>
-        </div>
-        <div className="grid gap-1.5">
-          {tables.map((t) => (
-            <button
-              key={t.name}
-              onClick={() => openTable(t.name)}
-              className="flex items-center justify-between px-3 py-2.5 rounded-md bg-bg-card/50 hover:bg-bg-card border border-border/50 hover:border-border transition-all text-left group"
-            >
-              <span className="font-mono text-[13px]">{t.name}</span>
-              <span className="text-xs text-text-muted group-hover:text-text transition-colors">
-                {t.rowCount} rows
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // Copy helper
+  const copyToClipboard = async (text: string, identifier: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedCell(identifier);
+      setTimeout(() => setCopiedCell(null), 1500);
+    } catch {
+      // ignore
+    }
+  };
 
-  function renderRowsView() {
-    if (!tableData) return null;
-    const totalPages = Math.ceil(tableData.total / PAGE_SIZE);
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setView("tables");
-              setTableData(null);
-            }}
-            className="text-xs text-text-muted hover:text-text transition-colors"
-          >
-            ← Tables
-          </button>
-          <h2 className="font-mono text-sm font-medium">{tableData.table}</h2>
-          <span className="text-xs text-text-muted">
-            {tableData.total} rows
-          </span>
-          <button
-            onClick={() => {
-              setSql(`SELECT * FROM "${tableData.table}" LIMIT 100`);
-              setView("query");
-            }}
-            className="ml-auto text-xs text-primary hover:text-primary-hover transition-colors"
-          >
-            Query this table
-          </button>
-        </div>
+  // Cell expand helper
+  const toggleCellExpand = (rowIdx: number, col: string) => {
+    const key = `${rowIdx}-${col}`;
+    setExpandedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
-        {/* Edit mode toggle */}
-        <div className="flex items-center gap-3">
-          <label className="inline-flex items-center gap-2 select-none cursor-pointer">
-            <input
-              type="checkbox"
-              checked={editMode}
-              onChange={(e) => setEditMode(e.target.checked)}
-              className="w-3.5 h-3.5 accent-danger cursor-pointer"
-            />
-            <span className="text-xs text-text-muted">Enable editing</span>
-          </label>
-          {editMode && (tableData?.primaryKeys?.length ?? 0) === 0 && (
-            <span className="text-[11px] text-text-muted/60 italic">
-              No primary key — editing disabled for this table
-            </span>
-          )}
-        </div>
+  // Column resize
+  const startResize = (e: React.MouseEvent, col: string) => {
+    e.preventDefault();
+    resizingCol.current = col;
+    startX.current = e.clientX;
+    startWidth.current = columnWidths[col] || 150;
 
-        {renderDataTable(tableData.columns, tableData.rows, { editable: true })}
-        {totalPages > 1 && (
-          <div className="flex items-center gap-2 justify-center pt-1">
-            <button
-              disabled={page === 0}
-              onClick={() => openTable(tableData.table, page - 1)}
-              className="px-2 py-1 text-xs rounded bg-bg-card border border-border disabled:opacity-30 hover:bg-bg-input transition-colors"
-            >
-              Prev
-            </button>
-            <span className="text-xs text-text-muted">
-              Page {page + 1} of {totalPages}
-            </span>
-            <button
-              disabled={page >= totalPages - 1}
-              onClick={() => openTable(tableData.table, page + 1)}
-              className="px-2 py-1 text-xs rounded bg-bg-card border border-border disabled:opacity-30 hover:bg-bg-input transition-colors"
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
+    const handleMove = (e: MouseEvent) => {
+      if (!resizingCol.current) return;
+      const diff = e.clientX - startX.current;
+      const newWidth = Math.max(50, startWidth.current + diff);
+      setColumnWidths((prev) => ({ ...prev, [resizingCol.current!]: newWidth }));
+    };
 
-  function renderQueryView() {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => {
-              setView("tables");
-              setQueryResult(null);
-              setError(null);
-            }}
-            className="text-xs text-text-muted hover:text-text transition-colors"
-          >
-            ← Tables
-          </button>
-          <h2 className="text-sm font-medium text-text-muted">SQL Query</h2>
-        </div>
-        <div className="relative">
-          <textarea
-            ref={queryRef}
-            value={sql}
-            onChange={(e) => setSql(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="SELECT * FROM users LIMIT 10"
-            rows={4}
-            className="w-full px-3 py-2.5 rounded-md bg-bg-input border border-border text-[13px] font-mono resize-y placeholder:text-text-muted/40 focus:outline-none focus:border-primary/40 transition-colors"
-          />
-          <div className="flex items-center justify-between mt-2">
-            <span className="text-[11px] text-text-muted/50">
-              Ctrl+Enter to run • SELECT, PRAGMA, EXPLAIN only
-            </span>
-            <button
-              onClick={runQuery}
-              disabled={loading || !sql.trim()}
-              className="px-3 py-1.5 text-xs rounded-md bg-primary/15 text-primary hover:bg-primary/25 border border-primary/20 disabled:opacity-30 transition-all"
-            >
-              {loading ? "Running…" : "Run"}
-            </button>
-          </div>
-        </div>
-        {queryResult && (
-          <div className="space-y-2">
-            <span className="text-xs text-text-muted">
-              {queryResult.rowCount} row{queryResult.rowCount !== 1 ? "s" : ""}{" "}
-              returned
-            </span>
-            {renderDataTable(queryResult.columns, queryResult.rows)}
-          </div>
-        )}
-      </div>
-    );
-  }
+    const handleUp = () => {
+      resizingCol.current = null;
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+    };
 
-  // ---------------------------------------------------------------------------
-  // Main render
-  // ---------------------------------------------------------------------------
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  };
 
+  // Export
+  const exportData = (format: ExportFormat) => {
+    if (!tableData) return;
+    let content = "";
+    let filename = "";
+    let mimeType = "";
+
+    switch (format) {
+      case "csv":
+        content = convertToCsv({ columns: tableData.columns, rows: filteredRows, rowCount: filteredRows.length });
+        filename = `${tableData.table}.csv`;
+        mimeType = "text/csv";
+        break;
+      case "json":
+        content = JSON.stringify(filteredRows, null, 2);
+        filename = `${tableData.table}.json`;
+        mimeType = "application/json";
+        break;
+      case "sql":
+        content = generateInsertSQL(tableData.table, tableData.columns, filteredRows);
+        filename = `${tableData.table}.sql`;
+        mimeType = "text/plain";
+        break;
+    }
+
+    downloadFile(content, filename, mimeType);
+    setShowExportMenu(false);
+  };
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts({
+    onRunQuery: view === "query" ? runQuery : undefined,
+    onFocusSearch: () => {
+      const searchInput = document.querySelector('input[type="text"]') as HTMLInputElement;
+      searchInput?.focus();
+    },
+  });
+
+  // Unlock screen
   if (!unlocked) {
     return (
       <div className="h-full flex items-center justify-center">
-        <div className="w-full max-w-xs space-y-4">
+        <div className="w-full max-w-sm space-y-4">
           <div className="text-center space-y-1">
-            <h1 className="text-base font-semibold tracking-tight">
-              Database Viewer
-            </h1>
-            <p className="text-xs text-text-muted">
-              Re-enter your password to view decrypted data
-            </p>
+            <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center text-primary">
+              <Icons.Schema />
+            </div>
+            <h1 className="text-lg font-semibold">Database Viewer</h1>
+            <p className="text-xs text-text-muted">Enter your password to view decrypted data</p>
           </div>
           <form
             onSubmit={(e) => {
@@ -503,17 +548,15 @@ export default function Database() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
               autoFocus
-              className="w-full bg-bg-input border border-border rounded-sm px-3 py-2 text-sm text-text placeholder:text-text-muted/50 outline-none focus:border-primary transition-colors"
+              className="w-full bg-bg-input border border-border rounded-lg px-4 py-3 text-sm placeholder:text-text-muted/50 outline-none focus:border-primary transition-colors"
             />
-            {verifyError && (
-              <p className="text-xs text-danger">{verifyError}</p>
-            )}
+            {verifyError && <p className="text-xs text-danger px-1">{verifyError}</p>}
             <button
               type="submit"
               disabled={verifying || !password}
-              className="w-full px-4 py-2 border border-border rounded-sm text-xs uppercase tracking-wider hover:border-primary disabled:opacity-50 transition-colors"
+              className="w-full px-4 py-3 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
             >
-              {verifying ? "Verifying…" : "Unlock"}
+              {verifying ? "Verifying…" : "Unlock Database"}
             </button>
           </form>
         </div>
@@ -524,59 +567,173 @@ export default function Database() {
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 px-6 py-4 border-b border-border">
+      <header className="shrink-0 px-6 py-4 border-b border-border bg-bg-card/50">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-base font-semibold tracking-tight">Database</h1>
-            <p className="text-xs text-text-muted mt-0.5">
-              Inspect tables and run queries on the encrypted store
-            </p>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+              <Icons.Schema />
+            </div>
+            <div>
+              <h1 className="text-base font-semibold">Database</h1>
+              <p className="text-[11px] text-text-muted">
+                {tables.length} tables • {stats?.totalRows?.toLocaleString() ?? "—"} rows
+              </p>
+            </div>
           </div>
-          <div className="flex gap-1.5">
-            <button
-              onClick={() => {
-                setView("tables");
-                setError(null);
-              }}
-              className={`px-3 py-1.5 text-xs rounded-md border transition-all ${
-                view === "tables"
-                  ? "bg-bg-card border-border text-text"
-                  : "border-transparent text-text-muted hover:text-text"
-              }`}
-            >
-              Tables
-            </button>
-            <button
-              onClick={() => {
-                setView("query");
-                setError(null);
-              }}
-              className={`px-3 py-1.5 text-xs rounded-md border transition-all ${
-                view === "query"
-                  ? "bg-bg-card border-border text-text"
-                  : "border-transparent text-text-muted hover:text-text"
-              }`}
-            >
-              Query
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1">
+              <NavButton active={view === "dashboard"} onClick={() => setView("dashboard")} icon={<Icons.Dashboard />}>
+                Dashboard
+              </NavButton>
+              <NavButton active={view === "tables" || view === "rows"} onClick={() => setView("tables")} icon={<Icons.Table />}>
+                Tables
+              </NavButton>
+              <NavButton active={view === "query"} onClick={() => setView("query")} icon={<Icons.Eye />}>
+                Query
+              </NavButton>
+            </div>
+            <KeyboardShortcutsHelp />
           </div>
         </div>
       </header>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-6 py-4">
+      <div className="flex-1 overflow-auto px-6 py-5">
         {error && (
-          <div className="mb-3 px-3 py-2 rounded-md bg-danger/10 border border-danger/20 text-danger text-xs">
+          <div className="mb-4 px-4 py-3 rounded-lg bg-danger/10 border border-danger/20 text-danger text-sm flex items-center gap-2">
+            <Icons.Warning />
             {error}
           </div>
         )}
+
         {loading && view === "tables" && tables.length === 0 ? (
-          <p className="text-sm text-text-muted animate-pulse">Loading…</p>
+          <div className="flex items-center justify-center h-32">
+            <div className="animate-pulse text-text-muted">Loading database…</div>
+          </div>
         ) : (
           <>
-            {view === "tables" && renderTablesView()}
-            {view === "rows" && renderRowsView()}
-            {view === "query" && renderQueryView()}
+            {view === "dashboard" && (
+              <Dashboard
+                tables={tables}
+                stats={stats}
+                recentTables={recentTables}
+                bookmarks={bookmarks}
+                topTables={topTables}
+                onOpenTable={openTable}
+                onSetView={setView}
+                onRemoveBookmark={removeBookmark}
+                isBookmarked={isBookmarked}
+              />
+            )}
+
+            {view === "tables" && (
+              <TableList
+                tables={tables}
+                filteredTables={filteredTables}
+                tableSearch={tableSearch}
+                bookmarks={bookmarks}
+                onOpenTable={openTable}
+                onSetTableSearch={setTableSearch}
+                onLoadTables={loadTables}
+                onSetSql={setSql}
+                onSetView={setView}
+                onAddBookmark={addBookmark}
+                onRemoveBookmark={removeBookmark}
+                isBookmarked={isBookmarked}
+              />
+            )}
+
+            {view === "rows" && tableData && (
+              <RowViewer
+                tableData={tableData}
+                filteredRows={filteredRows}
+                schemaColumns={schemaColumns}
+                columnStats={columnStats}
+                columnWidths={columnWidths}
+                bookmarks={bookmarks}
+                rowViewMode={rowViewMode}
+                editMode={editMode}
+                editingRow={editingRow}
+                editValues={editValues}
+                expandedCells={expandedCells}
+                rowFilter={rowFilter}
+                selectedRows={selectedRows}
+                selectAll={selectAll}
+                showColumnStats={showColumnStats}
+                showExportMenu={showExportMenu}
+                copiedCell={copiedCell}
+                page={page}
+                pageSize={PAGE_SIZE}
+                onSetView={setView}
+                onSetTableData={setTableData}
+                onSetRowViewMode={setRowViewMode}
+                onSetRowFilter={setRowFilter}
+                onSetEditMode={setEditMode}
+                onToggleCellExpand={toggleCellExpand}
+                onCopyToClipboard={copyToClipboard}
+                onOpenTable={openTable}
+                onStartEdit={startEdit}
+                onCancelEdit={cancelEdit}
+                onSaveEdit={saveEdit}
+                onDeleteRow={deleteRow}
+                onToggleRowSelection={toggleRowSelection}
+                onToggleSelectAll={toggleSelectAll}
+                onDeleteSelectedRows={deleteSelectedRows}
+                onSetShowColumnStats={setShowColumnStats}
+                onExportData={exportData}
+                onSetShowExportMenu={setShowExportMenu}
+                onStartResize={startResize}
+                onAddBookmark={addBookmark}
+                onRemoveBookmark={removeBookmark}
+                onSetEditValues={setEditValues}
+                isBookmarked={isBookmarked}
+                canMutate={canMutate}
+                containerRef={containerRef}
+                columnFilters={columnFilters}
+                onAddColumnFilter={(filter) => setColumnFilters((prev) => [...prev, filter])}
+                onRemoveColumnFilter={(idx) => setColumnFilters((prev) => prev.filter((_, i) => i !== idx))}
+                onClearColumnFilters={() => setColumnFilters([])}
+                onImportRows={importRows}
+                visibleColumns={visibleColumns}
+                hiddenColumns={hiddenColumns}
+                onToggleColumnVisibility={toggleColumn}
+                onShowAllColumns={showAllColumns}
+                onHideAllColumns={hideAllColumns}
+              />
+            )}
+
+            {view === "schema" && tableData && (
+              <SchemaView tableData={tableData} schemaColumns={schemaColumns} schemaIndexes={schemaIndexes} onSetView={setView} />
+            )}
+
+            {view === "relations" && tableData && (
+              <RelationsView
+                tableData={tableData}
+                tables={tables}
+                foreignKeys={foreignKeys}
+                onSetView={setView}
+                onOpenTable={openTable}
+              />
+            )}
+
+            {view === "query" && (
+              <QueryEditor
+                sql={sql}
+                queryResult={queryResult}
+                queryHistory={queryHistory}
+                bookmarks={bookmarks}
+                showHistory={showHistory}
+                loading={loading}
+                onSetSql={setSql}
+                onRunQuery={runQuery}
+                onSetShowHistory={setShowHistory}
+                onSetQueryHistory={setQueryHistory}
+                onSetView={setView}
+                onAddBookmark={addBookmark}
+                onRemoveBookmark={removeBookmark}
+                isBookmarked={isBookmarked}
+              />
+            )}
           </>
         )}
       </div>

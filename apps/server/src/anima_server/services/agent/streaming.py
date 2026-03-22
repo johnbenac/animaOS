@@ -125,9 +125,9 @@ def build_thought_event(step_index: int, thought: str) -> AgentStreamEvent:
 
 
 def build_tool_call_event(step_index: int, tool_call: ToolCall) -> AgentStreamEvent:
-    # Strip private ``thinking`` kwarg from the client-facing event —
-    # it is emitted separately via ``build_thought_event``.
-    args = {k: v for k, v in tool_call.arguments.items() if k != "thinking"}
+    # Strip injected kwargs from the client-facing event.
+    _injected = {"thinking", "request_heartbeat"}
+    args = {k: v for k, v in tool_call.arguments.items() if k not in _injected}
     data: dict[str, object] = {
         "stepIndex": step_index,
         "id": tool_call.id,
@@ -139,7 +139,7 @@ def build_tool_call_event(step_index: int, tool_call: ToolCall) -> AgentStreamEv
     if tool_call.raw_arguments is not None:
         # Redact ``thinking`` from raw JSON to avoid leaking private
         # reasoning on malformed tool call responses.
-        data["rawArguments"] = _redact_thinking_from_raw(
+        data["rawArguments"] = _redact_injected_kwargs_from_raw(
             tool_call.raw_arguments)
     return AgentStreamEvent(
         event="tool_call",
@@ -326,8 +326,11 @@ def _preview_text(text: str, *, limit: int = _TRACE_PREVIEW_LIMIT) -> str:
     return f"{text[:limit]}..."
 
 
-def _redact_thinking_from_raw(raw: str) -> str:
-    """Remove ``thinking`` key from a raw JSON arguments string.
+_INJECTED_KWARG_KEYS = ("thinking", "request_heartbeat")
+
+
+def _redact_injected_kwargs_from_raw(raw: str) -> str:
+    """Remove injected kwargs from a raw JSON arguments string.
 
     Tries JSON parse first (handles any value type), falls back to
     regex for malformed JSON.
@@ -335,18 +338,32 @@ def _redact_thinking_from_raw(raw: str) -> str:
     import json as _json
     try:
         parsed = _json.loads(raw)
-        if isinstance(parsed, dict) and "thinking" in parsed:
-            parsed.pop("thinking")
-            return _json.dumps(parsed)
+        if isinstance(parsed, dict):
+            changed = False
+            for key in _INJECTED_KWARG_KEYS:
+                if key in parsed:
+                    parsed.pop(key)
+                    changed = True
+            if changed:
+                return _json.dumps(parsed)
     except (ValueError, TypeError):
         pass
     # Regex fallback for unparseable JSON — strip string values only.
     import re as _re
-    return _re.sub(
-        r'"thinking"\s*:\s*"(?:[^"\\]|\\.)*"\s*,?\s*',
-        "",
-        raw,
-    )
+    result = raw
+    for key in _INJECTED_KWARG_KEYS:
+        result = _re.sub(
+            rf'"{key}"\s*:\s*"(?:[^"\\]|\\.)*"\s*,?\s*',
+            "",
+            result,
+        )
+        # Also strip boolean values (for request_heartbeat)
+        result = _re.sub(
+            rf'"{key}"\s*:\s*(?:true|false)\s*,?\s*',
+            "",
+            result,
+        )
+    return result
 
 
 def _serialize_message_preview(message: MessageSnapshot) -> dict[str, object]:

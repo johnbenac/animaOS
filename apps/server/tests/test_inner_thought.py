@@ -21,7 +21,6 @@ from anima_server.services.agent.runtime_types import (
     ToolCall,
 )
 from anima_server.services.agent.tools import (
-    continue_reasoning,
     get_tool_rules,
     get_tools,
     inject_inner_thoughts_into_tools,
@@ -147,8 +146,9 @@ async def test_executor_strips_thinking_before_dispatch() -> None:
     )
     result = await executor.execute(tc)
 
+    import json as _json
     assert result.is_error is False
-    assert result.output == "public"
+    assert _json.loads(result.output)["message"] == "public"
     assert result.inner_thinking == "private reasoning"
 
 
@@ -198,7 +198,7 @@ async def test_tool_then_respond_with_thinking() -> None:
         StepExecutionResult(
             tool_calls=(ToolCall(
                 id="c1", name="lookup",
-                arguments={"thinking": "Need to search for this."},
+                arguments={"thinking": "Need to search for this.", "request_heartbeat": True},
             ),)
         ),
         StepExecutionResult(

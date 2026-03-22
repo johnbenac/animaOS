@@ -776,6 +776,10 @@ export function createApiClient(options: ApiClientOptions) {
         request<DbTableData>(
           `/db/tables/${encodeURIComponent(tableName)}?limit=${limit}&offset=${offset}`,
         ),
+      tableSchema: (tableName: string) =>
+        request<{ columns: { name: string; type: string; nullable: boolean; default: string | null; primaryKey: boolean }[]; indexes: string[] }>(
+          `/db/tables/${encodeURIComponent(tableName)}/schema`,
+        ),
       query: (sql: string) =>
         request<DbQueryResult>("/db/query", {
           method: "POST",

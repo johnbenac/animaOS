@@ -26,6 +26,12 @@ from anima_server.services.agent.runtime_types import (
 from anima_server.services.agent.streaming import AgentStreamEvent
 from anima_server.services.agent.tools import inject_inner_thoughts_into_tools, send_message, tool
 
+import json as _json
+
+def _msg(output: str) -> str:
+    """Extract message from tool result JSON envelope."""
+    return _json.loads(output)["message"]
+
 
 # ---------------------------------------------------------------------------
 # Adapters
@@ -112,7 +118,7 @@ async def test_tool_timeout_does_not_affect_fast_tools() -> None:
         result = await executor.execute(tc)
 
     assert result.is_error is False
-    assert result.output == "fast result"
+    assert _msg(result.output) == "fast result"
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +150,8 @@ async def test_parallel_execution_runs_concurrently() -> None:
     ])
 
     assert len(results) == 2
-    assert results[0].output == "result_a"
-    assert results[1].output == "result_b"
+    assert _msg(results[0].output) == "result_a"
+    assert _msg(results[1].output) == "result_b"
     assert set(call_order) == {"a", "b"}
 
 
@@ -164,7 +170,7 @@ async def test_parallel_execution_single_tool() -> None:
     ])
 
     assert len(results) == 1
-    assert results[0].output == "only"
+    assert _msg(results[0].output) == "only"
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +200,7 @@ async def test_memory_modified_flag_propagated() -> None:
         result = await executor.execute(tc)
 
         assert result.memory_modified is True
-        assert result.output == "modified"
+        assert _msg(result.output) == "modified"
     finally:
         clear_tool_context()
 
@@ -235,7 +241,7 @@ async def test_memory_refresh_callback_updates_system_prompt() -> None:
     # Step 2: send_message with final response
     adapter = QueueAdapter([
         StepExecutionResult(
-            tool_calls=(ToolCall(id="c1", name="modify_tool", arguments={}),)
+            tool_calls=(ToolCall(id="c1", name="modify_tool", arguments={"request_heartbeat": True}),)
         ),
         StepExecutionResult(
             tool_calls=(ToolCall(id="c2", name="send_message", arguments={"message": "done"}),)
@@ -253,6 +259,7 @@ async def test_memory_refresh_callback_updates_system_prompt() -> None:
                     output=result.output,
                     is_terminal=result.is_terminal,
                     memory_modified=True,
+                    heartbeat_requested=result.heartbeat_requested,
                 )
             return result
 
@@ -294,15 +301,22 @@ async def test_memory_refresh_callback_updates_system_prompt() -> None:
 
 
 @pytest.mark.asyncio
-async def test_continue_reasoning_allows_multi_step() -> None:
-    """The continue_reasoning tool is non-terminal, allowing the agent
-    to chain steps before sending a final response."""
-    from anima_server.services.agent.tools import continue_reasoning
+async def test_heartbeat_allows_multi_step() -> None:
+    """Setting request_heartbeat=true on a non-terminal tool allows the
+    agent to chain steps before sending a final response."""
+
+    @tool
+    def lookup(query: str) -> str:
+        """Search for something."""
+        return "found it"
 
     adapter = QueueAdapter([
-        # Step 1: agent calls continue_reasoning
+        # Step 1: agent calls lookup with heartbeat=true (wants another step)
         StepExecutionResult(
-            tool_calls=(ToolCall(id="c1", name="continue_reasoning", arguments={}),)
+            tool_calls=(ToolCall(
+                id="c1", name="lookup",
+                arguments={"query": "test", "request_heartbeat": True},
+            ),)
         ),
         # Step 2: agent sends final message
         StepExecutionResult(
@@ -312,7 +326,7 @@ async def test_continue_reasoning_allows_multi_step() -> None:
 
     runtime = AgentRuntime(
         adapter=adapter,
-        tools=[continue_reasoning, send_message],
+        tools=[lookup, send_message],
         tool_rules=[TerminalToolRule(tool_name="send_message")],
         max_steps=3,
     )
@@ -321,8 +335,41 @@ async def test_continue_reasoning_allows_multi_step() -> None:
 
     assert result.response == "thought it through"
     assert result.stop_reason == StopReason.TERMINAL_TOOL.value
-    assert "continue_reasoning" in result.tools_used
+    assert "lookup" in result.tools_used
     assert len(result.step_traces) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_heartbeat_stops_after_tool() -> None:
+    """Without request_heartbeat, a non-terminal tool ends the turn."""
+
+    @tool
+    def lookup(query: str) -> str:
+        """Search for something."""
+        return "found it"
+
+    adapter = QueueAdapter([
+        # Step 1: agent calls lookup WITHOUT heartbeat (should stop)
+        StepExecutionResult(
+            tool_calls=(ToolCall(
+                id="c1", name="lookup",
+                arguments={"query": "test"},
+            ),)
+        ),
+    ])
+
+    runtime = AgentRuntime(
+        adapter=adapter,
+        tools=[lookup, send_message],
+        tool_rules=[TerminalToolRule(tool_name="send_message")],
+        max_steps=3,
+    )
+
+    result = await runtime.invoke("search", user_id=1, history=[])
+
+    # Turn ended without send_message — no heartbeat requested
+    assert result.stop_reason != StopReason.TERMINAL_TOOL.value
+    assert len(result.step_traces) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -371,24 +418,32 @@ async def test_streaming_retry_blocked_after_content_streamed() -> None:
 
 def test_core_memory_tools_registered() -> None:
     """core_memory_append and core_memory_replace are in get_tools()."""
-    from anima_server.services.agent.tools import get_tools
+    from anima_server.services.agent.tools import get_tools, get_core_tools
     tool_names = [getattr(t, "name", "") for t in get_tools()]
     assert "core_memory_append" in tool_names
     assert "core_memory_replace" in tool_names
-    assert "continue_reasoning" in tool_names
     assert "inner_thought" not in tool_names  # removed in favor of thinking kwarg
+    # Core tools are a subset of all tools
+    core_names = [getattr(t, "name", "") for t in get_core_tools()]
+    assert set(core_names) <= set(tool_names)
 
 
-def test_continue_reasoning_tool_is_not_terminal() -> None:
-    """continue_reasoning must not be terminal — it allows chaining."""
-    from anima_server.services.agent.tools import get_tools, get_tool_rules
+def test_heartbeat_not_on_terminal_tools() -> None:
+    """request_heartbeat should NOT be injected on send_message (terminal)."""
+    from anima_server.services.agent.tools import get_tools
     tools = get_tools()
-    rules = get_tool_rules(tools)
-    terminal_names = {
-        r.tool_name for r in rules if isinstance(r, TerminalToolRule)
-    }
-    assert "continue_reasoning" not in terminal_names
-    assert "send_message" in terminal_names
+    for t in tools:
+        name = getattr(t, "name", "")
+        schema = t.args_schema.model_json_schema()
+        props = schema.get("properties", {})
+        if name == "send_message":
+            assert "request_heartbeat" not in props, (
+                "send_message should not have request_heartbeat"
+            )
+        else:
+            assert "request_heartbeat" in props, (
+                f"{name} should have request_heartbeat"
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -183,6 +183,9 @@ def _try_decrypt_cell(
     aad: bytes | None,
 ) -> str:
     """Try to decrypt a single cell with multiple DEKs and AAD variants."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     # Try each DEK with AAD first, then without
     for dek in deks:
         if aad is not None:
@@ -190,10 +193,35 @@ def _try_decrypt_cell(
                 return decrypt_text_with_dek(val, dek, aad=aad)
             except Exception:
                 pass
+        # Fallback: try without AAD (for legacy enc1 data)
         try:
             return decrypt_text_with_dek(val, dek)
         except Exception:
             pass
+    
+    # Last resort: if we have AAD, try common variations
+    if aad is not None:
+        # Try with different AAD formats (legacy compatibility)
+        aad_str = aad.decode("utf-8")
+        parts = aad_str.split(":")
+        if len(parts) == 3:
+            table, user_id, field = parts
+            # Try without user_id in AAD
+            alt_aads = [
+                f"{table}::{field}".encode("utf-8"),
+                f"{table}:{field}".encode("utf-8"),
+                field.encode("utf-8"),
+            ]
+            for alt_aad in alt_aads:
+                for dek in deks:
+                    try:
+                        result = decrypt_text_with_dek(val, dek, aad=alt_aad)
+                        logger.info(f"Decrypted with alternative AAD: {alt_aad}")
+                        return result
+                    except Exception:
+                        pass
+    
+    logger.debug(f"Failed to decrypt value with {len(deks)} DEKs")
     return val
 
 
@@ -203,7 +231,11 @@ def _decrypt_rows(
     table_name: str,
 ) -> list[dict[str, Any]]:
     """Best-effort decrypt every encrypted cell in *rows*."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     if not session.deks:
+        logger.warning(f"No DEKs in session for user {session.user_id}")
         return rows
 
     user_id = session.user_id
@@ -216,6 +248,9 @@ def _decrypt_rows(
     for d, dek in session.deks.items():
         if d != domain:
             all_deks.append(dek)
+    
+    logger.info(f"Decrypting {len(rows)} rows from {table_name} with domain={domain}, deks={[d for d in session.deks.keys()]}")
+    
     if not all_deks:
         return rows
 
@@ -327,6 +362,14 @@ def verify_db_password(
     return {"verified": True}
 
 
+class ColumnInfo(BaseModel):
+    name: str
+    type: str
+    nullable: bool
+    default: str | None
+    primaryKey: bool
+
+
 @router.get("/tables/{table_name}")
 def get_table_rows(
     table_name: str,
@@ -355,6 +398,41 @@ def get_table_rows(
         "primaryKeys": pk_cols,
         "rows": rows,
         "total": total,
+    }
+
+
+@router.get("/tables/{table_name}/schema")
+def get_table_schema(
+    table_name: str,
+    _session: UnlockSession = Depends(require_db_viewer_auth),
+    _mode: None = Depends(require_sqlite_mode),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Get detailed schema information for a table."""
+    insp = inspect(db.get_bind())
+    _validate_table(insp, table_name)
+    
+    # Get columns with detailed info
+    columns_raw = insp.get_columns(table_name)
+    pk_cols = set(_pk_columns(insp, table_name))
+    
+    columns: list[dict[str, object]] = []
+    for col in columns_raw:
+        columns.append({
+            "name": col["name"],
+            "type": str(col["type"]),
+            "nullable": col.get("nullable", True),
+            "default": col.get("default"),
+            "primaryKey": col["name"] in pk_cols,
+        })
+    
+    # Get indexes
+    indexes_raw = insp.get_indexes(table_name)
+    indexes = [idx["name"] for idx in indexes_raw if idx.get("name")]
+    
+    return {
+        "columns": columns,
+        "indexes": indexes,
     }
 
 

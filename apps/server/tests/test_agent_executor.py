@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from anima_server.services.agent.executor import ToolExecutor, _stringify_output
 from anima_server.services.agent.runtime_types import ToolCall, ToolExecutionResult
 from anima_server.services.agent.tools import tool
+
+
+def _extract_message(output: str) -> str:
+    """Extract the ``message`` field from a tool result JSON envelope."""
+    return json.loads(output)["message"]
 
 
 # --------------------------------------------------------------------------- #
@@ -190,7 +197,7 @@ async def test_executor_callable_no_args() -> None:
     tc = ToolCall(id="c7", name="no_args_tool", arguments={})
     result = await executor.execute(tc)
     assert result.is_error is False
-    assert result.output == "no args result"
+    assert _extract_message(result.output) == "no args result"
 
 
 # --------------------------------------------------------------------------- #
@@ -259,8 +266,9 @@ async def test_executor_dict_output_json_serialized() -> None:
     executor = ToolExecutor([DictReturningTool()])
     tc = ToolCall(id="c11", name="dict_tool", arguments={})
     result = await executor.execute(tc)
-    assert '"count": 3' in result.output
-    assert '"key": "value"' in result.output
+    msg = _extract_message(result.output)
+    assert '"count": 3' in msg
+    assert '"key": "value"' in msg
 
 
 @pytest.mark.asyncio
@@ -268,7 +276,7 @@ async def test_executor_list_output_json_serialized() -> None:
     executor = ToolExecutor([ListReturningTool()])
     tc = ToolCall(id="c12", name="list_tool", arguments={})
     result = await executor.execute(tc)
-    assert result.output == "[1, 2, 3]"
+    assert _extract_message(result.output) == "[1, 2, 3]"
 
 
 @pytest.mark.asyncio
@@ -276,7 +284,7 @@ async def test_executor_int_output_stringified() -> None:
     executor = ToolExecutor([IntReturningTool()])
     tc = ToolCall(id="c13", name="int_tool", arguments={})
     result = await executor.execute(tc)
-    assert result.output == "42"
+    assert _extract_message(result.output) == "42"
 
 
 def test_stringify_output_string_passthrough() -> None:

@@ -43,6 +43,7 @@ class ToolExecutionResult:
     is_terminal: bool = False
     memory_modified: bool = False
     inner_thinking: str | None = None
+    heartbeat_requested: bool = False
 
 
 @dataclass(frozen=True, slots=True)

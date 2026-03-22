@@ -229,6 +229,8 @@ class AgentRuntime:
         tools_used: list[str] = []
         step_traces: list[StepTrace] = []
         deferred_tool_calls: list[ToolCall] = []
+        last_failed_tool: str | None = None
+        _prev_failed_tool: str | None = None
 
         for step_index in range(self._max_steps):
             # --- Cancellation check (step boundary) ---
@@ -237,9 +239,18 @@ class AgentRuntime:
                 break
 
             request_messages = _snapshot_messages(messages)
-            allowed_tool_names = tuple(
-                sorted(rules_solver.get_allowed_tools(self._tool_names))
-            )
+            allowed_set = rules_solver.get_allowed_tools(self._tool_names)
+            # Exclude a tool only if it failed twice consecutively —
+            # give the model one retry chance (matching the sandwich
+            # message guidance) before blocking it.
+            if (
+                last_failed_tool
+                and last_failed_tool == _prev_failed_tool
+                and last_failed_tool in allowed_set
+                and len(allowed_set) > 1
+            ):
+                allowed_set = allowed_set - {last_failed_tool}
+            allowed_tool_names = tuple(sorted(allowed_set))
             force_tool_call = bool(allowed_tool_names) and (
                 rules_solver.should_force_tool_call()
                 or "send_message" in allowed_tool_names
@@ -467,6 +478,13 @@ class AgentRuntime:
                 if tool_result.inner_thinking and event_callback is not None:
                     await event_callback(build_thought_event(step_index, tool_result.inner_thinking))
                 rules_solver.update_state(tool_call.name, tool_result.output)
+                # Track consecutive failures for exclusion.
+                if tool_result.is_error:
+                    _prev_failed_tool = last_failed_tool
+                    last_failed_tool = tool_call.name
+                else:
+                    _prev_failed_tool = None
+                    last_failed_tool = None
                 if tool_call.name not in tools_used:
                     tools_used.append(tool_call.name)
                 if tool_result.is_terminal:
@@ -489,6 +507,10 @@ class AgentRuntime:
                     build_timing_event(step_index, _compute_timing(step_ctx)))
 
             if rule_violation_hit:
+                messages.append(_sandwich_message(
+                    "Tool rule violation — the tool was not allowed at "
+                    "this point. Check allowed tools and try again."
+                ))
                 continue
 
             # Refresh memory blocks between steps if a tool modified memory.
@@ -511,9 +533,40 @@ class AgentRuntime:
                 except Exception:  # noqa: BLE001
                     logger.debug("Memory refresh between steps failed", exc_info=True)
 
-            if not terminal_tool_hit and not awaiting_approval:
+            if terminal_tool_hit or awaiting_approval:
+                break
+
+            # Continue the loop only if a heartbeat was requested, a
+            # tool error occurred (give the model a chance to recover),
+            # or a rule violation was hit (already handled above).
+            any_heartbeat = any(
+                tr.heartbeat_requested for tr in tool_results
+            )
+            any_error = any(tr.is_error for tr in tool_results)
+            if any_heartbeat or any_error:
+                # Sandwich message: inject a system-as-user message
+                # explaining WHY the loop continues, so the model
+                # has context for the next step.
+                if any_error:
+                    failed_names = [
+                        tr.name for tr in tool_results if tr.is_error
+                    ]
+                    sandwich = _sandwich_message(
+                        f"Tool call failed ({', '.join(failed_names)}). "
+                        "You may retry with corrected arguments or "
+                        "respond to the user."
+                    )
+                else:
+                    sandwich = _sandwich_message(
+                        "Heartbeat received. Continue with your next "
+                        "tool call or send_message when ready."
+                    )
+                messages.append(sandwich)
                 continue
 
+            # No heartbeat and no error — the model is done with
+            # non-terminal tools.  Fall through to end the turn.
+            # The response will be empty, triggering the default.
             break
         else:
             stop_reason = StopReason.MAX_STEPS
@@ -1197,7 +1250,6 @@ def _try_parse_single_text_tool_call(
 # Map of known tool name -> first argument name for single-string-arg coercion.
 _FIRST_ARG_NAMES: dict[str, str] = {
     "send_message": "message",
-    "continue_reasoning": "reasoning",
     "note_to_self": "note",
     "core_memory_append": "content",
     "save_to_memory": "content",
@@ -1206,6 +1258,24 @@ _FIRST_ARG_NAMES: dict[str, str] = {
 
 def _infer_first_arg_name(tool_name: str) -> str:
     return _FIRST_ARG_NAMES.get(tool_name, "input")
+
+
+_SANDWICH_PREFIX = (
+    "[This is an automated system message hidden from the user] "
+)
+
+
+def _sandwich_message(reason: str) -> object:
+    """Create an inter-step system-as-user message explaining why the
+    agent loop is continuing.
+
+    These "sandwich" messages give the model context between steps
+    (e.g. "function failed", "heartbeat received") so it can adjust
+    its next action.  Formatted as user-role messages with a prefix
+    that tells the model they are hidden from the user.
+    """
+    from anima_server.services.agent.messages import make_user_message
+    return make_user_message(f"{_SANDWICH_PREFIX}{reason}")
 
 
 def _default_response(stop_reason: StopReason) -> str:
@@ -1368,24 +1438,27 @@ def _tool_schema(tool: Any) -> dict[str, Any]:
     return schema
 
 
+_INJECTED_SCHEMA_KEYS = {"thinking", "request_heartbeat"}
+
+
 def _strip_thinking_from_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Remove the injected ``thinking`` parameter from a tool schema
-    so it doesn't leak in client-facing dry-run output."""
+    """Remove injected parameters (``thinking``, ``request_heartbeat``)
+    from a tool schema so they don't leak in client-facing dry-run output."""
     params = schema.get("parameters")
     if not isinstance(params, dict):
         return schema
     props = params.get("properties")
-    if isinstance(props, dict) and "thinking" in props:
+    if isinstance(props, dict) and _INJECTED_SCHEMA_KEYS & set(props):
         schema = dict(schema)
         schema["parameters"] = dict(params)
         schema["parameters"]["properties"] = {
-            k: v for k, v in props.items() if k != "thinking"
+            k: v for k, v in props.items() if k not in _INJECTED_SCHEMA_KEYS
         }
         required = params.get("required", [])
-        if isinstance(required, list) and "thinking" in required:
-            schema["parameters"]["required"] = [
-                r for r in required if r != "thinking"
-            ]
+        if isinstance(required, list):
+            filtered = [r for r in required if r not in _INJECTED_SCHEMA_KEYS]
+            if len(filtered) != len(required):
+                schema["parameters"]["required"] = filtered
     return schema
 
 
