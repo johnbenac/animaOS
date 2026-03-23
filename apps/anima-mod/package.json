@@ -10,6 +10,7 @@
     "test:watch": "bun test --watch --glob='**/*.test.ts'"
   },
   "dependencies": {
+    "@elysiajs/eden": "^1.4.8",
     "@sinclair/typebox": "^0.34.48",
     "drizzle-orm": "^0.45.1",
     "elysia": "^1.2.0",
