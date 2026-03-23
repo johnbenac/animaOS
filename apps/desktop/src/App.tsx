@@ -18,6 +18,7 @@ import Tasks from "./pages/Tasks";
 import Database from "./pages/Database";
 import KnowledgeGraph from "./pages/KnowledgeGraph";
 import Mods from "./pages/Mods";
+import ModDetail from "./pages/ModDetail";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import "./index.css";
@@ -81,6 +82,7 @@ function AppRoutes() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/mods" element={withLayout(<Mods />)} />
+      <Route path="/mods/:id" element={withLayout(<ModDetail />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
