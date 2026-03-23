@@ -60,6 +60,16 @@
       "name": "@anima/api-client",
       "version": "0.1.0",
     },
+    "packages/mod-client": {
+      "name": "@anima/mod-client",
+      "version": "0.1.0",
+      "dependencies": {
+        "@elysiajs/eden": "^1.2.0",
+      },
+      "peerDependencies": {
+        "elysia": "^1.2.0",
+      },
+    },
     "packages/ui": {
       "name": "@anima/ui",
       "version": "0.1.0",
@@ -76,6 +86,8 @@
   },
   "packages": {
     "@anima/api-client": ["@anima/api-client@workspace:packages/api-client"],
+
+    "@anima/mod-client": ["@anima/mod-client@workspace:packages/mod-client"],
 
     "@anima/ui": ["@anima/ui@workspace:packages/ui"],
 
