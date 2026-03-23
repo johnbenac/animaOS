@@ -15,7 +15,7 @@ The name follows Jungian terminology: **Anima** is the soul (cognitive core), **
 apps/
 ├── server/          <- Anima (soul — cognition, memory, LLM)
 ├── desktop/         <- Face (companion UI)
-├── anima-mod/       <- Voice (Telegram, Discord channels)
+├── anima-mod/       <- Mods
 └── animus/          <- Hands (CLI coding agent)
 ```
 
@@ -56,35 +56,36 @@ All messages are JSON with a `type` field for routing.
 
 ### Server -> Client Messages
 
-| Type | Fields | Purpose |
-|---|---|---|
-| `auth_ok` | user, agentState | Authentication succeeded |
-| `tool_execute` | tool_call_id, tool_name, args | "Run this tool locally" |
-| `assistant_message` | content, partial | Streaming/complete assistant text |
-| `reasoning` | content | Agent's inner thinking |
-| `tool_call` | tool_call_id, tool_name, args | Informational: agent decided to call a tool |
-| `tool_return` | tool_call_id, tool_name, result | Result of a server-side cognitive tool |
+| Type                | Fields                                | Purpose                                       |
+| ------------------- | ------------------------------------- | --------------------------------------------- |
+| `auth_ok`           | user, agentState                      | Authentication succeeded                      |
+| `tool_execute`      | tool_call_id, tool_name, args         | "Run this tool locally"                       |
+| `assistant_message` | content, partial                      | Streaming/complete assistant text             |
+| `reasoning`         | content                               | Agent's inner thinking                        |
+| `tool_call`         | tool_call_id, tool_name, args         | Informational: agent decided to call a tool   |
+| `tool_return`       | tool_call_id, tool_name, result       | Result of a server-side cognitive tool        |
 | `approval_required` | tool_call_id, tool_name, args, run_id | Server needs user approval for cognitive tool |
-| `turn_complete` | response, model, provider, tools_used | Turn finished |
-| `error` | message, code | Error during turn |
-| `stream_token` | token | Individual token for streaming text |
+| `turn_complete`     | response, model, provider, tools_used | Turn finished                                 |
+| `error`             | message, code                         | Error during turn                             |
+| `stream_token`      | token                                 | Individual token for streaming text           |
 
 ### Client -> Server Messages
 
-| Type | Fields | Purpose |
-|---|---|---|
-| `auth` | username, password OR unlockToken | Authenticate connection (uses same `unlockToken` from `POST /api/auth/login`, sent via `x-anima-unlock` header in REST) |
-| `user_message` | message | User sends a chat message |
-| `tool_result` | tool_call_id, status, result, stdout?, stderr? | Result of locally executed tool |
-| `tool_schemas` | tools[] | Register available action tools on connect |
-| `approval_response` | run_id, tool_call_id, approved, reason? | User approves/denies cognitive tool |
-| `cancel` | run_id? | Cancel current turn |
+| Type                | Fields                                         | Purpose                                                                                                                 |
+| ------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `auth`              | username, password OR unlockToken              | Authenticate connection (uses same `unlockToken` from `POST /api/auth/login`, sent via `x-anima-unlock` header in REST) |
+| `user_message`      | message                                        | User sends a chat message                                                                                               |
+| `tool_result`       | tool_call_id, status, result, stdout?, stderr? | Result of locally executed tool                                                                                         |
+| `tool_schemas`      | tools[]                                        | Register available action tools on connect                                                                              |
+| `approval_response` | run_id, tool_call_id, approved, reason?        | User approves/denies cognitive tool                                                                                     |
+| `cancel`            | run_id?                                        | Cancel current turn                                                                                                     |
 
 ## Server-Side Changes
 
 ### 1. WebSocket Endpoint (`api/routes/ws.py`)
 
 New FastAPI WebSocket route at `/ws/agent`:
+
 - Client connects, sends `auth` message with credentials
 - Server validates, sends `auth_ok` with user context
 - Client sends `tool_schemas` to register available action tools
@@ -106,6 +107,7 @@ else:
 ```
 
 When delegating:
+
 - The server strips `thinking` and `request_heartbeat` from args before sending (it already does this for server-side tools via `unpack_inner_thoughts_from_kwargs` / `unpack_heartbeat_from_kwargs` in executor.py — the same stripping applies before delegation, so the CLI receives clean args)
 - Send `tool_execute` message over WebSocket with clean args
 - Await response via `asyncio.Event` or `asyncio.Future`
@@ -172,6 +174,7 @@ anima --server <url>           # Connect to remote server
 ## Tool Implementation Details
 
 ### bash.ts
+
 - Spawns child process via Bun.spawn or node-pty
 - Streams stdout/stderr to TUI in real-time
 - Abort via AbortSignal (user presses Esc)
@@ -180,11 +183,13 @@ anima --server <url>           # Connect to remote server
 - Working directory tracking: cd commands update effective cwd
 
 ### edit.ts
+
 - Two modes: line range replacement and search/replace
 - Diff preview before applying (in approval prompt if permission required)
 - Atomic write (write to temp file, rename)
 
 ### permissions.ts — CLI-Side Safety
+
 - Read-only tools (read, grep, glob, list_dir): always allow
 - Write tools (write, edit): allow within cwd, ask outside cwd
 - Bash: pattern matching — read-only commands (ls, cat, git status) auto-allow, destructive commands (rm, sudo, git push) ask for approval
@@ -192,6 +197,7 @@ anima --server <url>           # Connect to remote server
 - User can respond with "always allow" to create a session-scoped rule
 
 ### Split Permission Model
+
 - **Server** enforces rules for cognitive tools via existing ToolRulesSolver (terminal rules, init rules, approval rules)
 - **CLI** enforces rules for local action tools (bash safety, file write boundaries)
 - Each side owns its domain — server knows about memory safety, CLI knows about filesystem safety
@@ -223,16 +229,19 @@ anima --server <url>           # Connect to remote server
 ## Connection Lifecycle
 
 ### Reconnection
+
 - Auto-reconnect with exponential backoff (1s, 2s, 4s, max 30s)
 - "Reconnecting..." shown in header status bar
 - If token expired: re-prompt login
 - Queued user messages held and sent after reconnect
 
 ### Server Not Running
+
 - Connection fails on startup: show error message with instructions
 - No auto-launching server in v1
 
 ### Mid-Turn Errors
+
 - Tool execution fails: send tool_result with status "error", server handles gracefully
 - WebSocket drops mid-turn: turn is lost, user notified, can retry
 - Server error: error message displayed in TUI
@@ -251,9 +260,12 @@ anima --server <url>           # Connect to remote server
 - No update checker
 - No telemetry
 
+## Desktop App Migration
+
+The WebSocket endpoint and protocol support desktop connections from day one (shared protocol). The desktop app can migrate from REST/SSE to WebSocket as a separate task, not blocked by Animus. Once migrated, the desktop app gains the same coding capabilities as the CLI — same brain, same protocol, different UI.
+
 ## Future Considerations
 
-- Desktop app can connect via same WebSocket protocol to gain coding capabilities
 - Subagent support for parallel task execution
 - Skill learning from coding sessions (like Letta Code)
 - MCP server support for external tool providers
