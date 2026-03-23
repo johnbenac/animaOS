@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass
 from threading import Lock
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,9 @@ async def _execute_agent_turn(
     *,
     event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
     source: str | None = None,
+    tool_delegate: Callable[..., Awaitable[Any]] | None = None,
+    delegated_tool_names: frozenset[str] = frozenset(),
+    extra_tool_schemas: list[dict[str, Any]] | None = None,
 ) -> AgentResult:
     user_lock = get_user_lock(user_id)
     async with user_lock:
@@ -356,6 +360,9 @@ async def _execute_agent_turn(
             db,
             event_callback=event_callback,
             source=source,
+            tool_delegate=tool_delegate,
+            delegated_tool_names=delegated_tool_names,
+            extra_tool_schemas=extra_tool_schemas,
         )
 
 
@@ -366,6 +373,9 @@ async def _execute_agent_turn_locked(
     *,
     event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
     source: str | None = None,
+    tool_delegate: Callable[..., Awaitable[Any]] | None = None,
+    delegated_tool_names: frozenset[str] = frozenset(),
+    extra_tool_schemas: list[dict[str, Any]] | None = None,
 ) -> AgentResult:
     # Stage 1: Prepare turn context
     thread, run, user_msg, initial_sequence_id, turn_ctx = await _prepare_turn_context(
@@ -400,6 +410,9 @@ async def _execute_agent_turn_locked(
             turn_ctx=turn_ctx,
             event_callback=event_callback,
             cancel_event=cancel_event,
+            tool_delegate=tool_delegate,
+            delegated_tool_names=delegated_tool_names,
+            extra_tool_schemas=extra_tool_schemas,
         )
     finally:
         companion.clear_cancel_event(run.id)
@@ -674,6 +687,9 @@ async def _invoke_turn_runtime(
     turn_ctx: _TurnContext,
     event_callback: Callable[[AgentStreamEvent], Awaitable[None]] | None = None,
     cancel_event: asyncio.Event | None = None,
+    tool_delegate: Callable[..., Awaitable[Any]] | None = None,
+    delegated_tool_names: frozenset[str] = frozenset(),
+    extra_tool_schemas: list[dict[str, Any]] | None = None,
 ) -> AgentResult:
     """Stage 2: Set tool context and invoke the agent runtime."""
     set_tool_context(ToolContext(db=db, user_id=user_id, thread_id=thread.id))
@@ -696,6 +712,17 @@ async def _invoke_turn_runtime(
 
     try:
         runner = get_or_build_runner()
+
+        # Set per-turn delegation on the executor so delegated tools
+        # are forwarded to the connected client instead of running
+        # server-side.
+        prepared_action_schemas: list[dict[str, Any]] = []
+        if tool_delegate:
+            runner._tool_executor.set_delegation(tool_delegate, delegated_tool_names)
+            if extra_tool_schemas:
+                from anima_server.services.agent.tools import prepare_action_tool_schemas
+
+                prepared_action_schemas = prepare_action_tool_schemas(extra_tool_schemas)
         try:
             return await runner.invoke(
                 user_message,
@@ -706,6 +733,7 @@ async def _invoke_turn_runtime(
                 event_callback=event_callback,
                 cancel_event=cancel_event,
                 memory_refresher=_refresh_memory,
+                extra_tool_schemas=prepared_action_schemas,
             )
         except StepFailedError as exc:
             if not _should_retry_after_compaction(exc):
@@ -735,6 +763,11 @@ async def _invoke_turn_runtime(
                 cancel_event=cancel_event,
                 memory_refresher=_refresh_memory,
             )
+        finally:
+            # Always clear delegation after the turn completes or fails
+            # to avoid leaking per-connection state into subsequent turns.
+            if tool_delegate:
+                runner._tool_executor.clear_delegation()
     except StepFailedError as exc:
         _handle_step_failure(db, run=run, user_msg=user_msg, err=exc)
         raise exc.cause from exc
@@ -1094,6 +1127,9 @@ async def stream_agent(
     db: Session,
     *,
     source: str | None = None,
+    tool_delegate: Callable[..., Awaitable[Any]] | None = None,
+    delegated_tool_names: frozenset[str] = frozenset(),
+    extra_tool_schemas: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[AgentStreamEvent, None]:
     queue: asyncio.Queue[AgentStreamEvent | None] = asyncio.Queue(
         maxsize=settings.agent_stream_queue_max_size,
@@ -1110,6 +1146,9 @@ async def stream_agent(
                 db,
                 event_callback=emit,
                 source=source,
+                tool_delegate=tool_delegate,
+                delegated_tool_names=delegated_tool_names,
+                extra_tool_schemas=extra_tool_schemas,
             )
         except Exception as exc:
             await queue.put(build_error_event(str(exc)))

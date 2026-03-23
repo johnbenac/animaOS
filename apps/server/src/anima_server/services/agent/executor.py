@@ -5,6 +5,7 @@ import contextvars
 import inspect
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC
 from typing import Any
 
@@ -60,6 +61,21 @@ class ToolExecutor:
         self._tools = {
             (getattr(tool, "name", "") or getattr(tool, "__name__", "")): tool for tool in tools
         }
+        self._tool_delegate: Callable[[str, str, dict[str, Any]], Awaitable[Any]] | None = None
+        self._delegated_tool_names: frozenset[str] = frozenset()
+
+    def set_delegation(
+        self,
+        delegate: Callable[[str, str, dict[str, Any]], Awaitable[Any]] | None,
+        tool_names: frozenset[str] = frozenset(),
+    ) -> None:
+        """Set per-turn delegation. Call with None to clear."""
+        self._tool_delegate = delegate
+        self._delegated_tool_names = tool_names
+
+    def clear_delegation(self) -> None:
+        self._tool_delegate = None
+        self._delegated_tool_names = frozenset()
 
     async def execute(
         self,
@@ -67,6 +83,42 @@ class ToolExecutor:
         *,
         is_terminal: bool = False,
     ) -> ToolExecutionResult:
+        # Strip injected kwargs early — before any error path can
+        # echo them back in raw_arguments or error messages.
+        thinking = unpack_inner_thoughts_from_kwargs(tool_call)
+        heartbeat = unpack_heartbeat_from_kwargs(tool_call)
+
+        # Check if this tool should be delegated to a connected client.
+        # This MUST happen before the local tool lookup so that action
+        # tools (bash, read_file, etc.) which aren't in self._tools
+        # are forwarded to the client instead of erroring.
+        if self._tool_delegate and tool_call.name in self._delegated_tool_names:
+            clean_args = dict(tool_call.arguments) if tool_call.arguments else {}
+            try:
+                delegated = await self._tool_delegate(tool_call.id, tool_call.name, clean_args)
+                formatted_output = (
+                    _package_tool_response(delegated.output)
+                    if not delegated.is_error
+                    else _package_error_response(delegated.output)
+                )
+                return ToolExecutionResult(
+                    call_id=tool_call.id,
+                    name=tool_call.name,
+                    output=formatted_output,
+                    is_error=delegated.is_error,
+                    inner_thinking=thinking,
+                    heartbeat_requested=heartbeat,
+                )
+            except Exception as exc:
+                return ToolExecutionResult(
+                    call_id=tool_call.id,
+                    name=tool_call.name,
+                    output=_package_error_response(f"Tool delegation failed: {exc}"),
+                    is_error=True,
+                    inner_thinking=thinking,
+                    heartbeat_requested=heartbeat,
+                )
+
         tool = self._tools.get(tool_call.name)
         if tool is None:
             return ToolExecutionResult(
@@ -75,11 +127,6 @@ class ToolExecutor:
                 output=f"Unknown tool: {tool_call.name}",
                 is_error=True,
             )
-
-        # Strip injected kwargs early — before any error path can
-        # echo them back in raw_arguments or error messages.
-        thinking = unpack_inner_thoughts_from_kwargs(tool_call)
-        heartbeat = unpack_heartbeat_from_kwargs(tool_call)
 
         if tool_call.parse_error is not None:
             # Redact thinking from raw_arguments string (the dict pop
