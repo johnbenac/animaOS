@@ -188,9 +188,11 @@ async def ws_agent(websocket: WebSocket) -> None:
 
             if msg_type == "tool_schemas":
                 conn.action_tool_schemas = data.get("tools", [])
+                names = [t.get("name", "") for t in conn.action_tool_schemas]
                 logger.info(
-                    "Client registered %d action tools",
+                    "Client registered %d action tools: %s",
                     len(conn.action_tool_schemas),
+                    names,
                 )
 
             elif msg_type == "user_message":
@@ -236,6 +238,11 @@ async def _handle_user_message(conn: ClientConnection, data: dict) -> None:
 
     action_tool_names = registry.get_action_tool_names(conn.user_id)
     action_tool_schemas = registry.get_action_tool_schemas(conn.user_id)
+    logger.info(
+        "Handling user message: %d action tools registered (%s)",
+        len(action_tool_schemas),
+        ", ".join(action_tool_names),
+    )
 
     db = get_user_session_factory(conn.user_id)()
     try:

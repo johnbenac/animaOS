@@ -188,6 +188,26 @@ class AgentRuntime:
         system_prompt, prompt_budget = self.build_system_prompt_with_budget(
             memory_blocks=memory_blocks,
         )
+
+        # When action tools are registered (from a connected client like
+        # Animus CLI), append their descriptions to the system prompt so the
+        # model knows they exist alongside the server-side tools.
+        if extra_tool_schemas:
+            action_lines = []
+            for s in extra_tool_schemas:
+                fn = s.get("function", {})
+                name = fn.get("name", "")
+                desc = fn.get("description", "")
+                if name:
+                    action_lines.append(f"- {name}: {desc}")
+            if action_lines:
+                system_prompt += (
+                    "\n\nAction Tools (client-side execution):\n"
+                    + "\n".join(action_lines)
+                    + "\n\nThese action tools are fully registered and available. "
+                    "Use them via function calling just like any other tool."
+                )
+
         messages = build_conversation_messages(
             history,
             user_message,
@@ -324,6 +344,7 @@ class AgentRuntime:
                     allowed_tool_names=allowed_tool_names,
                     step_index=step_index,
                     event_callback=event_callback,
+                    extra_tool_names=extra_tool_names,
                 )
                 if coerced is not None:
                     all_coerced_calls = tuple(tc for tc, _ in coerced)
@@ -916,6 +937,15 @@ class AgentRuntime:
             s for s in extra_tool_schemas
             if s.get("function", {}).get("name") in allowed_tool_names
         ]
+        if action_tools:
+            action_names = [s.get("function", {}).get("name") for s in action_tools]
+            logger.info(
+                "Step %d: %d server tools + %d action tools (%s)",
+                step_index,
+                len(server_tools),
+                len(action_tools),
+                ", ".join(action_names),
+            )
         request = LLMRequest(
             messages=tuple(messages),
             user_id=user_id,
@@ -1049,6 +1079,7 @@ class AgentRuntime:
         allowed_tool_names: Sequence[str],
         step_index: int,
         event_callback: StreamEventCallback | None,
+        extra_tool_names: frozenset[str] = frozenset(),
     ) -> list[tuple[ToolCall, ToolExecutionResult]] | None:
         """Detect and execute tool calls that the model output as plain text.
 
@@ -1057,13 +1088,21 @@ class AgentRuntime:
         plain text instead of structured tool calls.  This method parses
         those patterns and executes them as if they were real tool calls,
         keeping the cognitive loop intact.
+
+        *extra_tool_names* contains names of delegated action tools that
+        are not in the server-side registry but can be executed via the
+        tool executor's delegation mechanism.
         """
         if not step_result.assistant_text.strip():
             return None
 
+        # Include both server-side tools and delegated action tools in
+        # the parsing set so text-based tool calls are recognized for
+        # client-side tools too.
+        known_names = set(self._tool_registry.keys()) | extra_tool_names
         parsed = _parse_text_tool_calls(
             step_result.assistant_text,
-            set(self._tool_registry.keys()),
+            known_names,
         )
         if not parsed:
             # No recognizable tool calls in the text.  Fall back to
@@ -1079,7 +1118,9 @@ class AgentRuntime:
 
         results: list[tuple[ToolCall, ToolExecutionResult]] = []
         for i, ptc in enumerate(parsed):
-            if ptc.name not in self._tool_registry:
+            # Allow tools that are either in the server registry or in
+            # the delegated action tool set (executor handles routing).
+            if ptc.name not in self._tool_registry and ptc.name not in extra_tool_names:
                 continue
             tool_call = ToolCall(
                 id=f"synthetic-{ptc.name}-{step_index}-{i}",
