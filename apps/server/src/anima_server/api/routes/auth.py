@@ -118,6 +118,7 @@ def register(
             agent_name=payload.agentName,
             user_directive=payload.userDirective,
             relationship=payload.relationship,
+            persona_template=payload.personaTemplate,
         )
     except ValueError as exc:
         detail = str(exc)

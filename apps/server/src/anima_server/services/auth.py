@@ -85,9 +85,10 @@ def create_user(
     username: str,
     password: str,
     display_name: str,
-    agent_name: str = "Anima",
+    agent_name: str = "ANIMA",
     user_directive: str = "",
     relationship: str = "companion",
+    persona_template: str = "default",
     *,
     user_id: int | None = None,
 ) -> tuple[User, dict[str, bytes]]:
@@ -97,7 +98,8 @@ def create_user(
     if user_id is None:
         raise ValueError("User id is required to create wrapped DEKs")
 
-    deks, wrapped_records = create_wrapped_deks_for_domains(password, ALL_DOMAINS, user_id)
+    deks, wrapped_records = create_wrapped_deks_for_domains(
+        password, ALL_DOMAINS, user_id)
     user = User(
         id=user_id,
         username=username,
@@ -121,7 +123,8 @@ def create_user(
     )
 
     # Seed immutable origin block
-    soul_content = render_origin_block(agent_name=agent_name, creator_name=display_name)
+    soul_content = render_origin_block(
+        agent_name=agent_name, creator_name=display_name)
     db.add(
         SelfModelBlock(
             user_id=user.id,
@@ -133,9 +136,16 @@ def create_user(
     )
 
     # Seed persona from template (mutable — evolves through reflection)
-    from anima_server.config import settings
+    # Validate template name to prevent path traversal
+    from anima_server.services.agent.system_prompt import resolve_persona_template_path
 
-    persona_content = render_persona_seed(settings.agent_persona_template)
+    try:
+        resolve_persona_template_path(persona_template)
+    except Exception as exc:
+        raise ValueError(
+            f"Invalid persona template: {persona_template!r}") from exc
+
+    persona_content = render_persona_seed(persona_template)
     db.add(
         SelfModelBlock(
             user_id=user.id,
@@ -218,7 +228,8 @@ def _migrate_legacy_single_key(
     Future key rotation will produce independent per-domain keys.
     """
     legacy_domain = legacy_key.domain or "memories"
-    legacy_dek = unwrap_dek(password, to_wrapped_dek_record(legacy_key), user_id, legacy_domain)
+    legacy_dek = unwrap_dek(password, to_wrapped_dek_record(
+        legacy_key), user_id, legacy_domain)
 
     deks: dict[str, bytes] = {}
     for domain in ALL_DOMAINS:
@@ -246,7 +257,8 @@ def _unwrap_all_domain_keys(
     deks: dict[str, bytes] = {}
     for uk in user_keys:
         try:
-            dek = unwrap_dek(password, to_wrapped_dek_record(uk), uk.user_id, uk.domain)
+            dek = unwrap_dek(password, to_wrapped_dek_record(
+                uk), uk.user_id, uk.domain)
             deks[uk.domain] = dek
         except Exception as exc:
             raise ValueError("Invalid credentials") from exc

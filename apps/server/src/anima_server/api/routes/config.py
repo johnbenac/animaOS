@@ -35,6 +35,12 @@ class AgentConfigUpdateRequest(BaseModel):
     systemPrompt: str | None = None
 
 
+class PersonaTemplateInfo(BaseModel):
+    id: str
+    name: str
+    description: str
+
+
 AVAILABLE_PROVIDERS: list[ProviderInfo] = [
     ProviderInfo(name="scaffold", defaultModel="scaffold", requiresApiKey=False),
     ProviderInfo(
@@ -51,6 +57,23 @@ VALID_PROVIDERS = {"scaffold"} | set(SUPPORTED_PROVIDERS)
 @router.get("/providers", response_model=list[ProviderInfo])
 async def get_providers() -> list[ProviderInfo]:
     return AVAILABLE_PROVIDERS
+
+
+@router.get("/persona-templates", response_model=list[PersonaTemplateInfo])
+async def get_persona_templates() -> list[PersonaTemplateInfo]:
+    """Return available persona templates for AI creation."""
+    return [
+        PersonaTemplateInfo(
+            id="default",
+            name="Default",
+            description="A thoughtful, capable companion — neutral and adaptable.",
+        ),
+        PersonaTemplateInfo(
+            id="companion",
+            name="Companion",
+            description="Warm, emotionally attuned, and deeply present — for meaningful connection.",
+        ),
+    ]
 
 
 @router.get("/{user_id}", response_model=AgentConfigResponse)

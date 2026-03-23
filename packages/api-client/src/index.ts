@@ -43,7 +43,13 @@ export interface VaultImportResponse {
   requiresReauth?: boolean;
 }
 
-export type PersonaTemplate = "default" | "alice";
+export interface PersonaTemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export type PersonaTemplate = "default" | "companion";
 
 export interface TraceMessagePreview {
   role: string;
@@ -695,6 +701,7 @@ export function createApiClient(options: ApiClientOptions) {
     },
     config: {
       providers: () => request<ProviderInfo[]>("/config/providers"),
+      personaTemplates: () => request<PersonaTemplateInfo[]>("/config/persona-templates"),
       get: (userId: number) => request<AgentConfig>(`/config/${userId}`),
       update: (
         userId: number,
