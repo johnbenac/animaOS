@@ -1,4 +1,5 @@
 from __future__ import annotations
+from anima_server.services.agent.json_utils import parse_json_object
 
 import logging
 from collections.abc import Callable
@@ -45,10 +46,12 @@ async def maybe_generate_episode(
 
     factory = db_factory or SessionLocal
 
-    with factory() as db:
-        today = datetime.now(UTC).date().isoformat()
+    # ── Phase 1: Read — gather logs then release the session ──────
+    # Holding a session open during slow LLM calls causes SQLite
+    # "database is locked" errors when other writers need access.
+    today = datetime.now(UTC).date().isoformat()
 
-        # Sum actual turn_count from existing episodes to avoid offset overlap
+    with factory() as db:
         consumed_turns = (
             db.scalar(
                 select(func.coalesce(func.sum(MemoryEpisode.turn_count), 0)).where(
@@ -69,45 +72,50 @@ async def maybe_generate_episode(
                 .order_by(MemoryDailyLog.created_at.asc())
             ).all()
         )
+        # Detach ORM objects so they survive after session close
+        db.expunge_all()
 
-        remaining_logs = logs[consumed_turns:]
+    remaining_logs = logs[consumed_turns:]
 
-        if len(remaining_logs) < EPISODE_MIN_TURNS:
-            return None
+    if len(remaining_logs) < EPISODE_MIN_TURNS:
+        return None
 
-        # --- Batch segmentation path ---
-        from anima_server.services.agent.batch_segmenter import (
-            generate_episodes_from_segments,
-            indices_to_0based,
-            segment_messages_batch,
-            should_batch_segment,
-            validate_indices,
-        )
-        from anima_server.services.data_crypto import df as _df
+    # --- Batch segmentation path ---
+    from anima_server.services.agent.batch_segmenter import (
+        generate_episodes_from_segments,
+        indices_to_0based,
+        segment_messages_batch,
+        should_batch_segment,
+        validate_indices,
+    )
+    from anima_server.services.data_crypto import df as _df
 
-        if should_batch_segment(len(remaining_logs)):
-            try:
-                messages = [
-                    (
-                        _df(
-                            user_id,
-                            log.user_message,
-                            table="memory_daily_logs",
-                            field="user_message",
-                        ),
-                        _df(
-                            user_id,
-                            log.assistant_response,
-                            table="memory_daily_logs",
-                            field="assistant_response",
-                        ),
-                    )
-                    for log in remaining_logs
-                ]
-                groups = await segment_messages_batch(messages, user_id=user_id)
+    if should_batch_segment(len(remaining_logs)):
+        try:
+            messages = [
+                (
+                    _df(
+                        user_id,
+                        log.user_message,
+                        table="memory_daily_logs",
+                        field="user_message",
+                    ),
+                    _df(
+                        user_id,
+                        log.assistant_response,
+                        table="memory_daily_logs",
+                        field="assistant_response",
+                    ),
+                )
+                for log in remaining_logs
+            ]
+            # LLM call — no session held open
+            groups = await segment_messages_batch(messages, user_id=user_id)
 
-                if validate_indices(groups, len(remaining_logs)):
-                    segments_0 = indices_to_0based(groups)
+            if validate_indices(groups, len(remaining_logs)):
+                segments_0 = indices_to_0based(groups)
+                # ── Phase 2: Write — short-lived session for DB writes ──
+                with factory() as db:
                     episodes = await generate_episodes_from_segments(
                         db,
                         user_id=user_id,
@@ -117,7 +125,6 @@ async def maybe_generate_episode(
                         today=today,
                     )
                     db.commit()
-                    # Try merging each new episode with a recent one
                     result_episode = episodes[0] if episodes else None
                     for ep in episodes:
                         merged_into = _try_merge_episode(db, user_id, ep)
@@ -125,13 +132,15 @@ async def maybe_generate_episode(
                             result_episode = merged_into
                     db.commit()
                     return result_episode
-            except Exception:
-                logger.exception("Batch segmentation failed, falling back to sequential")
+        except Exception:
+            logger.exception(
+                "Batch segmentation failed, falling back to sequential")
 
-        # --- Sequential path (original behavior) ---
-        episode_logs = remaining_logs[: EPISODE_MIN_TURNS * 2]
+    # --- Sequential path (original behavior) ---
+    episode_logs = remaining_logs[: EPISODE_MIN_TURNS * 2]
 
-        if settings.agent_provider == "scaffold":
+    if settings.agent_provider == "scaffold":
+        with factory() as db:
             episode = _create_fallback_episode(
                 db,
                 user_id=user_id,
@@ -139,17 +148,27 @@ async def maybe_generate_episode(
                 logs=episode_logs,
                 today=today,
             )
-        else:
-            episode = await _generate_episode_via_llm(
-                db,
-                user_id=user_id,
-                thread_id=thread_id,
-                logs=episode_logs,
-                today=today,
-            )
+            db.commit()
+            merged_into = _try_merge_episode(db, user_id, episode)
+            if merged_into is not None:
+                episode = merged_into
+            db.commit()
+            return episode
 
+    # ── Phase 2a: LLM call — no session held open ────────────────
+    parsed = await _call_llm_for_episode_safe(episode_logs, user_id=user_id)
+
+    # ── Phase 2b: Write — short-lived session for DB writes ──────
+    with factory() as db:
+        episode = _build_episode_from_parsed(
+            db,
+            parsed=parsed,
+            user_id=user_id,
+            thread_id=thread_id,
+            logs=episode_logs,
+            today=today,
+        )
         db.commit()
-        # Try merging with a recent episode on the same topic
         merged_into = _try_merge_episode(db, user_id, episode)
         if merged_into is not None:
             episode = merged_into
@@ -276,7 +295,8 @@ def _create_fallback_episode(
 ) -> MemoryEpisode:
     summaries = []
     for log in logs:
-        text = df(user_id, log.user_message, table="memory_daily_logs", field="user_message")[:80]
+        text = df(user_id, log.user_message,
+                  table="memory_daily_logs", field="user_message")[:80]
         summaries.append(text)
     summary = "Conversation covering: " + "; ".join(summaries)
     if len(summary) > 500:
@@ -338,7 +358,8 @@ async def _generate_episode_via_llm(
         time=datetime.now(UTC).strftime("%H:%M:%S"),
         summary=ef(user_id, summary, table="memory_episodes", field="summary"),
         topics_json=topics if topics else None,
-        emotional_arc=ef(user_id, emotional_arc, table="memory_episodes", field="emotional_arc"),
+        emotional_arc=ef(user_id, emotional_arc,
+                         table="memory_episodes", field="emotional_arc"),
         significance_score=significance,
         turn_count=len(logs),
     )
@@ -360,7 +381,8 @@ async def _call_llm_for_episode(logs: list[MemoryDailyLog], *, user_id: int = 0)
     llm = create_llm()
     response = await llm.ainvoke(
         [
-            SystemMessage(content="You generate episode summaries. Respond only with JSON."),
+            SystemMessage(
+                content="You generate episode summaries. Respond only with JSON."),
             HumanMessage(content=prompt),
         ]
     )
@@ -370,8 +392,66 @@ async def _call_llm_for_episode(logs: list[MemoryDailyLog], *, user_id: int = 0)
     return _parse_json_object(content)
 
 
-from anima_server.services.agent.json_utils import parse_json_object
-
-
 def _parse_json_object(text: str) -> dict[str, Any]:
     return parse_json_object(text) or {}
+
+
+async def _call_llm_for_episode_safe(
+    logs: list[MemoryDailyLog], *, user_id: int = 0
+) -> dict[str, Any] | None:
+    """Call LLM for episode generation, returning None on failure."""
+    try:
+        return await _call_llm_for_episode(logs, user_id=user_id)
+    except Exception:
+        logger.exception("LLM episode generation failed, using fallback")
+        return None
+
+
+def _build_episode_from_parsed(
+    db: Session,
+    *,
+    parsed: dict[str, Any] | None,
+    user_id: int,
+    thread_id: int | None,
+    logs: list[MemoryDailyLog],
+    today: str,
+) -> MemoryEpisode:
+    """Create a MemoryEpisode from pre-parsed LLM output (or fallback)."""
+    if parsed is None:
+        return _create_fallback_episode(
+            db,
+            user_id=user_id,
+            thread_id=thread_id,
+            logs=logs,
+            today=today,
+        )
+
+    summary = parsed.get("summary", "")
+    if not summary or not isinstance(summary, str):
+        summary = "Conversation session"
+    topics = parsed.get("topics", [])
+    if not isinstance(topics, list):
+        topics = []
+    topics = [str(t) for t in topics if isinstance(t, str) and t.strip()][:5]
+    emotional_arc = parsed.get("emotional_arc")
+    if not isinstance(emotional_arc, str):
+        emotional_arc = None
+    significance = parsed.get("significance", 3)
+    if not isinstance(significance, int) or not 1 <= significance <= 5:
+        significance = 3
+
+    episode = MemoryEpisode(
+        user_id=user_id,
+        thread_id=thread_id,
+        date=today,
+        time=datetime.now(UTC).strftime("%H:%M:%S"),
+        summary=ef(user_id, summary, table="memory_episodes", field="summary"),
+        topics_json=topics if topics else None,
+        emotional_arc=ef(user_id, emotional_arc,
+                         table="memory_episodes", field="emotional_arc"),
+        significance_score=significance,
+        turn_count=len(logs),
+    )
+    db.add(episode)
+    db.flush()
+    return episode

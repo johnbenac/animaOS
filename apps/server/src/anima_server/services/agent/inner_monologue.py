@@ -8,6 +8,7 @@ Two modes:
 """
 
 from __future__ import annotations
+from anima_server.services.agent.json_utils import parse_json_object as _parse_json
 
 import logging
 from collections.abc import Callable
@@ -196,7 +197,8 @@ async def run_quick_reflection(
 
             ensure_self_model_exists(db, user_id=user_id)
 
-            inner_state_block = get_self_model_block(db, user_id=user_id, section="inner_state")
+            inner_state_block = get_self_model_block(
+                db, user_id=user_id, section="inner_state")
             working_memory_block = get_self_model_block(
                 db, user_id=user_id, section="working_memory"
             )
@@ -351,20 +353,20 @@ async def run_deep_monologue(
     factory = db_factory or SessionLocal
 
     try:
+        # ── Phase 1: Read context — then release the session ─────
+        # Holding a session open during slow LLM calls causes SQLite
+        # "database is locked" errors when other writers need access.
         with factory() as db:
             from anima_server.services.agent.emotional_intelligence import get_recent_signals
             from anima_server.services.agent.memory_store import get_memory_items
             from anima_server.services.agent.self_model import (
-                append_growth_log_entry,
                 ensure_self_model_exists,
                 get_all_self_model_blocks,
-                set_self_model_block,
             )
 
             ensure_self_model_exists(db, user_id=user_id)
             blocks = get_all_self_model_blocks(db, user_id=user_id)
 
-            # Gather context
             from sqlalchemy import select
 
             episodes = db.scalars(
@@ -381,7 +383,8 @@ async def run_deep_monologue(
                 or "No episodes yet."
             )
 
-            facts = get_memory_items(db, user_id=user_id, category="fact", limit=30)
+            facts = get_memory_items(
+                db, user_id=user_id, category="fact", limit=30)
             facts_text = (
                 "\n".join(
                     f"- {df(user_id, f.content, table='memory_items', field='content')}"
@@ -407,7 +410,6 @@ async def run_deep_monologue(
             identity_block = blocks.get("identity")
             identity_version = identity_block.version if identity_block else 1
 
-            # Load persona block (living style/approach)
             from sqlalchemy import select as sa_select
 
             from anima_server.models import SelfModelBlock
@@ -419,10 +421,12 @@ async def run_deep_monologue(
                 )
             )
             persona_text = (
-                df(user_id, persona_block.content, table="self_model_blocks", field="content")
+                df(user_id, persona_block.content,
+                   table="self_model_blocks", field="content")
                 if persona_block
                 else "Default persona — not yet customized."
             )
+            has_persona_block = persona_block is not None
 
             prompt = DEEP_MONOLOGUE_PROMPT.format(
                 identity_version=identity_version,
@@ -471,20 +475,29 @@ async def run_deep_monologue(
                 recent_episodes=episodes_text[:2000],
                 emotional_signals=signals_text[:1000],
             )
+        # Session is now closed — no DB lock held during LLM call.
 
-            response = await _call_llm(
-                prompt,
-                system="You are SAM's deep inner monologue. Think genuinely. Respond only with JSON.",
+        # ── Phase 2: LLM call — no session held open ────────────
+        response = await _call_llm(
+            prompt,
+            system="You are SAM's deep inner monologue. Think genuinely. Respond only with JSON.",
+        )
+        if not response:
+            return result
+
+        parsed = _parse_json(response)
+        if not parsed:
+            result.errors.append("Failed to parse monologue response")
+            return result
+
+        # ── Phase 3: Write — short-lived session for DB updates ──
+        with factory() as db:
+            from anima_server.models import SelfModelBlock
+            from anima_server.services.agent.self_model import (
+                append_growth_log_entry,
+                set_self_model_block,
             )
-            if not response:
-                return result
 
-            parsed = _parse_json(response)
-            if not parsed:
-                result.errors.append("Failed to parse monologue response")
-                return result
-
-            # Apply updates
             if parsed.get("identity_update"):
                 set_self_model_block(
                     db,
@@ -496,16 +509,25 @@ async def run_deep_monologue(
                 result.identity_updated = True
 
             if parsed.get("persona_update"):
-                # Evolve the persona block — the agent's living style/approach
-                if persona_block is not None:
-                    persona_block.content = ef(
-                        user_id,
-                        parsed["persona_update"],
-                        table="self_model_blocks",
-                        field="content",
+                if has_persona_block:
+                    # Re-load the persona block in this session for update
+                    from sqlalchemy import select as sa_select2
+
+                    fresh_persona = db.scalar(
+                        sa_select2(SelfModelBlock).where(
+                            SelfModelBlock.user_id == user_id,
+                            SelfModelBlock.section == "persona",
+                        )
                     )
-                    persona_block.version += 1
-                    persona_block.updated_by = "sleep_time"
+                    if fresh_persona is not None:
+                        fresh_persona.content = ef(
+                            user_id,
+                            parsed["persona_update"],
+                            table="self_model_blocks",
+                            field="content",
+                        )
+                        fresh_persona.version += 1
+                        fresh_persona.updated_by = "sleep_time"
                 else:
                     db.add(
                         SelfModelBlock(
@@ -561,7 +583,6 @@ async def run_deep_monologue(
                 )
                 result.intentions_updated = True
 
-            # Add procedural rules
             rules = parsed.get("new_procedural_rules", [])
             if isinstance(rules, list):
                 from anima_server.services.agent.intentions import add_procedural_rule
@@ -619,7 +640,8 @@ async def _get_recent_conversation(
     from anima_server.models import AgentMessage, AgentThread
 
     if thread_id is None:
-        thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
+        thread = db.scalar(select(AgentThread).where(
+            AgentThread.user_id == user_id))
         if thread is None:
             return ""
         thread_id = thread.id
@@ -678,6 +700,3 @@ def _last_n_entries(growth_log: str, n: int) -> str:
     entries = [e.strip() for e in growth_log.split("### ") if e.strip()]
     last_entries = entries[-n:] if len(entries) > n else entries
     return "\n\n".join(f"### {e}" for e in last_entries) if last_entries else "No entries yet."
-
-
-from anima_server.services.agent.json_utils import parse_json_object as _parse_json

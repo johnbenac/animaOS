@@ -70,11 +70,12 @@ def _make_engine(database_url: str | None = None) -> Engine:
             )
 
             @event.listens_for(eng, "connect")
-            def _set_sqlite_pragmas_fallback(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+            # type: ignore[no-untyped-def]
+            def _set_sqlite_pragmas_fallback(dbapi_connection, connection_record) -> None:
                 del connection_record
                 cursor = dbapi_connection.cursor()
                 cursor.execute("PRAGMA journal_mode = WAL")
-                cursor.execute("PRAGMA busy_timeout = 5000")
+                cursor.execute("PRAGMA busy_timeout = 30000")
                 cursor.close()
 
             return eng
@@ -98,7 +99,8 @@ def _make_engine(database_url: str | None = None) -> Engine:
                     "ANIMA_CORE_REQUIRE_ENCRYPTION is enabled but sqlcipher3 is not installed. "
                     "Install sqlcipher3 to enable database encryption: pip install sqlcipher3"
                 ) from None
-            logger.warning("sqlcipher3 not installed - falling back to unencrypted SQLite.")
+            logger.warning(
+                "sqlcipher3 not installed - falling back to unencrypted SQLite.")
             raw_key = None
 
     if raw_key is not None:
@@ -113,7 +115,8 @@ def _make_engine(database_url: str | None = None) -> Engine:
         )
 
         @event.listens_for(eng, "connect")
-        def _set_sqlcipher_key(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+        # type: ignore[no-untyped-def]
+        def _set_sqlcipher_key(dbapi_connection, connection_record) -> None:
             del connection_record
             cursor = dbapi_connection.cursor()
             cursor.execute(f"""PRAGMA key = "x'{hex_key}'" """)
@@ -127,7 +130,7 @@ def _make_engine(database_url: str | None = None) -> Engine:
             if platform.system() != "Windows":
                 cursor.execute("PRAGMA cipher_memory_security = ON")
             cursor.execute("PRAGMA journal_mode = WAL")
-            cursor.execute("PRAGMA busy_timeout = 5000")
+            cursor.execute("PRAGMA busy_timeout = 30000")
             cursor.close()
 
         logger.info("Database encryption enabled (SQLCipher).")
@@ -157,11 +160,12 @@ def _make_engine(database_url: str | None = None) -> Engine:
     )
 
     @event.listens_for(eng, "connect")
-    def _set_sqlite_pragmas_plain(dbapi_connection, connection_record) -> None:  # type: ignore[no-untyped-def]
+    # type: ignore[no-untyped-def]
+    def _set_sqlite_pragmas_plain(dbapi_connection, connection_record) -> None:
         del connection_record
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.execute("PRAGMA busy_timeout = 5000")
+        cursor.execute("PRAGMA busy_timeout = 30000")
         cursor.close()
 
     return eng
