@@ -8,6 +8,7 @@ export interface ChatEntry {
   toolName?: string;
   toolArgs?: Record<string, unknown>;
   toolStatus?: "running" | "success" | "error";
+  streaming?: boolean;
 }
 
 interface ChatProps {

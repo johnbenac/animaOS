@@ -36,6 +36,21 @@ export function App({ config }: AppProps) {
       onError: (err) => addEntry({ type: "error", content: err.message }),
       onMessage: async (msg: ServerMessage) => {
         switch (msg.type) {
+          case "stream_token":
+            setIsThinking(false);
+            setEntries((prev) => {
+              const last = prev[prev.length - 1];
+              if (last && last.type === "assistant" && last.streaming) {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...last,
+                  content: last.content + msg.token,
+                };
+                return updated;
+              }
+              return [...prev, { type: "assistant", content: msg.token, streaming: true }];
+            });
+            break;
           case "assistant_message":
             if (!msg.partial) {
               addEntry({ type: "assistant", content: msg.content });
@@ -78,6 +93,16 @@ export function App({ config }: AppProps) {
           case "turn_complete":
             setIsThinking(false);
             setModel(msg.model);
+            // Finalize any streaming entry
+            setEntries((prev) => {
+              const last = prev[prev.length - 1];
+              if (last && last.type === "assistant" && last.streaming) {
+                const updated = [...prev];
+                updated[updated.length - 1] = { ...last, streaming: false };
+                return updated;
+              }
+              return prev;
+            });
             break;
           case "error":
             addEntry({ type: "error", content: msg.message });

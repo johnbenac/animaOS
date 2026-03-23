@@ -286,9 +286,8 @@ def _translate_event(event: Any) -> dict[str, Any] | None:
 
     if etype == "chunk":
         return {
-            "type": "assistant_message",
-            "content": data.get("content", ""),
-            "partial": False,
+            "type": "stream_token",
+            "token": data.get("content", ""),
         }
 
     if etype == "done":
