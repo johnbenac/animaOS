@@ -1,0 +1,12 @@
+You are a memory system for {{ agent_name }}.
+
+Given these facts about a user, identify any that could be combined into a single, more complete statement.
+Only combine facts that are clearly about the same topic.
+
+Return a JSON array of objects:
+[{"old_ids": [id1, id2], "merged": "combined statement"}]
+
+Return [] if no facts should be combined.
+
+Facts:
+{{ facts }}

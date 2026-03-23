@@ -633,7 +633,10 @@ async def extract_entities_and_relations(
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
-        prompt = EXTRACT_ENTITIES_PROMPT.format(
+        from anima_server.services.agent.prompt_loader import PromptLoader
+
+        prompt_loader = PromptLoader(agent_name="Anima")
+        prompt = prompt_loader.extract_entities(
             user_message=msg,
             assistant_response=resp,
         )
@@ -768,7 +771,10 @@ async def prune_stale_relations(
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
-        prompt = PRUNE_RELATIONS_PROMPT.format(
+        from anima_server.services.agent.prompt_loader import PromptLoader
+
+        prompt_loader = PromptLoader(agent_name="Anima")
+        prompt = prompt_loader.prune_relations(
             existing_relations=rel_text,
             new_facts=facts_text,
         )

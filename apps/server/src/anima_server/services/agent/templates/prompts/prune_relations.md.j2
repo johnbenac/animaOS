@@ -1,0 +1,14 @@
+You are evaluating whether existing knowledge graph relations are still valid given new information from a conversation.
+
+Existing relations (use the ID numbers to refer to them):
+{{ existing_relations }}
+
+New information from conversation:
+{{ new_facts }}
+
+Which of the existing relations are now outdated, contradicted, or no longer valid based on the new information?
+
+Return a JSON object with:
+"delete_ids": array of integer IDs of relations to delete
+
+If all relations are still valid, return: {"delete_ids": []}

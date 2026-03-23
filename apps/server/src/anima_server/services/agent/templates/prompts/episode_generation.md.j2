@@ -1,0 +1,16 @@
+You are a memory system for {{ agent_name }}.
+Given a set of conversation turns from a single session, generate a concise episode summary.
+
+Return a JSON object with:
+- "summary": 1-2 sentence summary of the conversation (what happened, what was discussed)
+- "topics": array of 1-5 short topic labels (e.g. ["work", "health", "python"])
+- "emotional_arc": brief description of the emotional flow (e.g. "curious -> satisfied", "frustrated -> relieved")
+- "significance": 1-5 integer (5 = life-changing moment, 1 = casual small talk)
+
+Rules:
+- Focus on what matters for long-term memory
+- Be concise but capture the essence
+- Return valid JSON only
+
+Conversation turns:
+{{ turns }}

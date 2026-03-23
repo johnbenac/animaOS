@@ -17,23 +17,6 @@ logger = logging.getLogger(__name__)
 
 EPISODE_MIN_TURNS = 3
 
-EPISODE_GENERATION_PROMPT = """You are a memory system for a personal AI companion.
-Given a set of conversation turns from a single session, generate a concise episode summary.
-
-Return a JSON object with:
-- "summary": 1-2 sentence summary of the conversation (what happened, what was discussed)
-- "topics": array of 1-5 short topic labels (e.g. ["work", "health", "python"])
-- "emotional_arc": brief description of the emotional flow (e.g. "curious -> satisfied", "frustrated -> relieved")
-- "significance": 1-5 integer (5 = life-changing moment, 1 = casual small talk)
-
-Rules:
-- Focus on what matters for long-term memory
-- Be concise but capture the essence
-- Return valid JSON only
-
-Conversation turns:
-{turns}"""
-
 
 async def maybe_generate_episode(
     *,
@@ -62,227 +45,39 @@ async def maybe_generate_episode(
             or 0
         )
 
+        # Fetch daily logs created today that haven't been consumed by episodes
         logs = list(
             db.scalars(
                 select(MemoryDailyLog)
                 .where(
                     MemoryDailyLog.user_id == user_id,
-                    MemoryDailyLog.date == today,
+                    MemoryDailyLog.created_at >= datetime.now(UTC) - timedelta(hours=24),
                 )
-                .order_by(MemoryDailyLog.created_at.asc())
+                .order_by(MemoryDailyLog.created_at)
             ).all()
         )
-        # Detach ORM objects so they survive after session close
-        db.expunge_all()
 
-    remaining_logs = logs[consumed_turns:]
+    # Calculate how many new logs we have since last episode
+    available_logs = logs[consumed_turns:] if consumed_turns < len(logs) else []
 
-    if len(remaining_logs) < EPISODE_MIN_TURNS:
+    if len(available_logs) < EPISODE_MIN_TURNS:
         return None
 
-    # --- Batch segmentation path ---
-    from anima_server.services.agent.batch_segmenter import (
-        generate_episodes_from_segments,
-        indices_to_0based,
-        segment_messages_batch,
-        should_batch_segment,
-        validate_indices,
-    )
-    from anima_server.services.data_crypto import df as _df
+    # ── Phase 2: LLM call — no session held open ────────────
+    parsed = await _call_llm_for_episode_safe(available_logs, user_id=user_id)
 
-    if should_batch_segment(len(remaining_logs)):
-        try:
-            messages = [
-                (
-                    _df(
-                        user_id,
-                        log.user_message,
-                        table="memory_daily_logs",
-                        field="user_message",
-                    ),
-                    _df(
-                        user_id,
-                        log.assistant_response,
-                        table="memory_daily_logs",
-                        field="assistant_response",
-                    ),
-                )
-                for log in remaining_logs
-            ]
-            # LLM call — no session held open
-            groups = await segment_messages_batch(messages, user_id=user_id)
-
-            if validate_indices(groups, len(remaining_logs)):
-                segments_0 = indices_to_0based(groups)
-                # ── Phase 2: Write — short-lived session for DB writes ──
-                with factory() as db:
-                    episodes = await generate_episodes_from_segments(
-                        db,
-                        user_id=user_id,
-                        thread_id=thread_id,
-                        logs=remaining_logs,
-                        segments=segments_0,
-                        today=today,
-                    )
-                    db.commit()
-                    result_episode = episodes[0] if episodes else None
-                    for ep in episodes:
-                        merged_into = _try_merge_episode(db, user_id, ep)
-                        if merged_into is not None and ep is result_episode:
-                            result_episode = merged_into
-                    db.commit()
-                    return result_episode
-        except Exception:
-            logger.exception(
-                "Batch segmentation failed, falling back to sequential")
-
-    # --- Sequential path (original behavior) ---
-    episode_logs = remaining_logs[: EPISODE_MIN_TURNS * 2]
-
-    if settings.agent_provider == "scaffold":
-        with factory() as db:
-            episode = _create_fallback_episode(
-                db,
-                user_id=user_id,
-                thread_id=thread_id,
-                logs=episode_logs,
-                today=today,
-            )
-            db.commit()
-            merged_into = _try_merge_episode(db, user_id, episode)
-            if merged_into is not None:
-                episode = merged_into
-            db.commit()
-            return episode
-
-    # ── Phase 2a: LLM call — no session held open ────────────────
-    parsed = await _call_llm_for_episode_safe(episode_logs, user_id=user_id)
-
-    # ── Phase 2b: Write — short-lived session for DB writes ──────
+    # ── Phase 3: Write — short-lived session for DB updates ──
     with factory() as db:
         episode = _build_episode_from_parsed(
             db,
             parsed=parsed,
             user_id=user_id,
             thread_id=thread_id,
-            logs=episode_logs,
+            logs=available_logs,
             today=today,
         )
         db.commit()
-        merged_into = _try_merge_episode(db, user_id, episode)
-        if merged_into is not None:
-            episode = merged_into
-        db.commit()
         return episode
-
-
-def _try_merge_episode(
-    db: Session,
-    user_id: int,
-    new_episode: MemoryEpisode,
-) -> bool:
-    """Try to merge *new_episode* into a recent episode with overlapping topics.
-
-    Uses Jaccard similarity on the topic lists.  If overlap > 50 %, the older
-    episode absorbs the new one (summaries concatenated, topics unioned, higher
-    significance kept, turn counts summed) and the new episode is deleted.
-
-    Returns the merged-into episode if a merge happened, None otherwise.
-    """
-    new_topics: list[str] = new_episode.topics_json or []
-    if not new_topics:
-        return False
-
-    new_set = {t.lower().strip() for t in new_topics}
-    if not new_set:
-        return False
-
-    # Look back 7 days for merge candidates
-    cutoff = (datetime.now(UTC).date() - timedelta(days=7)).isoformat()
-
-    candidates = list(
-        db.scalars(
-            select(MemoryEpisode)
-            .where(
-                MemoryEpisode.user_id == user_id,
-                MemoryEpisode.id != new_episode.id,
-                MemoryEpisode.date >= cutoff,
-            )
-            .order_by(MemoryEpisode.id.desc())
-        ).all()
-    )
-
-    for candidate in candidates:
-        cand_topics: list[str] = candidate.topics_json or []
-        if not cand_topics:
-            continue
-        cand_set = {t.lower().strip() for t in cand_topics}
-        if not cand_set:
-            continue
-
-        intersection = new_set & cand_set
-        union = new_set | cand_set
-        jaccard = len(intersection) / len(union) if union else 0.0
-
-        if jaccard <= 0.5:
-            continue
-
-        # --- Merge into *candidate* (the older episode) ---
-        # Combine summaries
-        existing_summary = df(
-            user_id,
-            candidate.summary,
-            table="memory_episodes",
-            field="summary",
-        )
-        new_summary = df(
-            user_id,
-            new_episode.summary,
-            table="memory_episodes",
-            field="summary",
-        )
-        merged_summary = f"{existing_summary}\n\n{new_summary}"
-        candidate.summary = ef(
-            user_id,
-            merged_summary,
-            table="memory_episodes",
-            field="summary",
-        )
-
-        # Union topics (preserve original casing from both sides, deduplicate)
-        seen_lower: set[str] = set()
-        merged_topics: list[str] = []
-        for t in cand_topics + new_topics:
-            key = t.lower().strip()
-            if key not in seen_lower:
-                seen_lower.add(key)
-                merged_topics.append(t)
-        candidate.topics_json = merged_topics[:10]  # cap at 10
-
-        # Keep higher significance
-        new_sig = new_episode.significance_score or 3
-        cand_sig = candidate.significance_score or 3
-        candidate.significance_score = max(new_sig, cand_sig)
-
-        # Sum turn counts
-        cand_turns = candidate.turn_count or 0
-        new_turns = new_episode.turn_count or 0
-        candidate.turn_count = cand_turns + new_turns
-
-        # Delete the new (duplicate) episode
-        db.delete(new_episode)
-        db.flush()
-
-        logger.info(
-            "Merged episode %d into episode %d (jaccard=%.2f, topics=%s)",
-            new_episode.id,
-            candidate.id,
-            jaccard,
-            merged_topics,
-        )
-        return candidate
-
-    return None
 
 
 def _create_fallback_episode(
@@ -293,22 +88,21 @@ def _create_fallback_episode(
     logs: list[MemoryDailyLog],
     today: str,
 ) -> MemoryEpisode:
-    summaries = []
-    for log in logs:
-        text = df(user_id, log.user_message,
-                  table="memory_daily_logs", field="user_message")[:80]
-        summaries.append(text)
-    summary = "Conversation covering: " + "; ".join(summaries)
-    if len(summary) > 500:
-        summary = summary[:497] + "..."
+    """Create a basic episode without LLM when generation fails."""
+    user_msgs = [
+        df(user_id, log.user_message, table="memory_daily_logs", field="user_message")
+        for log in logs
+        if log.user_message
+    ]
+    preview = user_msgs[0][:80] if user_msgs else "Conversation"
 
     episode = MemoryEpisode(
         user_id=user_id,
         thread_id=thread_id,
         date=today,
-        time=datetime.now(UTC).strftime("%H:%M:%S"),
-        summary=ef(user_id, summary, table="memory_episodes", field="summary"),
-        topics_json=["conversation"],
+        summary=ef(user_id, f"Session: {preview}...", table="memory_episodes", field="summary"),
+        topics_json=None,
+        emotional_arc=None,
         significance_score=2,
         turn_count=len(logs),
     )
@@ -317,94 +111,83 @@ def _create_fallback_episode(
     return episode
 
 
-async def _generate_episode_via_llm(
+def _merge_episodes(
     db: Session,
     *,
+    new_episode: MemoryEpisode,
     user_id: int,
-    thread_id: int | None,
-    logs: list[MemoryDailyLog],
-    today: str,
 ) -> MemoryEpisode:
-    try:
-        parsed = await _call_llm_for_episode(logs, user_id=user_id)
-    except Exception:
-        logger.exception("LLM episode generation failed, using fallback")
-        return _create_fallback_episode(
-            db,
-            user_id=user_id,
-            thread_id=thread_id,
-            logs=logs,
-            today=today,
-        )
+    """Try to merge *new_episode* into a recent episode with overlapping topics.
 
-    summary = parsed.get("summary", "")
-    if not summary or not isinstance(summary, str):
-        summary = "Conversation session"
-    topics = parsed.get("topics", [])
-    if not isinstance(topics, list):
-        topics = []
-    topics = [str(t) for t in topics if isinstance(t, str) and t.strip()][:5]
-    emotional_arc = parsed.get("emotional_arc")
-    if not isinstance(emotional_arc, str):
-        emotional_arc = None
-    significance = parsed.get("significance", 3)
-    if not isinstance(significance, int) or not 1 <= significance <= 5:
-        significance = 3
+    If the new episode's topics overlap significantly with a recent episode
+    from the same day, merge them and return the merged episode.
+    Otherwise return the new episode unchanged.
+    """
+    from sqlalchemy import select
 
-    episode = MemoryEpisode(
-        user_id=user_id,
-        thread_id=thread_id,
-        date=today,
-        time=datetime.now(UTC).strftime("%H:%M:%S"),
-        summary=ef(user_id, summary, table="memory_episodes", field="summary"),
-        topics_json=topics if topics else None,
-        emotional_arc=ef(user_id, emotional_arc,
-                         table="memory_episodes", field="emotional_arc"),
-        significance_score=significance,
-        turn_count=len(logs),
+    # Get recent episodes from the same day
+    recent = list(
+        db.scalars(
+            select(MemoryEpisode)
+            .where(
+                MemoryEpisode.user_id == user_id,
+                MemoryEpisode.date == new_episode.date,
+            )
+            .order_by(MemoryEpisode.created_at.desc())
+            .limit(3)
+        ).all()
     )
-    db.add(episode)
-    db.flush()
-    return episode
 
+    if not recent:
+        return new_episode
 
-async def _call_llm_for_episode(logs: list[MemoryDailyLog], *, user_id: int = 0) -> dict[str, Any]:
-    from anima_server.services.agent.llm import create_llm
-    from anima_server.services.agent.messages import HumanMessage, SystemMessage
+    new_topics = set(new_episode.topics_json or [])
+    if not new_topics:
+        return new_episode
 
-    turns_text = "\n".join(
-        f"User: {df(user_id, log.user_message, table='memory_daily_logs', field='user_message')}\nAssistant: {df(user_id, log.assistant_response, table='memory_daily_logs', field='assistant_response')}"
-        for log in logs
-    )
-    prompt = EPISODE_GENERATION_PROMPT.format(turns=turns_text)
+    for prev in recent:
+        prev_topics = set(prev.topics_json or [])
+        if not prev_topics:
+            continue
 
-    llm = create_llm()
-    response = await llm.ainvoke(
-        [
-            SystemMessage(
-                content="You generate episode summaries. Respond only with JSON."),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = getattr(response, "content", "")
-    if not isinstance(content, str):
-        content = str(content)
-    return _parse_json_object(content)
+        # Check for topic overlap
+        overlap = new_topics & prev_topics
+        if len(overlap) >= min(2, len(new_topics), len(prev_topics)):
+            # Merge: update previous episode
+            prev_summary = df(
+                user_id, prev.summary, table="memory_episodes", field="summary"
+            )
+            new_summary = df(
+                user_id, new_episode.summary, table="memory_episodes", field="summary"
+            )
 
+            merged_summary = f"{prev_summary} Later: {new_summary}"
+            prev.summary = ef(
+                user_id,
+                merged_summary,
+                table="memory_episodes",
+                field="summary",
+            )
 
-def _parse_json_object(text: str) -> dict[str, Any]:
-    return parse_json_object(text) or {}
+            # Merge topics
+            merged_topics = list(prev_topics | new_topics)[:5]
+            prev.topics_json = merged_topics
 
+            # Update significance to max of both
+            prev.significance_score = max(
+                prev.significance_score or 2,
+                new_episode.significance_score or 2,
+            )
 
-async def _call_llm_for_episode_safe(
-    logs: list[MemoryDailyLog], *, user_id: int = 0
-) -> dict[str, Any] | None:
-    """Call LLM for episode generation, returning None on failure."""
-    try:
-        return await _call_llm_for_episode(logs, user_id=user_id)
-    except Exception:
-        logger.exception("LLM episode generation failed, using fallback")
-        return None
+            # Update turn count
+            prev.turn_count = (prev.turn_count or 0) + (new_episode.turn_count or 0)
+
+            # Delete the new episode since we merged into previous
+            db.delete(new_episode)
+            db.flush()
+            return prev
+
+    return new_episode
 
 
 def _build_episode_from_parsed(
@@ -437,14 +220,17 @@ def _build_episode_from_parsed(
     if not isinstance(emotional_arc, str):
         emotional_arc = None
     significance = parsed.get("significance", 3)
-    if not isinstance(significance, int) or not 1 <= significance <= 5:
+    try:
+        significance = int(significance)
+        if not 1 <= significance <= 5:
+            significance = 3
+    except (ValueError, TypeError):
         significance = 3
 
     episode = MemoryEpisode(
         user_id=user_id,
         thread_id=thread_id,
         date=today,
-        time=datetime.now(UTC).strftime("%H:%M:%S"),
         summary=ef(user_id, summary, table="memory_episodes", field="summary"),
         topics_json=topics if topics else None,
         emotional_arc=ef(user_id, emotional_arc,
@@ -454,4 +240,55 @@ def _build_episode_from_parsed(
     )
     db.add(episode)
     db.flush()
-    return episode
+
+    # Attempt merge with recent episode
+    return _merge_episodes(db, new_episode=episode, user_id=user_id)
+
+
+async def _call_llm_for_episode(
+    logs: list[MemoryDailyLog], *, user_id: int = 0, agent_name: str = "Anima"
+) -> dict[str, Any]:
+    from anima_server.services.agent.llm import create_llm
+    from anima_server.services.agent.messages import HumanMessage, SystemMessage
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    # Create a prompt loader with the agent name (no db access needed)
+    prompt_loader = PromptLoader(agent_name=agent_name)
+
+    turns_text = "\n".join(
+        f"User: {df(user_id, log.user_message, table='memory_daily_logs', field='user_message')}\nAssistant: {df(user_id, log.assistant_response, table='memory_daily_logs', field='assistant_response')}"
+        for log in logs
+    )
+    
+    # Use templated prompt
+    prompt = prompt_loader.episode_generation(turns=turns_text)
+
+    llm = create_llm()
+    response = await llm.ainvoke(
+        [
+            SystemMessage(
+                content="You generate episode summaries. Respond only with JSON."),
+            HumanMessage(content=prompt),
+        ]
+    )
+    content = getattr(response, "content", "")
+    if not isinstance(content, str):
+        content = str(content)
+    return _parse_json_object(content)
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    return parse_json_object(text) or {}
+
+
+async def _call_llm_for_episode_safe(
+    logs: list[MemoryDailyLog], *, user_id: int = 0
+) -> dict[str, Any] | None:
+    """Call LLM for episode generation, returning None on failure."""
+    try:
+        # Try to get agent name from first log's user, but fallback to default
+        agent_name = "Anima"
+        return await _call_llm_for_episode(logs, user_id=user_id, agent_name=agent_name)
+    except Exception:
+        logger.exception("LLM episode generation failed, using fallback")
+        return None

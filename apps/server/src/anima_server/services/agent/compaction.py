@@ -17,13 +17,8 @@ logger = logging.getLogger(__name__)
 SUMMARY_LINE_LIMIT = 12
 SUMMARY_TEXT_LIMIT = 180
 
-# LLM summarization prompt
-_SUMMARIZATION_PROMPT = """\
-Summarize the following conversation between a user and an AI assistant.
-Preserve: key facts discussed, decisions made, emotional tone, open questions.
-Be concise but don't lose important context. Write in third-person narrative style.
-
-{transcript}"""
+# Summarization prompt is now in Jinja2 template: summarization.md.j2
+# Use PromptLoader.summarization() instead.
 
 # Cascade: max chars for the LLM summarization input transcript
 _MAX_TRANSCRIPT_CHARS = 12000
@@ -293,7 +288,10 @@ async def summarize_with_llm(
     if len(transcript) > _MAX_TRANSCRIPT_CHARS:
         transcript = transcript[:_MAX_TRANSCRIPT_CHARS] + "\n[...truncated]"
 
-    prompt_text = _SUMMARIZATION_PROMPT.format(transcript=transcript)
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    prompt_loader = PromptLoader(agent_name="Anima")
+    prompt_text = prompt_loader.summarization(transcript=transcript)
 
     # Prefer extraction model (cheaper) if configured, else use primary.
     model = settings.agent_extraction_model.strip() or settings.agent_model

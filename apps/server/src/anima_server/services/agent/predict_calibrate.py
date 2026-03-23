@@ -81,46 +81,10 @@ _MIN_WORD_COUNT = 3
 # Prompts
 # ---------------------------------------------------------------------------
 
-PREDICTION_PROMPT = """Given these existing facts about the user:
-{existing_facts}
+# Prediction and delta extraction prompts are now in Jinja2 templates.
+# Use PromptLoader.prediction() and PromptLoader.delta_extraction() instead.
 
-And this conversation summary:
-{conversation_summary}
 
-Predict what new facts or information this conversation likely contains.
-Focus on what would be EXPECTED given what you already know.
-Be specific. If you expect nothing new, say "no new facts expected."
-"""
-
-DELTA_EXTRACTION_PROMPT = """PREDICTION (what was expected):
-{prediction}
-
-ACTUAL CONVERSATION:
-User: {user_message}
-Assistant: {assistant_response}
-
-Extract ONLY statements that are:
-- SURPRISING: not predicted, genuinely new information
-- CONTRADICTORY: conflicts with or updates a prediction
-- CORRECTIVE: the user explicitly corrects something
-
-Do NOT extract:
-- Information that matches the prediction (already known)
-- Vague or generic statements
-- Opinions about the conversation itself
-
-Also detect the user's emotional tone if notable (or null if nothing):
-- emotion: one of frustrated, excited, anxious, calm, stressed, relieved, curious, disappointed, or null
-- confidence: 0.0-1.0
-- trajectory: escalating, de-escalating, stable, or shifted
-- evidence_type: explicit, linguistic, behavioral, or contextual
-- evidence: what specifically indicated this
-
-Return as JSON array of objects with fields:
-  content, category (fact/preference/goal/relationship), confidence (0.0-1.0),
-  reason (surprising/contradictory/corrective),
-  detected_emotion (object with emotion/confidence/trajectory/evidence_type/evidence, or null)
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +179,7 @@ async def predict_episode_knowledge(
     *,
     existing_facts: list[str],
     conversation_summary: str,
+    prompt_loader: Any | None = None,
 ) -> str:
     """Predict what knowledge a conversation likely contains.
 
@@ -223,11 +188,16 @@ async def predict_episode_knowledge(
     from anima_server.services.agent.llm import create_llm
     from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    if prompt_loader is None:
+        prompt_loader = PromptLoader(agent_name="Anima")
+
     facts_text = (
         "\n".join(f"- {f}" for f in existing_facts) if existing_facts else "(no existing facts)"
     )
 
-    prompt = PREDICTION_PROMPT.format(
+    prompt = prompt_loader.prediction(
         existing_facts=facts_text,
         conversation_summary=conversation_summary,
     )
@@ -252,6 +222,7 @@ async def extract_knowledge_delta(
     user_message: str,
     assistant_response: str,
     prediction: str,
+    prompt_loader: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Extract only the delta between prediction and actual conversation.
 
@@ -261,7 +232,12 @@ async def extract_knowledge_delta(
     from anima_server.services.agent.llm import create_llm
     from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
-    prompt = DELTA_EXTRACTION_PROMPT.format(
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    if prompt_loader is None:
+        prompt_loader = PromptLoader(agent_name="Anima")
+
+    prompt = prompt_loader.delta_extraction(
         prediction=prediction,
         user_message=user_message,
         assistant_response=assistant_response,
@@ -312,6 +288,11 @@ async def predict_calibrate_extraction(
 
     F3.9: If predict-calibrate fails, falls back to direct extraction.
     """
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    # Create prompt loader with user's agent name
+    prompt_loader = PromptLoader.from_db(db, user_id)
+
     # Step 1: Retrieve relevant existing facts
     try:
         search_result = await hybrid_search(
@@ -349,12 +330,14 @@ async def predict_calibrate_extraction(
         prediction = await predict_episode_knowledge(
             existing_facts=existing_facts,
             conversation_summary=conversation_summary,
+            prompt_loader=prompt_loader,
         )
 
         delta_items = await extract_knowledge_delta(
             user_message=user_message,
             assistant_response=assistant_response,
             prediction=prediction,
+            prompt_loader=prompt_loader,
         )
     except Exception:
         logger.warning(

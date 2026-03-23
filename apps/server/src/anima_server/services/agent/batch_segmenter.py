@@ -18,22 +18,8 @@ logger = logging.getLogger(__name__)
 
 BATCH_THRESHOLD: int = 8  # Min messages for batch segmentation
 
-BATCH_SEGMENTATION_PROMPT = """You are grouping conversation messages by topic coherence.
-
-Messages:
-{messages}
-
-Group these messages by topic. Messages about the same topic should be in the
-same group, even if they are not consecutive. Return groups as a JSON array of
-arrays of message numbers.
-
-Example output: [[1, 3], [2]]
-
-Rules:
-- Every message number must appear in exactly one group
-- Groups can contain non-consecutive numbers
-- Each group should contain messages about a coherent topic
-- Aim for 2-5 groups (don't over-segment)"""
+# Batch segmentation prompt is now in Jinja2 template: batch_segmentation.md.j2
+# Use PromptLoader.batch_segmentation() instead.
 
 
 def should_batch_segment(buffer_size: int) -> bool:
@@ -133,7 +119,10 @@ async def _call_llm_for_segmentation(
         lines.append(f"[{i}] User: {user_msg}")
         lines.append(f"[{i}] Assistant: {assistant_resp}")
 
-    prompt = BATCH_SEGMENTATION_PROMPT.format(messages="\n".join(lines))
+    from anima_server.services.agent.prompt_loader import PromptLoader
+
+    prompt_loader = PromptLoader(agent_name="Anima")
+    prompt = prompt_loader.batch_segmentation(messages="\n".join(lines))
 
     # Create a dedicated client with low temperature for deterministic grouping
     client = OpenAICompatibleChatClient(

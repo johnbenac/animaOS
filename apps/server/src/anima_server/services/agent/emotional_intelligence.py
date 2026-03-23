@@ -45,15 +45,8 @@ SECONDARY_EMOTIONS = frozenset(
 
 ALL_EMOTIONS = PRIMARY_EMOTIONS | SECONDARY_EMOTIONS
 
-EMOTION_EXTRACTION_PROMPT_FRAGMENT = """Also detect the user's emotional tone in this exchange:
-- emotion: the primary emotion you detect (single word from: frustrated, excited, anxious, calm, stressed, relieved, curious, disappointed, vulnerable, proud, overwhelmed, playful)
-- emotion_confidence: 0.0-1.0 how confident you are
-- emotion_trajectory: escalating, de-escalating, stable, or shifted
-- emotion_evidence_type: explicit, linguistic, behavioral, or contextual
-- emotion_evidence: what specifically indicated this
-
-Only report if confidence > 0.4.
-If nothing notable, set emotion to null."""
+# Emotion extraction prompt is now in Jinja2 template: emotion_extraction.md.j2
+# Use PromptLoader.emotion_extraction() instead.
 
 
 def record_emotional_signal(

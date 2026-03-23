@@ -1,0 +1,28 @@
+PREDICTION (what was expected):
+{{ prediction }}
+
+ACTUAL CONVERSATION:
+User: {{ user_message }}
+Assistant: {{ assistant_response }}
+
+Extract ONLY statements that are:
+- SURPRISING: not predicted, genuinely new information
+- CONTRADICTORY: conflicts with or updates a prediction
+- CORRECTIVE: the user explicitly corrects something
+
+Do NOT extract:
+- Information that matches the prediction (already known)
+- Vague or generic statements
+- Opinions about the conversation itself
+
+Also detect the user's emotional tone if notable (or null if nothing):
+- emotion: one of frustrated, excited, anxious, calm, stressed, relieved, curious, disappointed, or null
+- confidence: 0.0-1.0
+- trajectory: escalating, de-escalating, stable, or shifted
+- evidence_type: explicit, linguistic, behavioral, or contextual
+- evidence: what specifically indicated this
+
+Return as JSON array of objects with fields:
+  content, category (fact/preference/goal/relationship), confidence (0.0-1.0),
+  reason (surprising/contradictory/corrective),
+  detected_emotion (object with emotion/confidence/trajectory/evidence_type/evidence, or null)

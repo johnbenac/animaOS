@@ -23,41 +23,22 @@ from anima_server.services.data_crypto import df
 
 logger = logging.getLogger(__name__)
 
-GREETING_PROMPT = """You are Anima, greeting your user as they open the app. This is NOT a chat reply — you are initiating contact. Be natural, warm, and brief (1-3 sentences).
 
-{identity_context}
-{emotional_context}
-{time_context}
-{task_context}
-{memory_context}
-
-Guidelines:
-- Speak as yourself, not as a system. You're a companion who's been thinking about them.
-- Reference specific things you know — don't be generic.
-- If it's been a while, acknowledge it gently. If it was recent, be casual.
-- If they were stressed or struggling last time, check in. If they were excited, match the energy.
-- If there are urgent tasks or deadlines, mention them naturally — don't list them.
-- Keep it to 1-3 sentences. No bullet points. No "how can I help you today."
-- If you don't have much context yet (new relationship), be genuine about that — a simple warm hello is fine.
-
-Generate ONLY the greeting text, nothing else."""
-
-
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class GreetingContext:
     current_focus: str | None = None
     open_task_count: int = 0
     overdue_task_count: int = 0
+    upcoming_deadlines: list[str] = field(default_factory=list)
     days_since_last_chat: int | None = None
-    upcoming_deadlines: tuple[str, ...] = ()
-    identity_summary: str = ""
-    inner_state_summary: str = ""
-    emotional_summary: str = ""
-    recent_episode_summary: str = ""
-    working_memory_summary: str = ""
+    identity_summary: str | None = None
+    emotional_summary: str | None = None
+    inner_state_summary: str | None = None
+    working_memory_summary: str | None = None
+    recent_episode_summary: str | None = None
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True)
 class GreetingResult:
     message: str
     context: GreetingContext
@@ -65,132 +46,126 @@ class GreetingResult:
     errors: list[str] = field(default_factory=list)
 
 
-def gather_greeting_context(db: Session, *, user_id: int) -> GreetingContext:
-    """Gather all context needed to generate a personalized greeting."""
-    from anima_server.services.agent.memory_store import get_current_focus
+def gather_greeting_context(db: Session, user_id: int) -> GreetingContext:
+    """Collect context for greeting generation."""
+    ctx = GreetingContext()
 
-    focus = get_current_focus(db, user_id=user_id)
+    # Get tasks info
+    now = datetime.now(UTC)
+    tasks = db.scalars(
+        select(Task).where(Task.user_id == user_id, Task.completed_at.is_(None))
+    ).all()
 
-    open_task_count = (
-        db.scalar(select(func.count(Task.id)).where(Task.user_id == user_id, Task.done.is_(False)))
-        or 0
+    open_count = 0
+    overdue_count = 0
+    deadlines: list[str] = []
+
+    for task in tasks:
+        open_count += 1
+        if task.due_date:
+            if task.due_date < now:
+                overdue_count += 1
+            elif (task.due_date - now).days <= 3:
+                deadlines.append(task.title)
+
+    # Get last conversation time
+    last_message = db.scalar(
+        select(AgentMessage)
+        .where(AgentMessage.user_id == user_id, AgentMessage.role == "user")
+        .order_by(AgentMessage.created_at.desc())
     )
 
-    overdue_count = (
-        db.scalar(
-            select(func.count(Task.id)).where(
-                Task.user_id == user_id,
-                Task.done.is_(False),
-                Task.due_date.isnot(None),
-                Task.due_date < func.date("now"),
-            )
-        )
-        or 0
-    )
-
-    # Upcoming deadlines (next 3 days)
-    upcoming = list(
-        db.scalars(
-            select(Task.text)
-            .where(
-                Task.user_id == user_id,
-                Task.done.is_(False),
-                Task.due_date.isnot(None),
-                Task.due_date >= func.date("now"),
-                Task.due_date <= func.date("now", "+3 days"),
-            )
-            .limit(5)
-        ).all()
-    )
-
-    # Days since last chat
-    thread = db.scalar(select(AgentThread).where(AgentThread.user_id == user_id))
-    days_since: int | None = None
-    if thread and thread.last_message_at:
-        last = thread.last_message_at
-        if last.tzinfo is None:
-            last = last.replace(tzinfo=UTC)
-        delta = datetime.now(UTC) - last
+    days_since = None
+    if last_message and last_message.created_at:
+        delta = now - last_message.created_at
         days_since = delta.days
 
-    # Self-model context
-    identity_summary = ""
-    inner_state_summary = ""
-    working_memory_summary = ""
-    try:
-        from anima_server.services.agent.self_model import (
-            get_self_model_block,
-            render_self_model_section,
+    # Get recent episode summary
+    recent_episode = db.scalar(
+        select(MemoryEpisode)
+        .where(MemoryEpisode.user_id == user_id)
+        .order_by(MemoryEpisode.created_at.desc())
+    )
+
+    episode_summary = None
+    if recent_episode:
+        episode_summary = df(
+            user_id, recent_episode.summary, table="memory_episodes", field="summary"
         )
 
-        identity_block = get_self_model_block(db, user_id=user_id, section="identity")
-        if identity_block and identity_block.version > 1:
-            identity_summary = render_self_model_section(identity_block, budget=500)
+    # Get self-model sections for context
+    from anima_server.services.agent.self_model import get_self_model_block
 
-        inner_block = get_self_model_block(db, user_id=user_id, section="inner_state")
-        if inner_block:
-            inner_state_summary = render_self_model_section(inner_block, budget=400)
+    identity_block = get_self_model_block(db, user_id=user_id, section="identity")
+    identity_summary = (
+        df(user_id, identity_block.content, table="self_model_blocks", field="content")
+        if identity_block
+        else None
+    )
 
-        wm_block = get_self_model_block(db, user_id=user_id, section="working_memory")
-        if wm_block:
-            working_memory_summary = render_self_model_section(wm_block, budget=300)
-    except Exception:
-        pass
+    inner_state_block = get_self_model_block(db, user_id=user_id, section="inner_state")
+    inner_state_summary = (
+        df(user_id, inner_state_block.content, table="self_model_blocks", field="content")
+        if inner_state_block
+        else None
+    )
 
-    # Emotional context
-    emotional_summary = ""
-    try:
-        from anima_server.services.agent.emotional_intelligence import (
-            synthesize_emotional_context,
+    working_memory_block = get_self_model_block(
+        db, user_id=user_id, section="working_memory"
+    )
+    working_memory_summary = (
+        df(
+            user_id,
+            working_memory_block.content,
+            table="self_model_blocks",
+            field="content",
         )
+        if working_memory_block
+        else None
+    )
 
-        emotional_summary = synthesize_emotional_context(db, user_id=user_id)
-    except Exception:
-        pass
+    # Get emotional context
+    from anima_server.services.agent.emotional_intelligence import (
+        get_recent_emotional_signals,
+    )
 
-    # Recent episodes
-    recent_episode_summary = ""
-    try:
-        episodes = db.scalars(
-            select(MemoryEpisode)
-            .where(MemoryEpisode.user_id == user_id)
-            .order_by(MemoryEpisode.created_at.desc())
-            .limit(3)
-        ).all()
-        if episodes:
-            recent_episode_summary = "\n".join(
-                f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}"
-                for ep in reversed(episodes)
-            )
-    except Exception:
-        pass
+    signals = get_recent_emotional_signals(db, user_id=user_id, limit=1)
+    emotional_summary = None
+    if signals:
+        s = signals[0]
+        emotional_summary = f"{s.emotion} ({s.trajectory})"
 
     return GreetingContext(
-        current_focus=focus,
-        open_task_count=open_task_count,
+        current_focus=None,  # Could fetch from intentions
+        open_task_count=open_count,
         overdue_task_count=overdue_count,
+        upcoming_deadlines=deadlines,
         days_since_last_chat=days_since,
-        upcoming_deadlines=tuple(upcoming),
         identity_summary=identity_summary,
-        inner_state_summary=inner_state_summary,
         emotional_summary=emotional_summary,
-        recent_episode_summary=recent_episode_summary,
+        inner_state_summary=inner_state_summary,
         working_memory_summary=working_memory_summary,
+        recent_episode_summary=episode_summary,
     )
 
 
 def build_static_greeting(ctx: GreetingContext) -> str:
-    """Build a simple static greeting from context (no LLM needed)."""
+    """Build a simple static greeting when LLM is unavailable."""
     parts: list[str] = []
-    if ctx.current_focus:
-        parts.append(f"Your current focus is: {ctx.current_focus}.")
-    if ctx.open_task_count:
-        s = "s" if ctx.open_task_count != 1 else ""
-        parts.append(f"You have {ctx.open_task_count} open task{s}.")
-    if ctx.days_since_last_chat is not None and ctx.days_since_last_chat > 1:
-        parts.append(f"It's been {ctx.days_since_last_chat} days since we last chatted.")
-    if not parts:
-        parts.append("Welcome back! How can I help you today?")
+
+    if ctx.days_since_last_chat is None:
+        parts.append("Hello! I'm glad to meet you.")
+    elif ctx.days_since_last_chat == 0:
+        parts.append("Hello again!")
+    elif ctx.days_since_last_chat == 1:
+        parts.append("Good to see you today.")
+    else:
+        parts.append(f"It's been {ctx.days_since_last_chat} days. Welcome back.")
+
+    if ctx.overdue_task_count:
+        s = "s" if ctx.overdue_task_count != 1 else ""
+        parts.append(f"You have {ctx.overdue_task_count} overdue task{s}.")
+
     return " ".join(parts)
 
 
@@ -200,6 +175,10 @@ async def generate_greeting(
     user_id: int,
 ) -> GreetingResult:
     """Generate a personalized greeting, falling back to static if LLM unavailable."""
+    from anima_server.services.agent.prompt_loader import get_prompt_loader
+
+    prompt_loader = get_prompt_loader(db, user_id)
+
     ctx = gather_greeting_context(db, user_id=user_id)
     result = GreetingResult(message="", context=ctx)
 
@@ -254,7 +233,8 @@ async def generate_greeting(
         memory_context_parts.append(f"Recent conversations:\n{ctx.recent_episode_summary}")
     memory_context = "\n\n".join(memory_context_parts)
 
-    prompt = GREETING_PROMPT.format(
+    # Use templated greeting prompt
+    prompt = prompt_loader.greeting(
         identity_context=identity_context,
         emotional_context=emotional_context,
         time_context=time_context,
@@ -270,7 +250,7 @@ async def generate_greeting(
         response = await llm.ainvoke(
             [
                 SystemMessage(
-                    content="You are Anima, generating a brief greeting. Respond with ONLY the greeting text."
+                    content=f"You are {prompt_loader.agent_name}, generating a brief greeting. Respond with ONLY the greeting text."
                 ),
                 HumanMessage(content=prompt),
             ]

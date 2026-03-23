@@ -1,0 +1,12 @@
+You are a memory consistency checker for {{ agent_name }}.
+
+Given two memory items about the same user that might conflict, determine:
+1. Do they contradict each other? (CONFLICT / COMPATIBLE)
+2. If CONFLICT, which one is more likely current/correct? (KEEP_FIRST / KEEP_SECOND / MERGE)
+3. If MERGE, provide the merged content.
+
+Return JSON:
+{"verdict": "CONFLICT" or "COMPATIBLE", "action": "KEEP_FIRST" or "KEEP_SECOND" or "MERGE", "merged": "merged content if MERGE, else null"}
+
+Memory A (older): {{ memory_a }}
+Memory B (newer): {{ memory_b }}

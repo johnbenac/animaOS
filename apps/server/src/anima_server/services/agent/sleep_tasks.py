@@ -399,7 +399,13 @@ async def _check_contradiction(
         from anima_server.services.agent.messages import HumanMessage, SystemMessage
 
         llm = create_llm()
-        prompt = CONTRADICTION_PROMPT.format(memory_a=content_a, memory_b=content_b)
+        from anima_server.services.agent.prompt_loader import PromptLoader
+
+        prompt_loader = PromptLoader(agent_name="Anima")
+        prompt = prompt_loader.contradiction_check(
+            memory_a=content_a,
+            memory_b=content_b,
+        )
         response = await llm.ainvoke(
             [
                 SystemMessage(content="You check memory consistency. Respond only with JSON."),
@@ -427,7 +433,10 @@ async def _call_profile_synthesis(facts: list[MemoryItem], *, user_id: int = 0) 
             f"[id={f.id}] {df(user_id, f.content, table='memory_items', field='content')}"
             for f in facts
         )
-        prompt = PROFILE_SYNTHESIS_PROMPT.format(facts=facts_text)
+        from anima_server.services.agent.prompt_loader import PromptLoader
+
+        prompt_loader = PromptLoader(agent_name="Anima")
+        prompt = prompt_loader.profile_synthesis(facts=facts_text)
 
         llm = create_llm()
         response = await llm.ainvoke(
