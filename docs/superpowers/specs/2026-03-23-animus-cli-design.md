@@ -264,10 +264,11 @@ anima --server <url>           # Connect to remote server
 
 The WebSocket endpoint and protocol support desktop connections from day one (shared protocol). The desktop app can migrate from REST/SSE to WebSocket as a separate task, not blocked by Animus. Once migrated, the desktop app gains the same coding capabilities as the CLI — same brain, same protocol, different UI.
 
-## Future Considerations
+## v2 Roadmap
 
 - Subagent support for parallel task execution
 - Skill learning from coding sessions (like Letta Code)
 - MCP server support for external tool providers
 - Auto-launch server if not running
 - Multi-conversation support with /new and /switch
+- Desktop app migration to WebSocket protocol
