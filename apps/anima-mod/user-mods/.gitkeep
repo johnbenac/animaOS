@@ -1,0 +1,15 @@
+# User modules directory
+# 
+# Add your custom modules here.
+# Each module should be in its own directory with a mod.ts entry point.
+#
+# Example:
+#   user-mods/my-module/
+#   ├── mod.ts
+#   └── package.json (optional)
+#
+# Then register in a-mod.config.yaml:
+#
+#   modules:
+#     - id: my-module
+#       path: ./user-mods/my-module

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Data
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Environment
+.env
+.env.local
+
+# User modules (user-installed, not committed)
+user-mods/*/
+!user-mods/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db

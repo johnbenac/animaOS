@@ -1,0 +1,24 @@
+{
+  "name": "anima-mod",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "build": "tsc",
+    "start": "bun run dist/index.js",
+    "test": "bun test --glob='**/*.test.ts'",
+    "test:watch": "bun test --watch --glob='**/*.test.ts'",
+  },
+  "dependencies": {
+    "@sinclair/typebox": "^0.34.48",
+    "elysia": "^1.2.0",
+    "grammy": "^1.41.1",
+    "pino": "^9.6.0",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,53 @@
+# a-mod configuration
+# Modules to load - paths relative to project root
+
+modules:
+  # Example echo module (built-in)
+  - id: echo
+    path: ./mods/echo
+    config: {}
+
+  # Telegram module (uncomment to enable)
+  # - id: telegram
+  #   path: ./mods/telegram
+  #   config:
+  #     token: ${TELEGRAM_BOT_TOKEN}
+  #     mode: polling                    # or "webhook"
+  #     # webhookUrl: https://.../telegram/webhook
+  #     # webhookSecret: ${TELEGRAM_WEBHOOK_SECRET}
+  #     # linkSecret: ${TELEGRAM_LINK_SECRET}
+
+  # Discord module (uncomment to enable)  
+  # - id: discord
+  #   path: ./mods/discord
+  #   config:
+  #     token: ${DISCORD_BOT_TOKEN}
+  #     # intents: 51351  # Optional: default includes guilds + messages + content
+  
+  # - id: discord
+  #   path: ./mods/discord
+  #   config:
+  #     token: ${DISCORD_BOT_TOKEN}
+  
+  # User modules (from user-mods/)
+  # - id: custom-integration
+  #   path: ./user-mods/custom-integration
+
+# Core configuration
+core:
+  port: 3034
+  hostname: "127.0.0.1"
+  
+  # Cognitive core connection
+  anima:
+    baseUrl: "http://127.0.0.1:3031/api"
+    username: ${ANIMA_USERNAME}
+    password: ${ANIMA_PASSWORD}
+  
+  # Module store (SQLite)
+  store:
+    path: "./data/a-mod.db"
+
+# Logging
+log:
+  level: "info"
