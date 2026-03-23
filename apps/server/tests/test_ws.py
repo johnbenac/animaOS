@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from conftest import managed_test_client
 from fastapi.testclient import TestClient
 
