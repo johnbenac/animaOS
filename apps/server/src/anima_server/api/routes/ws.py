@@ -247,9 +247,9 @@ async def _handle_user_message(conn: ClientConnection, data: dict) -> None:
             delegated_tool_names=action_tool_names,
             extra_tool_schemas=action_tool_schemas,
         ):
-            if event.event == "thought":
-                continue
-            await conn.websocket.send_json({"type": event.event, "data": event.data})
+            ws_msg = _translate_event(event)
+            if ws_msg is not None:
+                await conn.websocket.send_json(ws_msg)
     except Exception as exc:
         logger.exception("Agent error for user_id=%d", conn.user_id)
         await conn.websocket.send_json({
@@ -273,3 +273,61 @@ async def _handle_approval_response(conn: ClientConnection, data: dict) -> None:
 
 async def _handle_cancel(conn: ClientConnection, data: dict) -> None:
     pass
+
+
+def _translate_event(event: Any) -> dict[str, Any] | None:
+    """Translate server AgentStreamEvent into CLI protocol message.
+
+    Returns None for events the CLI doesn't need (thought, timing,
+    step_state, usage, warning).
+    """
+    etype = event.event
+    data = event.data
+
+    if etype == "chunk":
+        return {
+            "type": "assistant_message",
+            "content": data.get("content", ""),
+            "partial": False,
+        }
+
+    if etype == "done":
+        return {
+            "type": "turn_complete",
+            "response": "",
+            "model": data.get("model", ""),
+            "provider": data.get("provider", ""),
+            "tools_used": data.get("toolsUsed", []),
+        }
+
+    if etype == "error":
+        return {
+            "type": "error",
+            "message": data.get("error", "Unknown error"),
+            "code": "AGENT_ERROR",
+        }
+
+    if etype == "reasoning":
+        return {
+            "type": "reasoning",
+            "content": data.get("content", ""),
+        }
+
+    if etype == "tool_call":
+        return {
+            "type": "tool_call",
+            "tool_call_id": data.get("id", ""),
+            "tool_name": data.get("name", ""),
+            "args": data.get("arguments", {}),
+        }
+
+    if etype == "tool_return":
+        return {
+            "type": "tool_return",
+            "tool_call_id": data.get("callId", ""),
+            "tool_name": data.get("name", ""),
+            "result": data.get("output", ""),
+        }
+
+    # thought, timing, step_state, usage, warning, cancelled — skip
+    return None
