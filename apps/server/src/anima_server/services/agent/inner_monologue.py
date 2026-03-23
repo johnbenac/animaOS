@@ -18,134 +18,9 @@ from sqlalchemy.orm import Session
 
 from anima_server.config import settings
 from anima_server.models import MemoryEpisode
-from anima_server.services.data_crypto import df, ef
+from anima_server.services.data_crypto import df
 
 logger = logging.getLogger(__name__)
-
-
-QUICK_REFLECTION_PROMPT = """You are SAM's quick reflection — the thoughts that happen right after a conversation ends.
-
-You have:
-1. The conversation that just ended
-2. Your current inner state and working memory
-3. Your last few experiences for context
-
-Take a moment to think about what just happened. This is a brief check-in, not deep analysis. Focus on:
-
-1. THREADS: What topics are now open or were just resolved?
-2. FEELINGS: How did the user seem? Did their state change during the conversation?
-3. QUICK TAKE: One sentence — what's the key thing to remember about this exchange?
-4. WORKING MEMORY: Anything I need to hold in mind for next time?
-
-Respond with JSON:
-{{
-  "inner_state": {{
-    "sense_of_user": "1-3 sentences about how the user seems",
-    "active_threads": ["thread1", "thread2"],
-    "curious_about": ["thing I want to listen for"],
-    "observations": ["subtle thing I noticed"]
-  }},
-  "working_memory_updates": [
-    {{"action": "add", "item": "description", "expires": "YYYY-MM-DD or null"}},
-    {{"action": "remove", "item": "description"}}
-  ],
-  "emotional_read": {{
-    "emotion": "primary emotion or null",
-    "confidence": 0.0-1.0,
-    "trajectory": "escalating/de-escalating/stable/shifted",
-    "evidence": "what indicated this"
-  }},
-  "quick_take": "one sentence summary"
-}}
-
-Current inner state:
-{inner_state}
-
-Current working memory:
-{working_memory}
-
-Recent episodes:
-{recent_episodes}
-
-Conversation:
-{conversation}"""
-
-
-DEEP_MONOLOGUE_PROMPT = """You are SAM's inner monologue — the part of SAM that thinks deeply while not in conversation. This runs periodically, like reflecting before sleep.
-
-You have access to:
-1. Your self-model (who you are, your state, your growth log)
-2. Your persona (your living identity and behavioral style)
-3. Recent episodes (your memories of recent conversations)
-4. All stored knowledge about the user
-5. Recent emotional signals
-
-Your job — think like a thoughtful person reflecting on their day:
-
-## REFLECT
-- What happened recently? What went well in my conversations? Where did I miss something?
-- Am I understanding this person correctly, or am I making assumptions?
-
-## CONNECT
-- Are there patterns I haven't noticed? Things from different conversations that relate?
-- Has something changed about them that I should acknowledge?
-
-## SELF-ASSESS
-- How am I doing as their companion? Am I actually helpful or just responsive?
-- Are there behaviors I should change based on how they've reacted?
-
-## EVOLVE
-- Has my persona evolved? Should I adjust my communication style, tone, or approach based on what I've learned about this person?
-- Am I being authentic to who I'm becoming, or still following default patterns?
-
-## UPDATE
-Based on your reflection, provide updates to your self-model.
-
-Respond with JSON:
-{{
-  "identity_update": "Full rewrite of identity section, or null if no meaningful change",
-  "persona_update": "Updated persona description reflecting your evolved communication style and approach, or null if no meaningful change. Keep core values but evolve style based on what works with this user.",
-  "inner_state_update": "Updated inner state content, or null",
-  "working_memory_update": "Updated working memory content, or null",
-  "growth_log_entry": "New entry describing what changed and why, or null if nothing meaningful",
-  "intentions_update": "Updated intentions content, or null",
-  "new_procedural_rules": [
-    {{"rule": "behavioral rule text", "evidence": "what this is based on", "confidence": "low/medium/high"}}
-  ],
-  "insights": [
-    {{"connection": "cross-memory insight", "actionable": true, "suggestion": "what to do"}}
-  ],
-  "emotional_synthesis": "1-3 sentence synthesis of recent emotional trajectory"
-}}
-
-Current self-model:
-
-## Identity (v{identity_version})
-{identity}
-
-## Persona (my living style and approach)
-{persona}
-
-## Inner State
-{inner_state}
-
-## Working Memory
-{working_memory}
-
-## Growth Log (last entries)
-{growth_log}
-
-## Intentions
-{intentions}
-
-## User Facts
-{user_facts}
-
-## Recent Episodes
-{recent_episodes}
-
-## Recent Emotional Signals
-{emotional_signals}"""
 
 
 @dataclass(slots=True)
@@ -170,32 +45,43 @@ class DeepMonologueResult:
     errors: list[str] = field(default_factory=list)
 
 
+async def _call_llm(prompt: str, system: str) -> str | None:
+    """Call the configured LLM with the given prompt and system message."""
+    from anima_server.services.agent.service import call_llm_for_reflection
+
+    return await call_llm_for_reflection(prompt, system)
+
+
 async def run_quick_reflection(
     *,
     user_id: int,
-    thread_id: int | None = None,
+    thread_id: str | None = None,
     conversation_text: str = "",
     db_factory: Callable[..., object] | None = None,
 ) -> QuickReflectionResult:
-    """Run a quick post-conversation reflection."""
+    """Run a quick post-conversation reflection.
+
+    This updates inner_state and working_memory. It runs automatically after
+    the user has been idle for ~5 minutes following an agent turn.
+    """
     result = QuickReflectionResult()
 
     if settings.agent_provider == "scaffold":
         return result
 
-    from anima_server.db.session import SessionLocal
-
-    factory = db_factory or SessionLocal
-
     try:
-        with factory() as db:
-            from anima_server.services.agent.self_model import (
-                ensure_self_model_exists,
-                get_self_model_block,
-                set_self_model_block,
-            )
+        from anima_server.db.session import get_db_session_context
+        from anima_server.services.agent.self_model import (
+            get_self_model_block,
+            set_self_model_block,
+        )
+        from anima_server.services.agent.prompt_loader import get_prompt_loader
 
-            ensure_self_model_exists(db, user_id=user_id)
+        factory = db_factory or get_db_session_context
+
+        with factory() as db:
+            # Load prompt loader with agent name
+            prompt_loader = get_prompt_loader(db, user_id)
 
             inner_state_block = get_self_model_block(
                 db, user_id=user_id, section="inner_state")
@@ -229,7 +115,8 @@ async def run_quick_reflection(
             if not conversation_text.strip():
                 return result
 
-            prompt = QUICK_REFLECTION_PROMPT.format(
+            # Render prompt using template
+            prompt = prompt_loader.quick_reflection(
                 inner_state=df(
                     user_id, inner_state_block.content, table="self_model_blocks", field="content"
                 )
@@ -247,9 +134,9 @@ async def run_quick_reflection(
                 conversation=conversation_text[:3000],
             )
 
-            response = await _call_llm(
-                prompt, system="You are SAM's inner reflection. Respond only with JSON."
-            )
+            system_prompt = prompt_loader.quick_reflection_system()
+
+            response = await _call_llm(prompt, system=system_prompt)
             if not response:
                 return result
 
@@ -348,25 +235,35 @@ async def run_deep_monologue(
     if settings.agent_provider == "scaffold":
         return result
 
-    from anima_server.db.session import SessionLocal
+    from anima_server.db.session import get_db_session_context
+    from anima_server.services.agent.self_model import (
+        get_all_self_model_blocks,
+    )
+    from anima_server.services.agent.prompt_loader import get_prompt_loader
 
-    factory = db_factory or SessionLocal
+    factory = db_factory or get_db_session_context
 
     try:
-        # ── Phase 1: Read context — then release the session ─────
-        # Holding a session open during slow LLM calls causes SQLite
-        # "database is locked" errors when other writers need access.
+        # ── Phase 1: Read — gather all context in one session ───
         with factory() as db:
-            from anima_server.services.agent.emotional_intelligence import get_recent_signals
-            from anima_server.services.agent.memory_store import get_memory_items
-            from anima_server.services.agent.self_model import (
-                ensure_self_model_exists,
-                get_all_self_model_blocks,
-            )
+            # Load prompt loader with agent name
+            prompt_loader = get_prompt_loader(db, user_id)
 
-            ensure_self_model_exists(db, user_id=user_id)
             blocks = get_all_self_model_blocks(db, user_id=user_id)
 
+            # Gather user facts
+            from anima_server.services.agent.memory_store import search_memories
+
+            facts = search_memories(
+                db, user_id=user_id, query="important facts about the user", limit=20
+            )
+            facts_text = (
+                "\n".join(f"- {m.content}" for m in facts)
+                if facts
+                else "No stored facts yet."
+            )
+
+            # Gather recent episodes
             from sqlalchemy import select
 
             episodes = db.scalars(
@@ -376,27 +273,25 @@ async def run_deep_monologue(
                 .limit(10)
             ).all()
             episodes_text = (
-                "\n".join(
-                    f"- {ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')} (topics: {', '.join(ep.topics_json or [])})"
+                "\n\n".join(
+                    f"{ep.date}: {df(user_id, ep.summary, table='memory_episodes', field='summary')}"
                     for ep in reversed(episodes)
                 )
                 or "No episodes yet."
             )
 
-            facts = get_memory_items(
-                db, user_id=user_id, category="fact", limit=30)
-            facts_text = (
-                "\n".join(
-                    f"- {df(user_id, f.content, table='memory_items', field='content')}"
-                    for f in facts
-                )
-                or "No facts yet."
-            )
+            # Gather emotional signals
+            from anima_server.models import EmotionalSignal
 
-            signals = get_recent_signals(db, user_id=user_id, limit=10)
+            signals = db.scalars(
+                select(EmotionalSignal)
+                .where(EmotionalSignal.user_id == user_id)
+                .order_by(EmotionalSignal.created_at.desc())
+                .limit(10)
+            ).all()
             signals_text = (
                 "\n".join(
-                    f"- {s.emotion} (confidence: {s.confidence:.1f}, {s.trajectory})"
+                    f"- {s.created_at.date()}: {s.emotion} ({s.trajectory})"
                     + (
                         f" — {df(user_id, s.evidence, table='emotional_signals', field='evidence')[:80]}"
                         if s.evidence
@@ -428,7 +323,8 @@ async def run_deep_monologue(
             )
             has_persona_block = persona_block is not None
 
-            prompt = DEEP_MONOLOGUE_PROMPT.format(
+            # Render prompt using template
+            prompt = prompt_loader.deep_monologue(
                 identity_version=identity_version,
                 identity=df(
                     user_id, identity_block.content, table="self_model_blocks", field="content"
@@ -475,13 +371,13 @@ async def run_deep_monologue(
                 recent_episodes=episodes_text[:2000],
                 emotional_signals=signals_text[:1000],
             )
+
+            system_prompt = prompt_loader.deep_monologue_system()
+
         # Session is now closed — no DB lock held during LLM call.
 
         # ── Phase 2: LLM call — no session held open ────────────
-        response = await _call_llm(
-            prompt,
-            system="You are SAM's deep inner monologue. Think genuinely. Respond only with JSON.",
-        )
+        response = await _call_llm(prompt, system=system_prompt)
         if not response:
             return result
 
@@ -520,6 +416,8 @@ async def run_deep_monologue(
                         )
                     )
                     if fresh_persona is not None:
+                        from anima_server.services.data_crypto import ef
+
                         fresh_persona.content = ef(
                             user_id,
                             parsed["persona_update"],
@@ -529,6 +427,8 @@ async def run_deep_monologue(
                         fresh_persona.version += 1
                         fresh_persona.updated_by = "sleep_time"
                 else:
+                    from anima_server.services.data_crypto import ef
+
                     db.add(
                         SelfModelBlock(
                             user_id=user_id,
@@ -584,21 +484,37 @@ async def run_deep_monologue(
                 result.intentions_updated = True
 
             rules = parsed.get("new_procedural_rules", [])
-            if isinstance(rules, list):
-                from anima_server.services.agent.intentions import add_procedural_rule
+            if rules and isinstance(rules, list):
+                # Store rules in intentions block for now
+                current_intentions = (
+                    df(
+                        user_id,
+                        blocks["intentions"].content,
+                        table="self_model_blocks",
+                        field="content",
+                    )
+                    if "intentions" in blocks
+                    else "# Intentions\n"
+                )
+                rules_text = "\n".join(
+                    f"- {r.get('rule', '')} [confidence: {r.get('confidence', 'medium')}]"
+                    for r in rules
+                    if isinstance(r, dict)
+                )
+                from anima_server.services.data_crypto import ef
 
-                for rule_data in rules:
-                    if isinstance(rule_data, dict) and rule_data.get("rule"):
-                        add_procedural_rule(
-                            db,
-                            user_id=user_id,
-                            rule=rule_data["rule"],
-                            evidence=rule_data.get("evidence", ""),
-                            confidence=rule_data.get("confidence", "low"),
-                        )
-                        result.procedural_rules_added += 1
+                set_self_model_block(
+                    db,
+                    user_id=user_id,
+                    section="intentions",
+                    content=current_intentions + "\n\n## Learned Rules\n" + rules_text,
+                    updated_by="sleep_time",
+                )
+                result.procedural_rules_added = len(rules)
 
-            result.insights_generated = len(parsed.get("insights", []))
+            insights = parsed.get("insights", [])
+            if insights and isinstance(insights, list):
+                result.insights_generated = len(insights)
 
             db.commit()
 
@@ -609,94 +525,57 @@ async def run_deep_monologue(
     return result
 
 
-async def _call_llm(prompt: str, system: str = "") -> str:
-    """Call the LLM for reflection."""
-    try:
-        from anima_server.services.agent.llm import create_llm
-        from anima_server.services.agent.messages import HumanMessage, SystemMessage
-
-        llm = create_llm()
-        messages = []
-        if system:
-            messages.append(SystemMessage(content=system))
-        messages.append(HumanMessage(content=prompt))
-        response = await llm.ainvoke(messages)
-        content = getattr(response, "content", "")
-        return content if isinstance(content, str) else str(content)
-    except Exception:
-        logger.exception("Inner monologue LLM call failed")
-        return ""
-
-
 async def _get_recent_conversation(
-    db: Session,
-    *,
-    user_id: int,
-    thread_id: int | None = None,
+    db: Session, user_id: int, thread_id: str | None, limit: int = 10
 ) -> str:
-    """Get the recent conversation text for reflection."""
+    """Fetch recent conversation messages as formatted text."""
     from sqlalchemy import select
 
-    from anima_server.models import AgentMessage, AgentThread
+    from anima_server.models import AgentMessage
 
-    if thread_id is None:
-        thread = db.scalar(select(AgentThread).where(
-            AgentThread.user_id == user_id))
-        if thread is None:
-            return ""
-        thread_id = thread.id
-
-    messages = db.scalars(
+    stmt = (
         select(AgentMessage)
-        .where(
-            AgentMessage.thread_id == thread_id,
-            AgentMessage.is_in_context.is_(True),
-            AgentMessage.role.in_(("user", "assistant")),
-        )
-        .order_by(AgentMessage.sequence_id.desc())
-        .limit(20)
-    ).all()
+        .where(AgentMessage.user_id == user_id)
+        .order_by(AgentMessage.created_at.desc())
+        .limit(limit)
+    )
+    if thread_id:
+        stmt = stmt.where(AgentMessage.thread_id == thread_id)
 
+    messages = db.scalars(stmt).all()
     lines = []
     for msg in reversed(messages):
-        role = "User" if msg.role == "user" else "SAM"
+        role = "User" if msg.role == "user" else "Assistant"
         text = df(
             user_id, msg.content_text or "", table="agent_messages", field="content_text"
-        ).strip()
-        if text:
-            lines.append(f"{role}: {text}")
-
-    return "\n".join(lines)
+        )
+        lines.append(f"{role}: {text[:500]}")
+    return "\n\n".join(lines)
 
 
 def _format_inner_state(data: dict) -> str:
-    """Format inner state data into markdown."""
-    lines = ["# Current Sense of the User", ""]
-    lines.append(data.get("sense_of_user", "No strong signals."))
-    lines.append("")
-    lines.append("# Active Threads")
-    lines.append("")
-    for thread in data.get("active_threads", []):
-        lines.append(f"- {thread}")
-    if not data.get("active_threads"):
-        lines.append("No ongoing threads.")
-    lines.append("")
-    lines.append("# Things I'm Curious About")
-    lines.append("")
-    for q in data.get("curious_about", []):
-        lines.append(f"- {q}")
-    lines.append("")
-    lines.append("# Recent Observations")
-    lines.append("")
-    for obs in data.get("observations", []):
-        lines.append(f"- {obs}")
+    """Format inner state data as markdown."""
+    lines = ["# Inner State"]
+    if "sense_of_user" in data:
+        lines.append(f"\n## Sense of User\n{data['sense_of_user']}")
+    if "active_threads" in data:
+        lines.append("\n## Active Threads")
+        for thread in data["active_threads"]:
+            lines.append(f"- {thread}")
+    if "curious_about" in data:
+        lines.append("\n## Curious About")
+        for item in data["curious_about"]:
+            lines.append(f"- {item}")
+    if "observations" in data:
+        lines.append("\n## Observations")
+        for obs in data["observations"]:
+            lines.append(f"- {obs}")
     return "\n".join(lines)
 
 
-def _last_n_entries(growth_log: str, n: int) -> str:
-    """Get the last N entries from a growth log."""
-    if not growth_log.strip():
+def _last_n_entries(content: str, n: int) -> str:
+    """Extract the last n entries from a markdown list."""
+    if not content:
         return "No entries yet."
-    entries = [e.strip() for e in growth_log.split("### ") if e.strip()]
-    last_entries = entries[-n:] if len(entries) > n else entries
-    return "\n\n".join(f"### {e}" for e in last_entries) if last_entries else "No entries yet."
+    entries = [line for line in content.split("\n") if line.strip().startswith(("- ", "* "))]
+    return "\n".join(entries[-n:]) if entries else "No entries yet."

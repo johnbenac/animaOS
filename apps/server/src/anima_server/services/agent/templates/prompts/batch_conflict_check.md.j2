@@ -1,0 +1,13 @@
+Given a list of EXISTING memories and a NEW memory about the same user, determine which (if any) existing memory the new one updates/replaces.
+
+EXISTING MEMORIES (by ID):
+{{ existing_memories }}
+
+NEW: {{ new_content }}
+
+If the new memory updates/replaces one of the existing memories, respond with exactly: UPDATE <id>
+If the new memory is different from all existing memories, respond with exactly: DIFFERENT
+
+Examples:
+- "UPDATE 0" means the new memory replaces existing memory 0
+- "DIFFERENT" means it is a new, distinct memory
