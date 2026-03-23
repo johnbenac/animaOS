@@ -212,11 +212,44 @@ async def ws_agent(websocket: WebSocket) -> None:
 
 
 async def _handle_user_message(conn: ClientConnection, data: dict) -> None:
-    pass
+    from anima_server.services.agent.delegation import ToolDelegator
+    from anima_server.services.agent.service import stream_agent
+
+    message = data.get("message", "")
+    delegator = ToolDelegator(send_fn=lambda msg: conn.websocket.send_json(msg))
+    conn._delegator = delegator
+
+    action_tool_names = registry.get_action_tool_names(conn.user_id)
+    action_tool_schemas = registry.get_action_tool_schemas(conn.user_id)
+
+    db = get_user_session_factory(conn.user_id)()
+    try:
+        async for event in stream_agent(
+            message,
+            conn.user_id,
+            db,
+            tool_delegate=delegator.delegate,
+            delegated_tool_names=action_tool_names,
+            extra_tool_schemas=action_tool_schemas,
+        ):
+            if event.event == "thought":
+                continue
+            await conn.websocket.send_json({"type": event.event, "data": event.data})
+    except Exception as exc:
+        logger.exception("Agent error for user_id=%d", conn.user_id)
+        await conn.websocket.send_json({
+            "type": "error",
+            "message": str(exc),
+            "code": "AGENT_ERROR",
+        })
+    finally:
+        db.close()
+        conn._delegator = None
 
 
 def _handle_tool_result(conn: ClientConnection, data: dict) -> None:
-    pass
+    if conn._delegator:
+        conn._delegator.resolve(data.get("tool_call_id", ""), data)
 
 
 async def _handle_approval_response(conn: ClientConnection, data: dict) -> None:
