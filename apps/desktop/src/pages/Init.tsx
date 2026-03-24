@@ -1,9 +1,13 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 import { api, setUnlockToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { useAnimaSymbol } from "../lib/ascii-art";
 import pkg from "../../package.json";
+
+// ---------------------------------------------------------------------------
+// Types & config
+// ---------------------------------------------------------------------------
 
 interface Line {
   id: number;
@@ -12,9 +16,23 @@ interface Line {
   revealed: string;
 }
 
-const STEP = { NAME: 0, USERNAME: 1, PASSWORD: 2, VERIFY: 3, AGENT: 4, CONFIRM: 5, RECOVERY: 6 } as const;
-const STEP_LABELS = ["name", "username", "password", "verify", "agent", "confirm", "recovery"];
-const PASSWORD_STEPS: Set<number> = new Set([STEP.PASSWORD, STEP.VERIFY]);
+interface StepDef {
+  label: string;
+  placeholder: string;
+  password?: boolean;
+}
+
+const STEPS: StepDef[] = [
+  { label: "name", placeholder: "e.g. Alice" },
+  { label: "username", placeholder: "lowercase, no spaces" },
+  { label: "password", placeholder: "at least 6 characters", password: true },
+  { label: "verify", placeholder: "re-enter password", password: true },
+  { label: "agent", placeholder: "e.g. Anima" },
+  { label: "confirm", placeholder: "yes or no" },
+  { label: "recovery", placeholder: "type 'saved' when done" },
+];
+
+const S = { NAME: 0, USERNAME: 1, PASSWORD: 2, VERIFY: 3, AGENT: 4, CONFIRM: 5, RECOVERY: 6 } as const;
 
 const COPY = {
   askName: "What's your name?",
@@ -42,8 +60,13 @@ function getSymbolSpeed(done: boolean, inputLen: number, focused: boolean): numb
   return 1;
 }
 
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function Init() {
   const { isProvisioned, setUser } = useAuth();
+  const navigate = useNavigate();
   const [lines, setLines] = useState<Line[]>([]);
   const [input, setInput] = useState("");
   const [step, setStep] = useState(0);
@@ -53,17 +76,50 @@ export default function Init() {
   const [recoveryPhrase, setRecoveryPhrase] = useState<string | null>(null);
   const [pendingUser, setPendingUser] = useState<{ id: number; username: string; name: string } | null>(null);
   const [isFocused, setIsFocused] = useState(false);
+  const [copied, setCopied] = useState(false);
 
+  const cur = STEPS[step];
+  const isRevealing = lines.some((l) => l.revealed.length < l.text.length);
   const animaSymbol = useAnimaSymbol(getSymbolSpeed(done, input.length, isFocused));
   const inputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(0);
+  const stepSnapshots = useRef(new Map<number, number>());
 
-  // Typewriter: reveal one character per tick
+  // --- Derived state ---
+
+  const lastQuestion = useMemo(() => {
+    for (let i = lines.length - 1; i > 0; i--) {
+      if (lines[i].type === "output") return lines[i];
+    }
+    return null;
+  }, [lines]);
+
+  const lastError = useMemo(() => {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].type === "error") return lines[i];
+    }
+    return null;
+  }, [lines]);
+
+  const historyPairs = useMemo(() => {
+    const pairs: { question: Line; answer: Line }[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].type !== "input") continue;
+      for (let j = i - 1; j > 0; j--) {
+        if (lines[j].type === "output") {
+          pairs.push({ question: lines[j], answer: lines[i] });
+          break;
+        }
+      }
+    }
+    return pairs.slice(-2);
+  }, [lines]);
+
+  // --- Effects ---
+
   useEffect(() => {
-    const hasUnrevealed = lines.some((l) => l.revealed.length < l.text.length);
-    if (!hasUnrevealed) return;
-
+    if (!isRevealing) return;
     const t = setTimeout(() => {
       setLines((prev) =>
         prev.map((l) =>
@@ -74,7 +130,7 @@ export default function Init() {
       );
     }, 18);
     return () => clearTimeout(t);
-  }, [lines]);
+  }, [lines, isRevealing]);
 
   const addLine = useCallback((type: Line["type"], text: string) => {
     setLines((p) => [
@@ -96,65 +152,92 @@ export default function Init() {
   }, [lines]);
 
   useEffect(() => {
-    if (!booting && !done) inputRef.current?.focus();
-  }, [booting, done, step]);
+    if (!booting && !done && !isRevealing) inputRef.current?.focus();
+  }, [booting, done, step, isRevealing]);
 
-  if (isProvisioned) return <Navigate to="/login" replace />;
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => navigate("/"), 2000);
+    return () => clearTimeout(t);
+  }, [done, navigate]);
 
-  const next = () => {
+  if (isProvisioned && !done) return <Navigate to="/login" replace />;
+
+  // --- Actions ---
+
+  const advance = () => {
     setStep((s) => s + 1);
     setInput("");
   };
 
+  const goBack = () => {
+    if (step <= S.NAME || step >= S.RECOVERY || done || booting) return;
+
+    const prevStep = step - 1;
+    const snapshot = stepSnapshots.current.get(prevStep);
+    if (snapshot !== undefined) {
+      setLines((prev) => prev.slice(0, snapshot));
+    }
+
+    const restore: Record<number, string> = {
+      [S.NAME]: data.name,
+      [S.USERNAME]: data.username,
+      [S.AGENT]: data.agent,
+    };
+    setInput(restore[prevStep] ?? "");
+    setStep(prevStep);
+    stepSnapshots.current.delete(prevStep);
+    stepSnapshots.current.delete(step);
+  };
+
   const submit = () => {
-    if (!input.trim() || done) return;
+    if (!input.trim() || done || isRevealing) return;
+
+    if (!stepSnapshots.current.has(step)) {
+      stepSnapshots.current.set(step, lines.length);
+    }
+
     const v = input.trim();
-    addLine("input", `> ${PASSWORD_STEPS.has(step) ? "*".repeat(v.length) : v}`);
+    addLine("input", `> ${cur.password ? "*".repeat(v.length) : v}`);
 
     switch (step) {
-      case STEP.NAME:
+      case S.NAME:
         setData((d) => ({ ...d, name: v }));
         addLine("output", COPY.greetAndUsername(v));
-        next();
+        advance();
         break;
-      case STEP.USERNAME:
+      case S.USERNAME:
         if (v.length < 2) return addLine("error", COPY.errTooShort);
         setData((d) => ({ ...d, username: v }));
         addLine("output", COPY.askPassword);
-        next();
+        advance();
         break;
-      case STEP.PASSWORD:
+      case S.PASSWORD:
         if (v.length < 6) return addLine("error", COPY.errMinChars);
         setData((d) => ({ ...d, password: v }));
         addLine("output", COPY.confirmPassword);
-        next();
+        advance();
         break;
-      case STEP.VERIFY:
+      case S.VERIFY:
         if (v !== data.password) return addLine("error", COPY.errNoMatch);
         addLine("output", COPY.askAgent);
-        next();
+        advance();
         break;
-      case STEP.AGENT: {
+      case S.AGENT: {
         const agent = v || "Anima";
         setData((d) => ({ ...d, agent }));
         addLine("output", COPY.summary(data.name, data.username, agent));
         addLine("output", COPY.confirmCreate);
-        next();
+        advance();
         break;
       }
-      case STEP.CONFIRM:
-        if (v.toLowerCase() !== "yes") {
-          addLine("error", COPY.errCancelled);
-          return;
-        }
+      case S.CONFIRM:
+        if (v.toLowerCase() !== "yes") return addLine("error", COPY.errCancelled);
         addLine("output", COPY.creating);
         create();
         break;
-      case STEP.RECOVERY:
-        if (v.toLowerCase() !== "saved") {
-          addLine("error", COPY.errSaveFirst);
-          return;
-        }
+      case S.RECOVERY:
+        if (v.toLowerCase() !== "saved") return addLine("error", COPY.errSaveFirst);
         if (pendingUser) setUser(pendingUser);
         addLine("output", COPY.allSet);
         setDone(true);
@@ -165,20 +248,15 @@ export default function Init() {
   const create = async () => {
     try {
       const u = await api.auth.register(
-        data.username,
-        data.password,
-        data.name,
-        "default",
-        data.agent || "Anima",
-        "",
-        "companion",
+        data.username, data.password, data.name,
+        "default", data.agent || "Anima", "", "companion",
       );
       setUnlockToken(u.unlockToken);
 
       if (u.recoveryPhrase) {
         setPendingUser({ id: u.id, username: u.username, name: u.name });
         setRecoveryPhrase(u.recoveryPhrase);
-        setStep(STEP.RECOVERY);
+        setStep(S.RECOVERY);
         setInput("");
       } else {
         setUser({ id: u.id, username: u.username, name: u.name });
@@ -190,71 +268,64 @@ export default function Init() {
     }
   };
 
-  const lastQuestionIdx = lines.reduce(
-    (acc, l, i) => (l.type === "output" && i > 0 ? i : acc),
-    -1,
+  // --- Handlers ---
+
+  const handleKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") submit();
+    if (e.key === "Escape") goBack();
+  };
+
+  const focusInput = () => inputRef.current?.focus();
+
+  const copyPhrase = () => {
+    if (!recoveryPhrase) return;
+    navigator.clipboard.writeText(recoveryPhrase);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // --- Render ---
+
+  const inputEl = (
+    <input
+      ref={inputRef}
+      value={input}
+      onChange={(e) => setInput(e.target.value)}
+      onKeyDown={handleKey}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
+      type={cur.password ? "password" : "text"}
+      placeholder={cur.placeholder}
+      disabled={isRevealing}
+      spellCheck={false}
+      autoComplete="off"
+      className="flex-1 bg-transparent outline-none text-text font-sans placeholder:text-text/15"
+    />
   );
-  const errorLine = [...lines].reverse().find((l) => l.type === "error");
 
-  const historyPairs = useMemo(
-    () =>
-      lines
-        .map((l, i) => ({ l, i }))
-        .filter(({ l }) => l.type === "input")
-        .map(({ l: answer, i }) => {
-          const question = [...lines.slice(1, i)].reverse().find((x) => x.type === "output");
-          return question ? { question, answer } : null;
-        })
-        .filter(Boolean)
-        .slice(-2) as { question: Line; answer: Line }[],
-    [lines],
+  const inputRow = (
+    <div className="flex items-center gap-2 text-base border-b border-text/5 pb-1 focus-within:border-text/20 transition-colors">
+      {step > S.NAME && (
+        <span className="text-text/15 shrink-0 text-xs cursor-pointer hover:text-text/30 transition-colors" onClick={goBack}>‹</span>
+      )}
+      {inputEl}
+      <span className="animate-cursor text-text/30 shrink-0">_</span>
+    </div>
   );
-
-  const handleKey = (e: React.KeyboardEvent) => e.key === "Enter" && submit();
-  const onFocus = () => setIsFocused(true);
-  const onBlur = () => setIsFocused(false);
-
-  const inputProps = {
-    ref: inputRef,
-    value: input,
-    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setInput(e.target.value),
-    onKeyDown: handleKey,
-    onFocus,
-    onBlur,
-    className: "flex-1 bg-transparent outline-none text-white",
-    spellCheck: false,
-    autoComplete: "off",
-  } as const;
 
   return (
-    <div className="h-screen w-screen bg-black text-white text-sm relative overflow-hidden">
-      {/* CRT scanline overlay */}
-      <div
-        className="absolute inset-0 pointer-events-none z-20"
-        style={{
-          background:
-            "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.04) 2px, rgba(0,0,0,0.04) 4px)",
-        }}
-      />
-      {/* Vignette */}
-      <div
-        className="absolute inset-0 pointer-events-none z-20"
-        style={{
-          background:
-            "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.5) 100%)",
-        }}
-      />
+    <div className="h-screen w-screen bg-bg text-text text-sm relative overflow-hidden cursor-text" onClick={focusInput}>
 
-      {/* Symbol — always centered */}
+      {/* Symbol */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-        <pre className="text-xs whitespace-pre leading-none text-white/70">
+        <pre className="text-xs whitespace-pre leading-none text-text/70">
           {animaSymbol}
         </pre>
       </div>
 
-      {/* Version — pinned to top */}
+      {/* Version */}
       {lines[0]?.type === "output" && lines[0]?.text.startsWith("ANIMA OS") && (
-        <div className="absolute top-6 left-0 right-0 text-center z-10 text-white tracking-widest text-xs">
+        <div className="absolute top-6 left-0 right-0 text-center z-10 text-text/60 font-sans font-medium tracking-[0.3em] text-xs uppercase">
           {lines[0].revealed}
         </div>
       )}
@@ -263,28 +334,35 @@ export default function Init() {
       <div className="absolute bottom-0 left-0 right-0 z-10 pb-10 px-8">
         <div className="max-w-md mx-auto font-mono text-sm">
 
-          {step === STEP.RECOVERY && recoveryPhrase ? (
+          {step === S.RECOVERY && recoveryPhrase ? (
             <>
-              <div className="mb-3 text-white/50 text-xs">{COPY.recoveryLabel}</div>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-text/50 text-sm font-sans">{COPY.recoveryLabel}</div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); copyPhrase(); }}
+                  className="text-text/25 hover:text-text/50 text-xs font-mono transition-colors"
+                >
+                  {copied ? "copied" : "copy"}
+                </button>
+              </div>
               <div className="grid grid-cols-3 gap-x-6 gap-y-1.5 mb-4">
                 {recoveryPhrase.split(" ").map((word, i) => (
-                  <div key={i} className="text-white/80">
-                    <span className="text-white/30 mr-1.5">{String(i + 1).padStart(2)}</span>
+                  <div key={i} className="text-text/80">
+                    <span className="text-text/30 mr-1.5">{String(i + 1).padStart(2)}</span>
                     {word}
                   </div>
                 ))}
               </div>
-              <div className="text-white/40 text-xs mb-3">{COPY.recoveryWarning}</div>
+              <div className="text-text/40 text-xs mb-3">{COPY.recoveryWarning}</div>
 
-              {errorLine && (
-                <div key={errorLine.id} className="text-white/35 mb-1">! {errorLine.revealed}</div>
+              {lastError && (
+                <div key={lastError.id} className="text-text/35 mb-1 animate-fade-in">! {lastError.revealed}</div>
               )}
 
-              <div className="flex items-center gap-2" ref={bottomRef}>
-                <span className="text-white/25 shrink-0 text-xs">recovery</span>
-                <span className="text-white/40 shrink-0">›</span>
-                <input {...inputProps} type="text" placeholder="type 'saved' when done" />
-                <span className="animate-cursor text-white/30 shrink-0">_</span>
+              <div className="flex items-center gap-2 border-b border-text/5 pb-1 focus-within:border-text/20 transition-colors" ref={bottomRef}>
+                {inputEl}
+                <span className="animate-cursor text-text/30 shrink-0">_</span>
               </div>
             </>
           ) : (
@@ -293,38 +371,47 @@ export default function Init() {
                 <div className="space-y-0.5 mb-3">
                   {historyPairs.map(({ question, answer }) => (
                     <div key={question.id}>
-                      <div className="text-white/15">{question.text}</div>
-                      <div className="text-white/25 pl-3">{answer.text}</div>
+                      <div className="text-text/15 font-sans">{question.text}</div>
+                      <div className="text-text/25 pl-3 font-sans">{answer.text}</div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {lastQuestionIdx >= 0 && (
-                <div key={lines[lastQuestionIdx].id} className="text-white/75 mb-1">
-                  {lines[lastQuestionIdx].revealed}
+              {lastQuestion && (
+                <div key={lastQuestion.id} className="text-text/75 text-xl font-sans mb-3 animate-fade-in">
+                  {lastQuestion.revealed}
                 </div>
               )}
 
-              {errorLine && (
-                <div key={errorLine.id} className="text-white/35 mb-1">! {errorLine.revealed}</div>
+              {lastError && (
+                <div key={lastError.id} className="text-text/35 mb-1 animate-fade-in">! {lastError.revealed}</div>
               )}
 
-              <div className="flex items-center gap-2" ref={bottomRef}>
+              <div className="animate-fade-in" key={step} ref={bottomRef}>
                 {!done && !booting ? (
-                  <>
-                    <span className="text-white/25 shrink-0 text-xs">{STEP_LABELS[step]}</span>
-                    <span className="text-white/40 shrink-0">›</span>
-                    <input {...inputProps} type={PASSWORD_STEPS.has(step) ? "password" : "text"} />
-                    <span className="animate-cursor text-white/30 shrink-0">_</span>
-                  </>
+                  inputRow
                 ) : done ? (
-                  <a href="/" className="text-white/40 hover:text-white transition-colors">[continue]</a>
+                  <span className="text-text/40 font-sans text-sm tracking-wide">continue →</span>
                 ) : (
-                  <span className="text-white/20 animate-pulse">...</span>
+                  <span className="text-text/20 animate-pulse">...</span>
                 )}
               </div>
             </>
+          )}
+
+          {/* Progress dots */}
+          {!done && !booting && (
+            <div className="flex items-center justify-center gap-1.5 mt-6">
+              {STEPS.slice(0, S.CONFIRM + 1).map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-1 h-1 rounded-full transition-colors ${
+                    i === step ? "bg-text/40" : i < step ? "bg-text/15" : "bg-text/5"
+                  }`}
+                />
+              ))}
+            </div>
           )}
 
         </div>
