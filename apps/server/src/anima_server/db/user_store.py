@@ -21,6 +21,7 @@ from anima_server.db.session import (
 from anima_server.models import User
 from anima_server.services.auth import (
     authenticate_user,
+    build_user_key,
     create_user,
     normalize_username,
     serialize_user,
@@ -123,7 +124,8 @@ def register_account(
     user_directive: str = "",
     relationship: str = "companion",
     persona_template: str = "default",
-) -> tuple[dict[str, object], dict[str, bytes]]:
+) -> tuple[dict[str, object], dict[str, bytes], str]:
+    """Register a new account. Returns (user_data, deks, recovery_phrase)."""
     if is_provisioned():
         raise ValueError("Core is already provisioned")
     normalized = normalize_username(username)
@@ -131,8 +133,17 @@ def register_account(
         raise ValueError("Username is required")
 
     user_id = allocate_user_id()
-    _maybe_generate_sqlcipher_key(password, user_id)
+    sqlcipher_raw_key = _maybe_generate_sqlcipher_key(password, user_id)
     factory = ensure_user_database(user_id)
+
+    from anima_server.services.recovery import (
+        generate_recovery_phrase,
+        wrap_keys_for_recovery,
+        wrap_sqlcipher_key_for_recovery,
+    )
+
+    recovery_phrase = generate_recovery_phrase()
+
     with factory() as db:
         user, deks = create_user(
             db,
@@ -145,9 +156,25 @@ def register_account(
             persona_template=persona_template,
             user_id=user_id,
         )
+
+        # Store recovery-wrapped DEKs alongside password-wrapped DEKs
+        recovery_records = wrap_keys_for_recovery(recovery_phrase, deks, user_id)
+        for domain, wrapped_dek in recovery_records:
+            db.add(build_user_key(user_id, domain, wrapped_dek))
+        db.commit()
+
+    # Store recovery-wrapped SQLCipher key in manifest
+    if sqlcipher_raw_key is not None:
+        from anima_server.services.core import store_recovery_sqlcipher_key
+
+        recovery_wrapped = wrap_sqlcipher_key_for_recovery(
+            recovery_phrase, sqlcipher_raw_key, user_id
+        )
+        store_recovery_sqlcipher_key(recovery_wrapped)
+
     set_owner_user_id(user_id)
     store_user_index_entry(normalized, user_id)
-    return serialize_user(user), deks
+    return serialize_user(user), deks, recovery_phrase
 
 
 def authenticate_account(
@@ -268,20 +295,93 @@ def _legacy_backup_path(shared_db_path: Path) -> Path:
         counter += 1
 
 
+def recover_account_with_phrase(
+    phrase: str,
+    new_password: str,
+) -> tuple[dict[str, object], dict[str, bytes]]:
+    """Recover an account using the recovery phrase and set a new password.
+
+    Returns (user_data, deks) on success.
+    """
+    from cryptography.exceptions import InvalidTag
+
+    from anima_server.services.core import get_recovery_sqlcipher_key
+    from anima_server.services.crypto import WrappedDekRecord, unwrap_dek
+    from anima_server.services.recovery import recover_account
+    from anima_server.services.sessions import set_sqlcipher_key
+
+    # 1. Unwrap SQLCipher key from manifest using recovery phrase
+    recovery_wrapped = get_recovery_sqlcipher_key()
+    if recovery_wrapped is None:
+        raise ValueError("No recovery data found")
+
+    record = WrappedDekRecord(
+        kdf_salt=str(recovery_wrapped["kdf_salt"]),
+        kdf_time_cost=int(recovery_wrapped["kdf_time_cost"]),
+        kdf_memory_cost_kib=int(recovery_wrapped["kdf_memory_cost_kib"]),
+        kdf_parallelism=int(recovery_wrapped["kdf_parallelism"]),
+        kdf_key_length=int(recovery_wrapped["kdf_key_length"]),
+        wrap_iv=str(recovery_wrapped["wrap_iv"]),
+        wrap_tag=str(recovery_wrapped["wrap_tag"]),
+        wrapped_dek=str(recovery_wrapped["wrapped_key"]),
+    )
+    user_id = int(recovery_wrapped.get("user_id", 0))
+    try:
+        raw_key = unwrap_dek(phrase, record, user_id, "recovery:sqlcipher")
+    except InvalidTag:
+        raise ValueError("Invalid recovery phrase") from None
+
+    # 2. Cache the SQLCipher key so we can open the encrypted database
+    set_sqlcipher_key(raw_key)
+
+    # 3. Open the user database and recover DEKs
+    with get_user_session_factory(user_id)() as db:
+        deks = recover_account(db, phrase, new_password, user_id)
+
+    # 4. Re-wrap SQLCipher key with new password in manifest
+    from anima_server.services.crypto import wrap_dek
+
+    wrapped = wrap_dek(new_password, raw_key, user_id, "sqlcipher")
+    store_wrapped_sqlcipher_key(
+        {
+            "user_id": user_id,
+            "kdf_salt": wrapped.kdf_salt,
+            "kdf_time_cost": wrapped.kdf_time_cost,
+            "kdf_memory_cost_kib": wrapped.kdf_memory_cost_kib,
+            "kdf_parallelism": wrapped.kdf_parallelism,
+            "kdf_key_length": wrapped.kdf_key_length,
+            "wrap_iv": wrapped.wrap_iv,
+            "wrap_tag": wrapped.wrap_tag,
+            "wrapped_key": wrapped.wrapped_dek,
+        }
+    )
+
+    # 5. Re-read user for response
+    with get_user_session_factory(user_id)() as db:
+        from anima_server.models import User
+
+        user = db.get(User, user_id)
+        if user is None:
+            raise ValueError("User not found after recovery")
+        return serialize_user(user), deks
+
+
 # ---------------------------------------------------------------------------
 # Unified passphrase helpers
 # ---------------------------------------------------------------------------
 
 
-def _maybe_generate_sqlcipher_key(password: str, user_id: int) -> None:
+def _maybe_generate_sqlcipher_key(password: str, user_id: int) -> bytes | None:
     """Generate and store a wrapped SQLCipher key if unified mode is active.
 
     Called during registration when no ANIMA_CORE_PASSPHRASE env var is set.
     The SQLCipher key is random (high entropy), wrapped with the user's
     password-derived KEK, and stored in the manifest.
+
+    Returns the raw key if one was generated, or None in env var mode.
     """
     if settings.core_passphrase.strip():
-        return  # env var mode — no need for wrapped key
+        return None  # env var mode — no need for wrapped key
 
     import os
 
@@ -304,6 +404,7 @@ def _maybe_generate_sqlcipher_key(password: str, user_id: int) -> None:
         }
     )
     set_sqlcipher_key(raw_key)
+    return raw_key
 
 
 def _maybe_unwrap_sqlcipher_key(password: str) -> None:

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from anima_server.api.deps.unlock import read_unlock_token
 from anima_server.db import dispose_all_user_engines, get_db
-from anima_server.db.user_store import authenticate_account, register_account
+from anima_server.db.user_store import authenticate_account, recover_account_with_phrase, register_account
 from anima_server.schemas.auth import (
     ChangePasswordRequest,
     ChangePasswordResponse,
@@ -19,6 +19,8 @@ from anima_server.schemas.auth import (
     LoginRequest,
     LoginResponse,
     LogoutResponse,
+    RecoverRequest,
+    RecoverResponse,
     RegisterRequest,
     RegisterResponse,
     UserResponse,
@@ -111,7 +113,7 @@ def register(
         raise HTTPException(status_code=422, detail="Name is required")
 
     try:
-        response, deks = register_account(
+        response, deks, recovery_phrase = register_account(
             username=username,
             password=payload.password,
             display_name=display_name,
@@ -131,6 +133,7 @@ def register(
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
     response["unlockToken"] = unlock_session_store.create(int(response["id"]), deks)
+    response["recoveryPhrase"] = recovery_phrase
     return response
 
 
@@ -218,6 +221,24 @@ def change_password(
     unlock_session_store.revoke_user(user.id)
     new_unlock_token = unlock_session_store.create(user.id, session.deks)
     return {"success": True, "unlockToken": new_unlock_token}
+
+
+@router.post("/recover", response_model=RecoverResponse)
+def recover(payload: RecoverRequest) -> dict[str, object]:
+    phrase = payload.recoveryPhrase.strip().lower()
+    if not phrase:
+        raise HTTPException(status_code=422, detail="Recovery phrase is required")
+
+    try:
+        response, deks = recover_account_with_phrase(phrase, payload.newPassword)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from None
+
+    return {
+        **response,
+        "unlockToken": unlock_session_store.create(int(response["id"]), deks),
+        "message": "Account recovered successfully",
+    }
 
 
 def _rewrap_sqlcipher_key_if_unified(new_password: str) -> None:

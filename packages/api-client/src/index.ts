@@ -29,6 +29,7 @@ export interface LoginResponse extends User {
 
 export interface AuthResponse extends User {
   unlockToken: string;
+  recoveryPhrase?: string;
 }
 
 export interface ChangePasswordResponse {
@@ -651,6 +652,11 @@ export function createApiClient(options: ApiClientOptions) {
         request<ChangePasswordResponse>("/auth/change-password", {
           method: "POST",
           body: { oldPassword, newPassword },
+        }),
+      recover: (recoveryPhrase: string, newPassword: string) =>
+        request<LoginResponse>("/auth/recover", {
+          method: "POST",
+          body: { recoveryPhrase, newPassword },
         }),
     },
     users: {

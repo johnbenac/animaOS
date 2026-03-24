@@ -8,7 +8,7 @@ export default function ProtectedRoute({ children }: { children: ReactNode }) {
   if (isLoading) return null;
 
   if (!isAuthenticated) {
-    return <Navigate to={isProvisioned ? "/login" : "/register"} replace />;
+    return <Navigate to={isProvisioned ? "/login" : "/init"} replace />;
   }
 
   return <>{children}</>;

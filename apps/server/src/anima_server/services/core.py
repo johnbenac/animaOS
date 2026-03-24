@@ -98,6 +98,26 @@ def has_wrapped_sqlcipher_key() -> bool:
     return get_wrapped_sqlcipher_key() is not None
 
 
+def store_recovery_sqlcipher_key(wrapped: dict[str, object]) -> None:
+    """Persist a recovery-wrapped SQLCipher key in the manifest."""
+    with _manifest_lock:
+        manifest = _load_manifest(now=datetime.now(UTC).isoformat())
+        manifest["recovery_sqlcipher_key"] = wrapped
+        _write_manifest(manifest)
+
+
+def get_recovery_sqlcipher_key() -> dict[str, object] | None:
+    """Return the recovery-wrapped SQLCipher key from the manifest, or None."""
+    path = get_manifest_path()
+    if not path.is_file():
+        return None
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    key_data = manifest.get("recovery_sqlcipher_key")
+    if not isinstance(key_data, dict):
+        return None
+    return key_data
+
+
 # ---------------------------------------------------------------------------
 # User index — lightweight username→user_id mapping outside encrypted DBs
 # ---------------------------------------------------------------------------

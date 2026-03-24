@@ -55,6 +55,9 @@
         "@anima/api-client": "workspace:*",
         "@anima/mod-client": "workspace:*",
         "@anima/ui": "workspace:*",
+        "@fontsource/playfair-display": "^5.2.8",
+        "@fontsource/space-grotesk": "^5.2.10",
+        "@fontsource/space-mono": "^5.2.9",
         "@tailwindcss/typography": "^0.5.19",
         "@tailwindcss/vite": "^4.1.18",
         "@tauri-apps/api": "^2",
@@ -219,6 +222,12 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.25.12", "", { "os": "win32", "cpu": "ia32" }, "sha512-HkqnmmBoCbCwxUKKNPBixiWDGCpQGVsrQfJoVGYLPT41XWF8lHuE5N6WhVia2n4o5QK5M4tYr21827fNhi4byQ=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.25.12", "", { "os": "win32", "cpu": "x64" }, "sha512-alJC0uCZpTFrSL0CCDjcgleBXPnCrEAhTBILpeAp7M/OFgoqtAetfBzX0xM00MUsVVPpVjlPuMbREqnZCXaTnA=="],
+
+    "@fontsource/playfair-display": ["@fontsource/playfair-display@5.2.8", "", {}, "sha512-fUEhib70SszNhQVsGbUMSsWJhr7Je0rdeuZdtGpDNu0GKF1xJM8QhpI/y0pckU25GcChXm9TLOmeZupkvvZo2g=="],
+
+    "@fontsource/space-grotesk": ["@fontsource/space-grotesk@5.2.10", "", {}, "sha512-XNXEbT74OIITPqw2H6HXwPDp85fy43uxfBwFR5PU+9sLnjuLj12KlhVM9nZVN6q6dlKjkuN8JisW/OBxwxgUew=="],
+
+    "@fontsource/space-mono": ["@fontsource/space-mono@5.2.9", "", {}, "sha512-b61faFOHEISQ/pD25G+cfGY9o/WW6lRv6hBQQfpWvEJ4y1V+S4gmth95EVyBE2VL3qDYHeVQ8nBzrplzdXTDDg=="],
 
     "@grammyjs/types": ["@grammyjs/types@3.25.0", "", {}, "sha512-iN9i5p+8ZOu9OMxWNcguojQfz4K/PDyMPOnL7PPCON+SoA/F8OKMH3uR7CVUkYfdNe0GCz8QOzAWrnqusQYFOg=="],
 

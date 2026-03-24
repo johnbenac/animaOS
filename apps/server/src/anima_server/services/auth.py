@@ -198,7 +198,9 @@ def authenticate_user(db: Session, username: str, password: str) -> tuple[User, 
     if not verification.valid:
         raise ValueError("Invalid credentials")
 
-    user_keys = get_user_keys_by_user_id(db, user.id)
+    all_keys = get_user_keys_by_user_id(db, user.id)
+    # Skip recovery-wrapped keys — they use the mnemonic, not the password
+    user_keys = [k for k in all_keys if not k.domain.startswith("recovery:")]
     if not user_keys:
         raise RuntimeError(f"User {user.id} is missing key material")
 
@@ -278,7 +280,8 @@ def change_user_password(
 
     user.password_hash = hash_password(new_password)
 
-    user_keys = get_user_keys_by_user_id(db, user.id)
+    all_keys = get_user_keys_by_user_id(db, user.id)
+    user_keys = [k for k in all_keys if not k.domain.startswith("recovery:")]
     if not user_keys:
         raise RuntimeError(f"User {user.id} is missing key material")
 

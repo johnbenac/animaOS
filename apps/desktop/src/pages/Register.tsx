@@ -1,6 +1,5 @@
-import { useState, useEffect } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
-import { Field } from "@anima/ui";
+import { useState, useEffect, useRef } from "react";
+import { Navigate } from "react-router-dom";
 import { api, setUnlockToken } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 
@@ -10,249 +9,418 @@ interface PersonaTemplate {
   description: string;
 }
 
-type RegisterStep = "account" | "create-ai";
+interface Line {
+  id: number;
+  type: "system" | "question" | "user" | "error" | "success" | "divider";
+  text: string;
+}
+
+const LETTERS: Record<string, number[][]> = {
+  A: [
+    [0,0,0,1,0,0,0],
+    [0,0,1,0,1,0,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,1,1,1,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+  ],
+  N: [
+    [0,1,0,0,0,1,0],
+    [0,1,1,0,0,1,0],
+    [0,1,0,1,0,1,0],
+    [0,1,0,0,1,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+  ],
+  I: [
+    [0,0,1,1,1,0,0],
+    [0,0,0,1,0,0,0],
+    [0,0,0,1,0,0,0],
+    [0,0,0,1,0,0,0],
+    [0,0,0,1,0,0,0],
+    [0,0,0,1,0,0,0],
+    [0,0,1,1,1,0,0],
+  ],
+  M: [
+    [0,1,0,0,0,1,0],
+    [0,1,1,0,1,1,0],
+    [0,1,0,1,0,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+    [0,1,0,0,0,1,0],
+  ],
+};
+
+function useWaveText(text: string) {
+  const [frame, setFrame] = useState("");
+  const tickRef = useRef(0);
+
+  useEffect(() => {
+    const width = 70;
+    const height = 16;
+    const chars = " .'-:;=+*#%@";
+
+    const render = () => {
+      const tick = tickRef.current;
+      const output: string[] = new Array(width * height).fill(" ");
+      const zbuffer: number[] = new Array(width * height).fill(-999);
+
+      const points: { x: number; y: number; z: number; char: string }[] = [];
+      const letterSpacing = 9;
+      const startX = -((text.length * letterSpacing) / 2);
+
+      for (let li = 0; li < text.length; li++) {
+        const letter = LETTERS[text[li]];
+        if (!letter) continue;
+
+        const letterPhase = tick * 0.05 + li * 0.8;
+        const waveY = Math.sin(letterPhase) * 1.5;
+        const waveZ = Math.cos(letterPhase) * 2;
+        const rot = Math.sin(tick * 0.03 + li * 0.5) * 0.3;
+
+        for (let y = 0; y < letter.length; y++) {
+          for (let x = 0; x < letter[y].length; x++) {
+            if (letter[y][x]) {
+              const baseX = startX + li * letterSpacing + x;
+              const baseY = y - 3 + waveY;
+              
+              const rx = baseX * Math.cos(rot) - baseY * Math.sin(rot);
+              const ry = baseX * Math.sin(rot) + baseY * Math.cos(rot);
+              const rz = waveZ + Math.sin(tick * 0.1 + x * 0.5) * 0.5;
+
+              points.push({ x: rx, y: ry, z: rz, char: "@" });
+              points.push({ x: rx, y: ry, z: rz - 0.5, char: "%" });
+            }
+          }
+        }
+      }
+
+      for (const p of points) {
+        const ooz = 1 / (5 + p.z * 0.4);
+        const xp = Math.floor(width / 2 + p.x * ooz * 2.5);
+        const yp = Math.floor(height / 2 - p.y * ooz * 1.8);
+
+        const idx = xp + yp * width;
+        if (idx >= 0 && idx < width * height && xp >= 0 && xp < width) {
+          if (ooz > zbuffer[idx]) {
+            zbuffer[idx] = ooz;
+            const lum = Math.floor(ooz * 15 + Math.sin(tick * 0.2) * 2);
+            const charIdx = Math.max(0, Math.min(chars.length - 1, lum));
+            output[idx] = chars[charIdx];
+          }
+        }
+      }
+
+      let result = "";
+      for (let y = 0; y < height; y++) {
+        result += output.slice(y * width, (y + 1) * width).join("").replace(/\s+$/, "");
+        result += "\n";
+      }
+
+      setFrame(result);
+      tickRef.current += 1;
+    };
+
+    const interval = setInterval(render, 40);
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return frame;
+}
+
+const QUESTIONS = [
+  { key: "name", text: "What should I call you?", hint: "Your name" },
+  { key: "username", text: "Choose a username.", hint: "Unique identifier" },
+  { key: "password", text: "Create a password.", hint: "Min 6 characters" },
+  { key: "agent", text: "What is my name?", hint: "Default: Anima" },
+  { key: "persona", text: "Choose my personality.", hint: "Select one" },
+  { key: "confirm", text: "Create your companion?", hint: "Type yes to confirm" },
+];
 
 export default function Register() {
-  const { isProvisioned } = useAuth();
-  const navigate = useNavigate();
+  const { isProvisioned, setUser } = useAuth();
+  const [lines, setLines] = useState<Line[]>([]);
+  const [input, setInput] = useState("");
+  const [step, setStep] = useState(0);
+  const [data, setData] = useState({
+    name: "",
+    username: "",
+    password: "",
+    agent: "",
+    persona: "default",
+  });
+  const [personas, setPersonas] = useState<PersonaTemplate[]>([]);
+  const [done, setDone] = useState(false);
+  const [showHint, setShowHint] = useState(true);
+  const animaFrame = useWaveText("ANIMA");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const idRef = useRef(0);
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [agentName, setAgentName] = useState("Anima");
-  const [personaTemplate, setPersonaTemplate] = useState("default");
-  const [personaTemplates, setPersonaTemplates] = useState<PersonaTemplate[]>([]);
-  const [step, setStep] = useState<RegisterStep>("account");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const { setUser } = useAuth();
-
-  // Fetch persona templates on mount
   useEffect(() => {
-    api.config
-      .personaTemplates()
-      .then(setPersonaTemplates)
-      .catch(() => setPersonaTemplates([
-        { id: "default", name: "Default", description: "A thoughtful, capable companion." },
-        { id: "companion", name: "Companion", description: "Warm, emotionally attuned." },
-      ]));
+    api.config.personaTemplates().then(setPersonas).catch(() =>
+      setPersonas([
+        { id: "default", name: "Default", description: "Thoughtful and capable" },
+        { id: "companion", name: "Companion", description: "Warm and emotionally attuned" },
+      ])
+    );
   }, []);
 
-  if (isProvisioned) {
-    return <Navigate to="/login" replace />;
-  }
+  useEffect(() => {
+    const boot = [
+      { t: "system" as const, text: "ANIMA OS v0.2.1" },
+      { t: "divider" as const, text: "─".repeat(50) },
+      { t: "system" as const, text: "Initializing encrypted vault..." },
+      { t: "system" as const, text: "Loading neural substrate..." },
+      { t: "system" as const, text: "Ready." },
+      { t: "divider" as const, text: "─".repeat(50) },
+    ];
+    let i = 0;
+    const t = setInterval(() => {
+      if (i < boot.length) {
+        addLine(boot[i].t, boot[i].text);
+        i++;
+      } else {
+        clearInterval(t);
+        showQuestion(0);
+      }
+    }, 80);
+    return () => clearInterval(t);
+  }, []);
 
-  const isAccountStep = step === "account";
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [lines]);
 
-  function validateAccountFields(): boolean {
-    if (!name || !username || !password) {
-      setError("Please fill in all fields");
-      return false;
+  useEffect(() => {
+    inputRef.current?.focus();
+  });
+
+  if (isProvisioned) return <Navigate to="/login" replace />;
+
+  const addLine = (type: Line["type"], text: string) => {
+    setLines((p) => [...p, { id: idRef.current++, type, text }]);
+  };
+
+  const showQuestion = (idx: number) => {
+    const q = QUESTIONS[idx];
+    addLine("divider", "");
+    addLine("question", `┌─ ${q.text}`);
+    if (idx === 4 && personas.length > 0) {
+      personas.forEach((p, i) => {
+        addLine("system", `│  [${i}] ${p.name} ─ ${p.description}`);
+      });
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters");
-      return false;
+    addLine("question", "└─");
+  };
+
+  const next = () => {
+    const newStep = step + 1;
+    setStep(newStep);
+    setInput("");
+    setShowHint(true);
+    if (newStep < QUESTIONS.length) {
+      showQuestion(newStep);
     }
-    return true;
-  }
+  };
 
-  function continueToCreateAI() {
-    if (!validateAccountFields()) return;
-    setError("");
-    setStep("create-ai");
-  }
+  const submit = () => {
+    if (!input.trim() || done) return;
+    const v = input.trim();
+    
+    // Echo user input
+    const displayValue = step === 2 ? "•".repeat(Math.min(v.length, 20)) : v;
+    addLine("user", `   > ${displayValue}`);
 
-  async function registerAccount() {
-    if (!agentName.trim()) {
-      setError("Give your AI a name");
-      return;
+    switch (step) {
+      case 0:
+        if (!v) {
+          addLine("error", "   ! Name required");
+          return;
+        }
+        setData((d) => ({ ...d, name: v }));
+        addLine("success", `   ✓ Hello, ${v}.`);
+        next();
+        break;
+      case 1:
+        if (v.length < 2) {
+          addLine("error", "   ! Username too short");
+          return;
+        }
+        setData((d) => ({ ...d, username: v }));
+        addLine("success", `   ✓ Username set.`);
+        next();
+        break;
+      case 2:
+        if (v.length < 6) {
+          addLine("error", "   ! Minimum 6 characters");
+          return;
+        }
+        setData((d) => ({ ...d, password: v }));
+        addLine("success", `   ✓ Password secured.`);
+        next();
+        break;
+      case 3:
+        const agent = v || "Anima";
+        setData((d) => ({ ...d, agent }));
+        addLine("success", `   ✓ Agent name: ${agent}.`);
+        next();
+        break;
+      case 4:
+        const idx = parseInt(v);
+        const selected = !isNaN(idx) && personas[idx] ? personas[idx] : personas[0];
+        setData((d) => ({ ...d, persona: selected.id }));
+        addLine("success", `   ✓ Personality: ${selected.name}.`);
+        next();
+        break;
+      case 5:
+        if (v.toLowerCase() !== "yes") {
+          addLine("error", "   ! Cancelled. Type 'yes' to proceed.");
+          return;
+        }
+        addLine("divider", "");
+        addLine("system", "Creating your companion...");
+        create();
+        break;
     }
-    setError("");
-    setLoading(true);
+  };
 
+  const create = async () => {
     try {
-      const user = await api.auth.register(
-        username,
-        password,
-        name,
-        personaTemplate as "default" | "companion",
-        agentName.trim(),
+      const u = await api.auth.register(
+        data.username,
+        data.password,
+        data.name,
+        data.persona as "default" | "companion",
+        data.agent || "Anima",
         "",
-        "companion",
+        "companion"
       );
-      setUnlockToken(user.unlockToken);
-      setUser({ id: user.id, username: user.username, name: user.name });
-      navigate("/");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
-    } finally {
-      setLoading(false);
+      setUnlockToken(u.unlockToken);
+      setUser({ id: u.id, username: u.username, name: u.name });
+      
+      addLine("divider", "═".repeat(50));
+      addLine("success", "Companion created successfully.");
+      addLine("system", "Initializing session...");
+      addLine("divider", "─".repeat(50));
+      setDone(true);
+    } catch (e) {
+      addLine("error", `   ! ${e instanceof Error ? e.message : "Error"}`);
     }
-  }
+  };
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (isAccountStep) {
-      continueToCreateAI();
-      return;
-    }
-    await registerAccount();
-  }
+  const currentQ = QUESTIONS[step];
+  const progress = done ? 100 : Math.round((step / QUESTIONS.length) * 100);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-bg">
-      <div className="relative mx-auto flex min-h-screen w-full max-w-[980px] items-center px-6 py-10">
-        <div className="mx-auto w-full max-w-[460px]">
-          <form
-            onSubmit={handleSubmit}
-            className="border border-border bg-bg-card p-7"
-          >
-            {/* Progress bar */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between font-mono text-[9px] tracking-wider text-text-muted/50">
-                <span>STEP {isAccountStep ? "1" : "2"}/2</span>
-                <span>
-                  {isAccountStep ? "ACCOUNT" : "CREATE YOUR AI"}
-                </span>
-              </div>
-              <div className="h-px bg-border">
-                <div
-                  className={`h-full bg-primary transition-all duration-300 ${
-                    isAccountStep ? "w-1/2" : "w-full"
-                  }`}
-                />
-              </div>
+    <div className="h-screen w-screen bg-black text-white font-mono text-sm flex flex-col">
+      {/* Header with animated ANIMA */}
+      <div className="p-4 border-b border-white/10">
+        <pre className="text-xs whitespace-pre leading-none h-28 opacity-80">{animaFrame}</pre>
+      </div>
+
+      {/* Main content area */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: Chat history */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-0">
+          {lines.map((l) => (
+            <div
+              key={l.id}
+              className={
+                l.type === "question"
+                  ? "text-white font-bold"
+                  : l.type === "user"
+                  ? "text-white/80"
+                  : l.type === "error"
+                  ? "text-white/60"
+                  : l.type === "success"
+                  ? "text-white/70"
+                  : l.type === "divider"
+                  ? "text-white/20"
+                  : "text-white/50"
+              }
+            >
+              {l.text}
             </div>
-
-            {/* Header */}
-            <div className="mt-6 mb-5">
-              <h2 className="font-mono text-sm tracking-wider text-text">
-                {isAccountStep ? "CREATE LOCAL VAULT" : "CREATE YOUR AI"}
-              </h2>
-              <p className="mt-1 font-mono text-[10px] text-text-muted/40 tracking-wider">
-                {isAccountStep
-                  ? "THESE CREDENTIALS UNLOCK YOUR ENCRYPTED LOCAL DATA."
-                  : "CHOOSE A NAME AND PERSONALITY FOR YOUR COMPANION."}
-              </p>
-            </div>
-
-            {error && (
-              <div className="mb-5 border-l-2 border-danger bg-danger/5 px-3.5 py-2.5 font-mono text-[10px] text-danger tracking-wider">
-                {error}
-              </div>
-            )}
-
-            {/* Step content */}
-            {isAccountStep ? (
-              <div className="space-y-4">
-                <Field
-                  label="Your Name"
-                  id="name"
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
-                  required
-                  autoFocus
-                />
-
-                <Field
-                  label="Username"
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Choose a username"
-                  required
-                />
-
-                <Field
-                  label="Password"
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Min 6 characters"
-                  required
-                  minLength={6}
-                />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <Field
-                  label="AI Name"
-                  id="agentName"
-                  type="text"
-                  value={agentName}
-                  onChange={(e) => setAgentName(e.target.value)}
-                  placeholder="Anima"
-                  required
-                  autoFocus
-                  maxLength={50}
-                  hint="What you'd like to call your AI companion."
-                />
-
-                <div className="space-y-2">
-                  <label className="block font-mono text-[10px] tracking-wider text-text-muted">
-                    PERSONALITY
-                  </label>
-                  <div className="space-y-2">
-                    {personaTemplates.map((template) => (
-                      <label
-                        key={template.id}
-                        className={`flex cursor-pointer items-start gap-3 border p-3 transition-colors ${
-                          personaTemplate === template.id
-                            ? "border-primary bg-primary/[0.04]"
-                            : "border-border hover:border-text-muted/30"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="personaTemplate"
-                          value={template.id}
-                          checked={personaTemplate === template.id}
-                          onChange={(e) => setPersonaTemplate(e.target.value)}
-                          className="mt-0.5"
-                        />
-                        <div className="flex-1">
-                          <div className="font-mono text-[11px] text-text tracking-wider">
-                            {template.name}
-                          </div>
-                          <div className="font-mono text-[9px] text-text-muted/60 tracking-wider mt-0.5">
-                            {template.description}
-                          </div>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="mt-6 flex items-center gap-3">
-              {!isAccountStep && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setError("");
-                    setStep("account");
-                  }}
-                  className="border border-border px-4 py-2.5 font-mono text-[10px] tracking-wider text-text-muted transition-colors cursor-pointer hover:text-text hover:border-text-muted/30"
-                >
-                  BACK
-                </button>
-              )}
-              <button
-                type="submit"
-                className="flex-1 py-2.5 font-mono text-[10px] tracking-wider bg-primary/[0.08] text-primary border border-primary/30 transition-colors cursor-pointer hover:bg-primary/[0.12] disabled:cursor-not-allowed disabled:opacity-30"
-                disabled={loading}
-              >
-                {isAccountStep ? "CONTINUE" : loading ? "CREATING..." : "CREATE"}
-              </button>
-            </div>
-          </form>
+          ))}
+          <div ref={bottomRef} />
         </div>
+
+        {/* Right: Status panel */}
+        <div className="w-48 border-l border-white/10 p-4 hidden lg:block">
+          <div className="text-xs text-white/30 mb-2">SETUP PROGRESS</div>
+          <div className="h-px bg-white/10 mb-2">
+            <div
+              className="h-full bg-white/40 transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <div className="text-right text-xs text-white/30">{progress}%</div>
+          
+          {step > 0 && (
+            <>
+              <div className="text-xs text-white/30 mt-6 mb-2">CONFIGURED</div>
+              <div className="space-y-1 text-xs">
+                {data.name && <div className="text-white/50">Name: {data.name}</div>}
+                {data.username && <div className="text-white/50">User: {data.username}</div>}
+                {(data.agent || step > 3) && <div className="text-white/50">Agent: {data.agent || "Anima"}</div>}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Input area */}
+      <div className="border-t border-white/20 p-4 bg-black">
+        {!done ? (
+          <div className="max-w-3xl">
+            {/* Question label */}
+            <div className="flex items-center gap-2 text-xs text-white/40 mb-2">
+              <span>STEP {step + 1} OF {QUESTIONS.length}</span>
+              <span className="text-white/20">│</span>
+              {showHint && currentQ?.hint && (
+                <span className="text-white/30">{currentQ.hint}</span>
+              )}
+            </div>
+            
+            {/* Input line */}
+            <div className="flex items-center gap-3">
+              <span className="text-white/60 text-lg">›</span>
+              <input
+                ref={inputRef}
+                type={step === 2 ? "password" : "text"}
+                value={input}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setShowHint(e.target.value.length === 0);
+                }}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                className="flex-1 bg-transparent outline-none text-white text-lg"
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={currentQ?.hint}
+              />
+              {input && (
+                <span className="text-xs text-white/30 animate-pulse">
+                  press ENTER
+                </span>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between max-w-3xl">
+            <span className="text-white/50">Ready to begin.</span>
+            <a 
+              href="/" 
+              className="px-4 py-2 border border-white/20 hover:border-white/40 hover:bg-white/5 transition-colors"
+            >
+              ENTER ›
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

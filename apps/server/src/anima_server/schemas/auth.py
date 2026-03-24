@@ -54,6 +54,7 @@ class UserResponse(BaseModel):
 
 class RegisterResponse(UserResponse):
     unlockToken: str
+    recoveryPhrase: str
 
 
 class LoginResponse(UserResponse):
@@ -63,6 +64,16 @@ class LoginResponse(UserResponse):
 
 class LogoutResponse(BaseModel):
     success: bool
+
+
+class RecoverRequest(BaseModel):
+    recoveryPhrase: str = Field(min_length=1)
+    newPassword: str = Field(min_length=8)
+
+
+class RecoverResponse(UserResponse):
+    unlockToken: str
+    message: str
 
 
 class ChangePasswordResponse(BaseModel):

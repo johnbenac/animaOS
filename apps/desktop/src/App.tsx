@@ -20,7 +20,7 @@ import KnowledgeGraph from "./pages/KnowledgeGraph";
 import Mods from "./pages/Mods";
 import ModDetail from "./pages/ModDetail";
 import Login from "./pages/Login";
-import Register from "./pages/Register";
+import Init from "./pages/Init";
 import "./index.css";
 
 // Register global shortcut to summon ANIMA (Cmd+Shift+A / Ctrl+Shift+A)
@@ -80,7 +80,7 @@ function AppRoutes() {
       <Route path="/database" element={withLayout(<Database />)} />
       <Route path="/graph" element={withLayout(<KnowledgeGraph />)} />
       <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      <Route path="/init" element={<Init />} />
       <Route path="/mods" element={withLayout(<Mods />)} />
       <Route path="/mods/:id" element={withLayout(<ModDetail />)} />
       <Route path="*" element={<Navigate to="/" replace />} />
