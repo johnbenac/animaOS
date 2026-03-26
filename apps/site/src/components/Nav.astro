@@ -1,0 +1,33 @@
+---
+const links = [
+  { href: "/#features", label: "Features" },
+  { href: "/blog", label: "Blog" },
+  { href: "/docs", label: "Docs" },
+];
+---
+
+<nav class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg/80 backdrop-blur-md">
+  <div class="mx-auto max-w-5xl flex items-center justify-between px-6 py-4">
+    <a href="/" class="font-mono text-sm tracking-[0.3em] uppercase text-primary hover:text-text transition-colors">
+      ANIMA
+    </a>
+    <div class="flex items-center gap-8">
+      {links.map((link) => (
+        <a
+          href={link.href}
+          class="font-mono text-xs tracking-[0.2em] uppercase text-text-muted hover:text-text transition-colors"
+        >
+          {link.label}
+        </a>
+      ))}
+      <a
+        href="https://github.com/juliocaesar/animaOS"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="font-mono text-xs tracking-[0.2em] uppercase text-text-muted hover:text-text transition-colors"
+      >
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
