@@ -5,7 +5,7 @@ export default function AnimaSymbolSpinning() {
 
   return (
     <pre
-      className="font-mono text-[8px] sm:text-[9px] md:text-[10px] leading-[1.15] text-text-muted/40 select-none whitespace-pre"
+      className="font-mono text-[10px] sm:text-[12px] md:text-[14px] leading-[1.2] text-text-muted select-none whitespace-pre"
       aria-hidden="true"
     >
       {frame}
