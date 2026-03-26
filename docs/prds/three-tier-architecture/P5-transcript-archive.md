@@ -9,7 +9,7 @@ version: "1.0"
 
 **Depends on**: P4 (Write Boundary)
 **Date**: 2026-03-26
-**Status**: Proposed
+**Status**: Approved
 **PR scope**: 1 PR
 
 ---

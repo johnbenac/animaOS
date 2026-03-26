@@ -7,7 +7,7 @@ version: "1.0"
 
 # Phase 8: N-Agent Spawning
 
-**Status**: Draft
+**Status**: Approved
 **Depends on**: P4 (Write Boundary), P7 (Concurrency Refactor)
 **Estimated scope**: 1 PR
 

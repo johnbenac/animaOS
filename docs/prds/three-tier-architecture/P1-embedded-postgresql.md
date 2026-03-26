@@ -9,7 +9,7 @@ version: "1.0"
 
 **Version**: 1.0
 **Date**: 2026-03-26
-**Status**: Draft
+**Status**: Approved
 **Priority**: P0 -- Foundation
 **Depends on**: None (first phase)
 **Blocks**: P2 (Runtime Messages), P3 (Self-Model Split), all subsequent phases
@@ -624,7 +624,7 @@ Tests T7-T14 should work against either embedded PG or Docker PG -- they test th
 
 ### ADR-P1-001: Embedded PostgreSQL via `pgserver`
 
-**Status**: Proposed
+**Status**: Accepted
 
 **Context**: The Runtime store needs PostgreSQL for concurrent write support (N-agent spawning). The application must remain zero-dependency and portable -- no Docker Desktop, no system-level PostgreSQL installation. The primary development platform is Windows 11.
 
@@ -639,7 +639,7 @@ Tests T7-T14 should work against either embedded PG or Docker PG -- they test th
 
 ### ADR-P1-002: Separate DeclarativeBase for Runtime Models
 
-**Status**: Proposed
+**Status**: Accepted
 
 **Context**: The Soul store (SQLCipher) and Runtime store (PostgreSQL) have different models. They need independent metadata so Alembic migrations (when added in P2) can target each store independently without seeing the other's tables.
 
@@ -652,7 +652,7 @@ Tests T7-T14 should work against either embedded PG or Docker PG -- they test th
 
 ### ADR-P1-003: Async Engine for Runtime, Sync Engine for Soul
 
-**Status**: Proposed
+**Status**: Accepted
 
 **Context**: The existing SQLCipher engine is synchronous (SQLite does not benefit from async I/O -- it is in-process). PostgreSQL benefits from async I/O because queries go over a network socket (even localhost). The FastAPI routes are already async.
 

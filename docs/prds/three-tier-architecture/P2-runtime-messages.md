@@ -7,6 +7,11 @@ version: "1.0"
 
 # Phase 2: Runtime Messages
 
+**Status**: Approved
+**Date**: 2026-03-26
+**Depends on**: P1 (Embedded PostgreSQL)
+**Blocks**: P3, P6, P7
+
 ## Overview
 
 AnimaOS currently stores all agent runtime state -- threads, messages, runs, steps, and background task tracking -- in per-user SQLCipher databases. This design was correct for the single-user portable model, but it creates a hard ceiling for multi-agent concurrency: SQLite allows only one writer at a time, and the WAL-mode busy timeout (30 seconds) is the only concurrency mechanism available.

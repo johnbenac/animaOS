@@ -43,14 +43,14 @@ Physical separation of Soul (SQLCipher) / Runtime (embedded PostgreSQL) / Archiv
 
 | PRD | Phase | Priority | Status | Summary |
 |-----|-------|----------|--------|---------|
-| [P1 — Embedded PostgreSQL](three-tier-architecture/P1-embedded-postgresql.md) | P1 | P0 | Draft | Dual-engine infrastructure, PG lifecycle, CI fallback |
-| [P2 — Runtime Messages](three-tier-architecture/P2-runtime-messages.md) | P2 | P0 | Draft | Move messages/threads/runs to PostgreSQL |
-| [P3 — Self-Model Split](three-tier-architecture/P3-self-model-split.md) | P3 | P0 | Draft | Identity (soul) vs working state (runtime) |
-| [P4 — Write Boundary](three-tier-architecture/P4-write-boundary.md) | P4 | P0 | Draft | Pending memory ops, consolidation gateway |
-| [P5 — Transcript Archive](three-tier-architecture/P5-transcript-archive.md) | P5 | P1 | Draft | Encrypted JSONL export, sidecar indexes, eager consolidation |
-| [P6 — pgvector Embeddings](three-tier-architecture/P6-pgvector-embeddings.md) | P6 | P1 | Draft | Migrate embeddings from in-memory to pgvector |
-| [P7 — Concurrency Refactor](three-tier-architecture/P7-concurrency-refactor.md) | P7 | P0 | Draft | Per-thread locking, stateless ToolExecutor |
-| [P8 — N-Agent Spawning](three-tier-architecture/P8-n-agent-spawning.md) | P8 | P0 | Draft | SpawnManager, spawn tools, LLM semaphore |
+| [P1 — Embedded PostgreSQL](three-tier-architecture/P1-embedded-postgresql.md) | P1 | P0 | Approved | Dual-engine infrastructure, PG lifecycle, CI fallback |
+| [P2 — Runtime Messages](three-tier-architecture/P2-runtime-messages.md) | P2 | P0 | Approved | Move messages/threads/runs to PostgreSQL |
+| [P3 — Self-Model Split](three-tier-architecture/P3-self-model-split.md) | P3 | P0 | Approved | Identity (soul) vs working state (runtime) |
+| [P4 — Write Boundary](three-tier-architecture/P4-write-boundary.md) | P4 | P0 | Approved | Pending memory ops, consolidation gateway |
+| [P5 — Transcript Archive](three-tier-architecture/P5-transcript-archive.md) | P5 | P1 | Approved | Encrypted JSONL export, sidecar indexes, eager consolidation |
+| [P6 — pgvector Embeddings](three-tier-architecture/P6-pgvector-embeddings.md) | P6 | P1 | Approved | Migrate embeddings from in-memory to pgvector |
+| [P7 — Concurrency Refactor](three-tier-architecture/P7-concurrency-refactor.md) | P7 | P0 | Approved | Per-thread locking, stateless ToolExecutor |
+| [P8 — N-Agent Spawning](three-tier-architecture/P8-n-agent-spawning.md) | P8 | P0 | Approved | SpawnManager, spawn tools, LLM semaphore |
 
 ### Build Order
 

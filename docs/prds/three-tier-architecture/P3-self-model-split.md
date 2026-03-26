@@ -9,7 +9,7 @@ version: "1.0"
 
 **Version**: 1.0
 **Date**: 2026-03-26
-**Status**: Draft
+**Status**: Approved
 **Priority**: P0
 **Depends on**: P2 (Runtime Messages) -- PostgreSQL runtime engine must be operational
 **Blocks**: P4 (Write Boundary) -- consolidation gateway reads from the split stores

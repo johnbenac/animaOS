@@ -9,7 +9,7 @@ version: "1.0"
 
 **Version**: 1.0
 **Date**: 2026-03-26
-**Status**: Proposed
+**Status**: Approved
 **Depends on**: P2 (Runtime Messages -- threads/runs live in PostgreSQL)
 **Enables**: P8 (N-Agent Spawning)
 **Estimated scope**: 1 PR, ~300 lines changed

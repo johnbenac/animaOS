@@ -7,7 +7,7 @@ version: "1.0"
 
 # Phase 6: pgvector Embeddings
 
-**Status**: Proposed
+**Status**: Approved
 **Depends on**: P2 (Runtime Messages -- PostgreSQL infrastructure must be operational)
 **Parallel with**: P3, P4, P5, P7 (no ordering dependency beyond P2)
 **Estimated scope**: 1 PR

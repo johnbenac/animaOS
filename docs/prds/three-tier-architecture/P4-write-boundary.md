@@ -9,7 +9,7 @@ version: "1.0"
 
 **Version**: 1.0
 **Date**: 2026-03-26
-**Status**: Proposed
+**Status**: Approved
 **Depends on**: P3 (Self-Model Split)
 **Blocks**: P5 (Transcript Archive), P8 (N-Agent Spawning)
 

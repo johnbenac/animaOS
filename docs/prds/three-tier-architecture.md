@@ -221,6 +221,8 @@ P1 ──> P2 ──> P3 ──> P4 ──> P5
 
 Note: P6 and P7 can run in parallel after P2. P8 requires both P4 (write boundary) and P7 (concurrency).
 
+**Recommended implementation order:** P1 → P2 → P7 → P3 → P4 → P5 → P8, with P6 slotted after P2 whenever convenient. P7 is moved up because it is small (~300 lines), has no schema changes, and unlocks P8 earlier.
+
 ---
 
 ## 8. Success Criteria
