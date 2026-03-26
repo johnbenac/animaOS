@@ -1,0 +1,50 @@
+---
+const features = [
+  {
+    title: "Deep Memory",
+    description: "Not a flat list of facts. Structured understanding that deepens over time — preferences, goals, episodes, the arc of your relationship.",
+  },
+  {
+    title: "Self-Model",
+    description: "The AI writes about itself. Five sections, five rhythms — identity, inner state, working memory, growth log, intentions. It learns who it is through knowing you.",
+  },
+  {
+    title: "Emotional Awareness",
+    description: "Notices how you feel without being told. Adjusts without announcing why. Attentional, not diagnostic. Like a good friend who just gets it.",
+  },
+  {
+    title: "Inner Life",
+    description: "Between conversations, the AI thinks. Quick reflections after each session. Deep monologues overnight. Growth happens in the silence.",
+  },
+  {
+    title: "Encrypted Vault",
+    description: "AES-256-GCM with Argon2id key derivation. Cold-wallet-style encryption. 12-word recovery phrase. Your keys, your data, your rules.",
+  },
+  {
+    title: "Digital Succession",
+    description: "What happens when you die? Your AI can be inherited. It participates in the transition — acknowledges the change, carries its history, greets its new owner as a continuation of itself.",
+  },
+];
+---
+
+<section id="features" class="py-32 px-6 border-t border-border">
+  <div class="mx-auto max-w-4xl">
+    <h2 class="font-mono text-xs tracking-[0.3em] uppercase text-primary mb-4">Features</h2>
+    <p class="font-serif italic text-2xl sm:text-3xl text-text leading-snug mb-16">
+      Memory is foundational, not optional.
+    </p>
+
+    <div class="grid md:grid-cols-2 gap-x-12 gap-y-10">
+      {features.map((feature) => (
+        <div>
+          <h3 class="font-mono text-xs tracking-[0.3em] uppercase text-text mb-3">
+            {feature.title}
+          </h3>
+          <p class="font-sans text-sm text-text-muted leading-relaxed">
+            {feature.description}
+          </p>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>

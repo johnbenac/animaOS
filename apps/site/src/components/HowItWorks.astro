@@ -1,0 +1,40 @@
+---
+const steps = [
+  {
+    number: "01",
+    title: "Install",
+    description: "Download AnimaOS. Run it. Your .anima/ Core is created locally.",
+  },
+  {
+    number: "02",
+    title: "Talk",
+    description: "Have conversations. The AI remembers, reflects, and grows. Everything stays on your machine, encrypted.",
+  },
+  {
+    number: "03",
+    title: "Carry",
+    description: "Copy the Core to a USB drive. Plug it into any machine. Enter your passphrase. Same mind. New shell.",
+  },
+];
+---
+
+<section class="py-32 px-6 border-t border-border">
+  <div class="mx-auto max-w-3xl">
+    <h2 class="font-mono text-xs tracking-[0.3em] uppercase text-primary mb-4">How It Works</h2>
+    <p class="font-serif italic text-2xl sm:text-3xl text-text leading-snug mb-16">
+      Three steps. No cloud. No account.
+    </p>
+
+    <div class="space-y-12">
+      {steps.map((step) => (
+        <div class="flex gap-8 items-start">
+          <span class="font-mono text-3xl text-primary/30 shrink-0">{step.number}</span>
+          <div>
+            <h3 class="font-mono text-xs tracking-[0.3em] uppercase text-text mb-2">{step.title}</h3>
+            <p class="font-sans text-sm text-text-muted leading-relaxed">{step.description}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
