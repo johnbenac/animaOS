@@ -1,5 +1,4 @@
 ---
-import Nav from "../components/Nav.astro";
 import Footer from "../components/Footer.astro";
 import "../styles/global.css";
 
@@ -21,8 +20,7 @@ const { title, description = "A mind that remains. A soul that remembers." } = A
     <title>{title}</title>
   </head>
   <body class="bg-background text-foreground">
-    <Nav />
-    <main class="pt-20">
+    <main>
       <slot />
     </main>
     <Footer />
