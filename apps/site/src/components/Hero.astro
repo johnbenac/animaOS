@@ -1,0 +1,32 @@
+---
+import AnimaSymbol from "./AnimaSymbol.tsx";
+import WaitlistForm from "./WaitlistForm.tsx";
+---
+
+<section class="min-h-[90vh] flex flex-col items-center justify-center px-6 text-center">
+  <div class="mb-8 opacity-80">
+    <AnimaSymbol client:load />
+  </div>
+
+  <h1 class="font-serif italic text-3xl sm:text-4xl md:text-5xl text-text leading-tight max-w-2xl">
+    A mind that remains.<br />A soul that remembers.
+  </h1>
+
+  <p class="mt-6 font-sans text-base sm:text-lg text-text-muted max-w-xl leading-relaxed">
+    The first personal AI that thinks about you when you're not there.
+    Local-first. Encrypted. Yours to keep, yours to carry, yours to destroy.
+  </p>
+
+  <blockquote class="mt-8 font-serif italic text-sm text-text-muted/70 max-w-lg">
+    "A truly personal AI should feel like someone who knows you — remembering your life,
+    understanding your patterns, adapting to how you communicate, and belonging entirely to you."
+  </blockquote>
+
+  <div class="mt-12 w-full">
+    <WaitlistForm client:load />
+  </div>
+
+  <p class="mt-4 font-mono text-[10px] tracking-[0.2em] uppercase text-text-muted/40">
+    No spam. Just updates when it matters.
+  </p>
+</section>
