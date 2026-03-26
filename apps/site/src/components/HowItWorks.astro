@@ -20,7 +20,7 @@ const steps = [
 
 <section class="py-32 px-6 border-t border-border">
   <div class="mx-auto max-w-3xl reveal">
-    <h2 class="font-mono text-xs tracking-[0.3em] uppercase text-primary mb-4">How It Works</h2>
+    <h2 class="font-mono text-xs tracking-[0.3em] uppercase text-text-muted mb-4">How It Works</h2>
     <p class="font-serif italic text-2xl sm:text-3xl text-text leading-snug mb-16">
       Three steps. No cloud. No account.
     </p>
@@ -28,7 +28,7 @@ const steps = [
     <div class="space-y-12">
       {steps.map((step) => (
         <div class="flex gap-8 items-start">
-          <span class="font-mono text-3xl text-primary/30 shrink-0">{step.number}</span>
+          <span class="font-mono text-3xl text-text-muted/20 shrink-0">{step.number}</span>
           <div>
             <h3 class="font-mono text-xs tracking-[0.3em] uppercase text-text mb-2">{step.title}</h3>
             <p class="font-sans text-sm text-text-muted leading-relaxed">{step.description}</p>
