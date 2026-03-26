@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+@import "@fontsource/space-grotesk/400.css";
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";
+@import "@fontsource/playfair-display/400.css";
+@import "@fontsource/playfair-display/400-italic.css";
+
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --color-bg: #08090e;
+  --color-bg-card: #0c0d14;
+  --color-bg-input: #10111a;
+  --color-bg-surface: #13141e;
+  --color-border: #252740;
+  --color-border-active: #383a58;
+  --color-text: #c8c8d4;
+  --color-text-muted: #8898a8;
+  --color-primary: #5ea0ab;
+  --color-primary-hover: #4a8892;
+  --color-danger: #d04848;
+  --color-success: #48a060;
+  --color-warning: #c89848;
+  --color-accent: #5ea0ab;
+  --font-mono: "Space Mono", "JetBrains Mono", "Fira Code", monospace;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-sans:
+    "Space Grotesk", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+body {
+  @apply bg-bg text-text font-sans antialiased min-h-screen leading-relaxed;
+}
+
+::selection {
+  background: rgba(94, 160, 171, 0.18);
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #252740;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out forwards;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes text-glow {
+  0%, 100% { text-shadow: 0 0 2px currentColor; }
+  50% { text-shadow: 0 0 8px currentColor; }
+}
+.animate-text-glow {
+  animation: text-glow 2s ease-in-out infinite;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-cursor {
+  animation: cursor-blink 1s step-end infinite;
+}

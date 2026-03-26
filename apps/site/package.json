@@ -1,0 +1,29 @@
+{
+  "name": "site",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.9.0",
+    "@astrojs/react": "^4.4.0",
+    "@tailwindcss/vite": "^4.1.18",
+    "tailwindcss": "^4.1.18",
+    "@tailwindcss/typography": "^0.5.19",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@fontsource/space-mono": "^5.2.9",
+    "@fontsource/playfair-display": "^5.2.8",
+    "@anima/standard-templates": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "typescript": "~5.8.3"
+  }
+}

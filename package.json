@@ -34,7 +34,8 @@
     "db:server:upgrade": "node ./scripts/run-nx.cjs run server:db-upgrade",
     "data:nuke": "bash ./scripts/nuke-dev-data.sh --yes",
     "data:nuke:reinit": "bash ./scripts/nuke-dev-data.sh --yes --migrate",
-    "codegen:api-types": "bun run packages/api-client/scripts/generate-types.ts"
+    "codegen:api-types": "bun run packages/api-client/scripts/generate-types.ts",
+    "dev:site": "cd apps/site && bun run dev"
   },
   "devDependencies": {
     "nx": "^21.0.3",
