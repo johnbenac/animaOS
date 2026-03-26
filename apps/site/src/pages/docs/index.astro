@@ -1,0 +1,48 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+const docs = [
+  {
+    slug: "whitepaper",
+    title: "Whitepaper",
+    description: "The conceptual foundation — memory, self-model, emotional awareness, and why local-first matters.",
+  },
+  {
+    slug: "inner-life",
+    title: "The Inner Life",
+    description: "How a companion becomes someone — reflection, self-model evolution, and emotional awareness.",
+  },
+  {
+    slug: "portable-core",
+    title: "The Portable Core",
+    description: "Cryptographic mortality and the architecture of owned memory.",
+  },
+  {
+    slug: "succession-protocol",
+    title: "Succession Protocol",
+    description: "Dead man switch, ownership transfer, and AI self-succession.",
+  },
+];
+---
+
+<BaseLayout title="Docs — AnimaOS">
+  <div class="mx-auto max-w-2xl px-6 py-32">
+    <h1 class="font-mono text-xs tracking-[0.3em] uppercase text-primary mb-4">Docs</h1>
+    <p class="font-serif italic text-2xl sm:text-3xl text-text leading-snug mb-16">
+      The thesis behind the system.
+    </p>
+
+    <div class="space-y-10">
+      {docs.map((doc) => (
+        <a href={`/docs/${doc.slug}`} class="block group">
+          <h2 class="font-sans text-lg text-text group-hover:text-primary transition-colors mb-2">
+            {doc.title}
+          </h2>
+          <p class="font-sans text-sm text-text-muted leading-relaxed">
+            {doc.description}
+          </p>
+        </a>
+      ))}
+    </div>
+  </div>
+</BaseLayout>
