@@ -18,20 +18,20 @@ const steps = [
 ];
 ---
 
-<section class="py-32 px-6 border-t border-border">
-  <div class="mx-auto max-w-3xl reveal">
-    <h2 class="font-mono text-xs tracking-[0.3em] uppercase text-text-muted mb-4">How It Works</h2>
-    <p class="font-serif italic text-2xl sm:text-3xl text-text leading-snug mb-16">
+<section class="py-24 px-6 border-t border-border/50">
+  <div class="mx-auto max-w-xl reveal">
+    <p class="font-mono text-[8px] tracking-[0.3em] uppercase text-text-muted/30 mb-3">// how it works</p>
+    <p class="font-serif italic text-xl sm:text-2xl text-text/80 leading-snug mb-12">
       Three steps. No cloud. No account.
     </p>
 
-    <div class="space-y-12">
+    <div class="space-y-1">
       {steps.map((step) => (
-        <div class="flex gap-8 items-start">
-          <span class="font-mono text-3xl text-text-muted/20 shrink-0">{step.number}</span>
+        <div class="flex gap-4 items-start border-l-2 border-border pl-4 py-3">
+          <span class="font-mono text-[9px] text-text-muted/20 shrink-0 pt-px">{step.number}</span>
           <div>
-            <h3 class="font-mono text-xs tracking-[0.3em] uppercase text-text mb-2">{step.title}</h3>
-            <p class="font-sans text-sm text-text-muted leading-relaxed">{step.description}</p>
+            <p class="font-mono text-[9px] tracking-[0.2em] uppercase text-text/60 mb-1">{step.title}</p>
+            <p class="font-sans text-xs text-text-muted/50 leading-relaxed">{step.description}</p>
           </div>
         </div>
       ))}

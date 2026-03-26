@@ -10,7 +10,6 @@ export default function WaitlistForm() {
     setStatus("submitting");
 
     try {
-      // TODO: Replace with real endpoint (Formspree, Buttondown, etc.)
       await new Promise((resolve) => setTimeout(resolve, 800));
       setStatus("success");
       setEmail("");
@@ -21,31 +20,37 @@ export default function WaitlistForm() {
 
   if (status === "success") {
     return (
-      <p className="font-mono text-xs tracking-[0.2em] uppercase text-success">
-        You're on the list. We'll be in touch.
+      <p className="font-mono text-[9px] tracking-[0.3em] uppercase text-text-muted/60">
+        [ registered ] — we'll be in touch
       </p>
     );
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 w-full max-w-md mx-auto">
-      <input
-        type="email"
-        required
-        placeholder="you@example.com"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="flex-1 bg-bg-input border border-border px-4 py-3 font-mono text-xs text-text placeholder:text-text-muted/50 focus:border-primary focus:outline-none transition-colors"
-      />
+    <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-px w-full max-w-sm mx-auto">
+      <div className="flex-1 flex items-center bg-bg-input border border-border px-3 py-2.5 gap-2">
+        <span className="font-mono text-[9px] text-text-muted/30 shrink-0">&gt;</span>
+        <input
+          type="email"
+          required
+          placeholder="you@example.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="flex-1 bg-transparent font-mono text-[10px] text-text placeholder:text-text-muted/30 focus:outline-none tracking-wider"
+        />
+      </div>
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="bg-primary hover:bg-primary-hover text-bg font-mono text-xs tracking-[0.2em] uppercase px-6 py-3 transition-colors disabled:opacity-50"
+        className="relative overflow-hidden border border-border px-4 py-2.5 font-mono text-[9px] tracking-[0.2em] uppercase text-text-muted/60 hover:text-bg transition-colors disabled:opacity-30
+          before:absolute before:inset-0 before:bg-text before:-translate-x-full hover:before:translate-x-0 before:transition-transform before:duration-500 before:ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
-        {status === "submitting" ? "..." : "Join the waitlist"}
+        <span className="relative z-10">
+          {status === "submitting" ? "..." : "Join"}
+        </span>
       </button>
       {status === "error" && (
-        <p className="font-mono text-xs text-danger mt-1">Something went wrong. Try again.</p>
+        <p className="font-mono text-[8px] text-danger/60 mt-1 sm:mt-0 sm:ml-2 self-center">[err] try again</p>
       )}
     </form>
   );
