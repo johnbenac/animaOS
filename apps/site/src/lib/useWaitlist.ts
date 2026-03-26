@@ -23,7 +23,12 @@ export function useWaitlist() {
       }
     );
 
-    setState(res.ok ? "done" : "idle");
+    if (res.ok) {
+      (window as any).umami?.track("waitlist-signup");
+      setState("done");
+    } else {
+      setState("idle");
+    }
   }
 
   return { email, setEmail, state, submit };
