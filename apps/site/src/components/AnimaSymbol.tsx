@@ -1,14 +1,22 @@
 import { useAnimaSymbol } from "@anima/standard-templates";
 
 export default function AnimaSymbol() {
-  const frame = useAnimaSymbol(0.6);
+  const frame = useAnimaSymbol(0.6, "hello");
 
   return (
-    <pre
-      className="font-mono text-[7px] sm:text-[8px] md:text-[9px] leading-[1.15] text-text/30 select-none whitespace-pre"
-      aria-hidden="true"
-    >
-      {frame.base}
-    </pre>
+    <div className="relative">
+      <pre
+        className="font-mono text-[8px] sm:text-[9px] md:text-[10px] leading-[1.15] text-text-muted/40 select-none whitespace-pre"
+        aria-hidden="true"
+      >
+        {frame.base}
+      </pre>
+      <pre
+        className="absolute inset-0 font-mono text-[8px] sm:text-[9px] md:text-[10px] leading-[1.15] text-text/60 select-none whitespace-pre"
+        aria-hidden="true"
+      >
+        {frame.text}
+      </pre>
+    </div>
   );
 }

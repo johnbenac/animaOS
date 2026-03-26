@@ -29,20 +29,20 @@ export default function WaitlistForm() {
   return (
     <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-px w-full max-w-sm mx-auto">
       <div className="flex-1 flex items-center bg-bg-input border border-border px-3 py-2.5 gap-2">
-        <span className="font-mono text-[9px] text-text-muted/30 shrink-0">&gt;</span>
+        <span className="font-mono text-xs text-text-muted/40 shrink-0">&gt;</span>
         <input
           type="email"
           required
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="flex-1 bg-transparent font-mono text-[10px] text-text placeholder:text-text-muted/30 focus:outline-none tracking-wider"
+          className="flex-1 bg-transparent font-mono text-xs text-text placeholder:text-text-muted/40 focus:outline-none tracking-wider"
         />
       </div>
       <button
         type="submit"
         disabled={status === "submitting"}
-        className="relative overflow-hidden border border-border px-4 py-2.5 font-mono text-[9px] tracking-[0.2em] uppercase text-text-muted/60 hover:text-bg transition-colors disabled:opacity-30
+        className="relative overflow-hidden border border-border px-4 py-2.5 font-mono text-[10px] tracking-[0.2em] uppercase text-text-muted hover:text-bg transition-colors disabled:opacity-30
           before:absolute before:inset-0 before:bg-text before:-translate-x-full hover:before:translate-x-0 before:transition-transform before:duration-500 before:ease-[cubic-bezier(0.16,1,0.3,1)]"
       >
         <span className="relative z-10">
