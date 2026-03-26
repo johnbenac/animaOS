@@ -5,7 +5,7 @@ export default function AnimaSymbol() {
 
   return (
     <pre
-      className="font-mono text-[6px] sm:text-[7px] md:text-[8px] leading-[1.1] text-primary/60 select-none whitespace-pre"
+      className="font-mono text-[8px] sm:text-[9px] md:text-[10px] leading-[1.2] text-primary/60 select-none whitespace-pre"
       aria-hidden="true"
     >
       {frame.base}
