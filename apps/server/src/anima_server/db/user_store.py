@@ -53,6 +53,10 @@ class AccountRecord:
     name: str
 
 
+class InvalidCredentialsError(ValueError):
+    """Authentication failed because the supplied credentials were invalid."""
+
+
 def ensure_per_user_databases_ready() -> None:
     ensure_core_manifest()
     if not settings.database_url.startswith("sqlite"):
@@ -182,7 +186,7 @@ def authenticate_account(
 ) -> tuple[dict[str, object], dict[str, bytes]]:
     normalized = normalize_username(username)
     if not normalized:
-        raise ValueError("Invalid credentials")
+        raise InvalidCredentialsError("Invalid credentials")
 
     # Unified passphrase: unwrap SQLCipher key before opening the database
     _maybe_unwrap_sqlcipher_key(password)
@@ -194,13 +198,16 @@ def authenticate_account(
     else:
         account = find_account_by_username(normalized)
         if account is None:
-            raise ValueError("Invalid credentials")
+            raise InvalidCredentialsError("Invalid credentials")
         account_user_id = account.user_id
         # Backfill the index for next time
         store_user_index_entry(normalized, account_user_id)
 
     with get_user_session_factory(account_user_id)() as db:
-        user, deks = authenticate_user(db, normalized, password)
+        try:
+            user, deks = authenticate_user(db, normalized, password)
+        except ValueError as exc:
+            raise InvalidCredentialsError("Invalid credentials") from exc
         return serialize_user(user), deks
 
 
@@ -426,6 +433,8 @@ def _maybe_unwrap_sqlcipher_key(password: str) -> None:
     if wrapped_data is None:
         return  # no wrapped key — plain SQLite mode
 
+    from cryptography.exceptions import InvalidTag
+
     from anima_server.services.crypto import WrappedDekRecord, unwrap_dek
 
     record = WrappedDekRecord(
@@ -438,5 +447,8 @@ def _maybe_unwrap_sqlcipher_key(password: str) -> None:
         wrap_tag=str(wrapped_data["wrap_tag"]),
         wrapped_dek=str(wrapped_data["wrapped_key"]),
     )
-    raw_key = unwrap_dek(password, record, int(wrapped_data.get("user_id", 0)), "sqlcipher")
+    try:
+        raw_key = unwrap_dek(password, record, int(wrapped_data.get("user_id", 0)), "sqlcipher")
+    except InvalidTag as exc:
+        raise InvalidCredentialsError("Invalid credentials") from exc
     set_sqlcipher_key(raw_key)
